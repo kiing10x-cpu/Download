@@ -22,6 +22,7 @@ import json
 import csv
 import time
 import shutil
+import subprocess
 import logging
 import tempfile
 import functools
@@ -80,6 +81,18 @@ if not FFMPEG_PATH:
     except Exception:
         FFMPEG_PATH = None
 FFMPEG_AVAILABLE = bool(FFMPEG_PATH)
+
+# ffprobe normally lives next to ffmpeg. Used to verify a downloaded reel
+# actually has a Telegram-playable audio track — see
+# ensure_telegram_compatible_audio() below, which is the fix for reels
+# that download fine but play back with no sound on some devices.
+FFPROBE_PATH = shutil.which("ffprobe")
+if not FFPROBE_PATH and FFMPEG_PATH:
+    _candidate = os.path.join(os.path.dirname(FFMPEG_PATH), "ffprobe")
+    if os.path.exists(_candidate):
+        FFPROBE_PATH = _candidate
+    elif os.path.exists(_candidate + ".exe"):
+        FFPROBE_PATH = _candidate + ".exe"
 
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
@@ -969,7 +982,17 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     def build_ydl_opts(use_merge: bool) -> dict:
         opts = {
-            "format": "bestvideo+bestaudio/best" if use_merge else "best",
+            # Prefer an mp4 video + m4a (AAC) audio pairing over the plain
+            # "bestvideo+bestaudio" selector. Instagram frequently serves
+            # audio as Opus (webm); yt-dlp will happily stream-copy that
+            # straight into an .mp4 container, which many Telegram clients
+            # accept as a file but can't actually decode the audio track
+            # from — that's the "sound kabhi kabhi nahi aata" bug. Asking
+            # for m4a/mp4 up front avoids the risky combo in most cases.
+            "format": (
+                "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best"
+                if use_merge else "best"
+            ),
             "outtmpl": out_template,
             "quiet": True,
             "no_warnings": True,
@@ -981,6 +1004,53 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 opts["ffmpeg_location"] = FFMPEG_PATH
         return opts
 
+    def audio_codec_of(path: str):
+        """Returns the audio codec name in `path`, or None if there's no
+        audio stream at all / ffprobe isn't available to check."""
+        if not FFPROBE_PATH:
+            return "unknown"
+        try:
+            out = subprocess.run(
+                [FFPROBE_PATH, "-v", "error", "-select_streams", "a:0",
+                 "-show_entries", "stream=codec_name", "-of",
+                 "default=nokey=1:noprint_wrappers=1", path],
+                capture_output=True, text=True, timeout=20,
+            )
+            codec = out.stdout.strip()
+            return codec or None
+        except Exception:
+            return "unknown"
+
+    def ensure_telegram_compatible_audio(path: str) -> str:
+        """Safety net: if the merged file's audio isn't AAC/MP3 (i.e. it's
+        Opus or missing), re-encode just the audio track to AAC so
+        Telegram reliably plays sound on every device. Video stream is
+        copied untouched, so this is fast and lossless for video."""
+        if not FFMPEG_PATH:
+            return path
+        codec = audio_codec_of(path)
+        if codec in ("aac", "mp3", None) and codec is not None:
+            return path  # already fine, or "unknown" -> leave as-is below
+        if codec is None:
+            return path  # genuinely no audio stream, nothing to fix
+        fixed_path = path.rsplit(".", 1)[0] + "_fixed.mp4"
+        try:
+            result = subprocess.run(
+                [FFMPEG_PATH, "-y", "-i", path, "-c:v", "copy",
+                 "-c:a", "aac", "-b:a", "128k", fixed_path],
+                capture_output=True, timeout=120,
+            )
+            if result.returncode == 0 and os.path.exists(fixed_path):
+                os.replace(fixed_path, path)
+        except Exception:
+            log.warning("Audio re-encode fallback failed for %s", path, exc_info=True)
+            if os.path.exists(fixed_path):
+                try:
+                    os.remove(fixed_path)
+                except Exception:
+                    pass
+        return path
+
     def run_download(use_merge: bool):
         opts = build_ydl_opts(use_merge)
         with yt_dlp.YoutubeDL(opts) as ydl:
@@ -988,6 +1058,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             fp = ydl.prepare_filename(info)
             if not fp.endswith(".mp4") and os.path.exists(fp.rsplit(".", 1)[0] + ".mp4"):
                 fp = fp.rsplit(".", 1)[0] + ".mp4"
+            if use_merge and fp.endswith(".mp4"):
+                fp = ensure_telegram_compatible_audio(fp)
             ig_caption = (info.get("description") or "").strip()
             return fp, ig_caption
 
