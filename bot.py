@@ -98,14 +98,6 @@ INSTAGRAM_URL_RE = re.compile(
     r"(https?://(?:www\.)?instagram\.com/(?:reel|reels|p|tv)/[A-Za-z0-9_\-]+/?\S*)"
 )
 
-QUOTES = [
-    "Har din ek naya mauka hai khud ko behtar banane ka.\nRuk mat, thak ke bhi chal.\nKal tera aaj se zyada mazboot hoga.\n100% sahi baat.",
-    "Mehnat kabhi dikhti nahi, sirf result bolta hai.\nAaj ka effort kal ki pehchaan banega.\nBas lage raho.\nYehi sabse simple formula hai.",
-    "Girna problem nahi, na uthna problem hai.\nHar fail ek lesson hai, har try ek kadam hai.\nApne pace pe chal, apne raaste pe chal.\nTu ruk mat.",
-    "Chhoti shuru'aat se bade sapne banate hain.\nAaj thoda sa kar, kal thoda aur.\nConsistency hi asli talent hai.\nBas yehi yaad rakh.",
-    "Doosron se compare mat kar, apne kal se compare kar.\nThoda better aaj, thoda better kal.\nYehi growth hai.\nSimple si baat hai.",
-]
-
 # ----------------------------------------------------------------------------
 # Unicode "style" helpers (#1 — Style Text)
 # ----------------------------------------------------------------------------
@@ -304,6 +296,8 @@ _mongo_client = None
 _mongo_collection = None
 _mongo_last_error = None
 _rate_state = {}  # in-memory only, not persisted
+_caption_cache = {}  # (chat_id, message_id) -> real Instagram caption, in-memory only
+CAPTION_CACHE_MAX = 500
 
 
 def _deep_merge_defaults(data: dict) -> dict:
@@ -778,18 +772,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             fp = ydl.prepare_filename(info)
             if not fp.endswith(".mp4") and os.path.exists(fp.rsplit(".", 1)[0] + ".mp4"):
                 fp = fp.rsplit(".", 1)[0] + ".mp4"
-            return fp
+            ig_caption = (info.get("description") or "").strip()
+            return fp, ig_caption
 
     file_path = None
     try:
         try:
-            file_path = run_download(use_merge=FFMPEG_AVAILABLE)
+            file_path, ig_caption = run_download(use_merge=FFMPEG_AVAILABLE)
         except Exception as e:
             # Self-heal: if a merge was attempted and ffmpeg turned out to be
             # the problem, retry once with a no-merge (progressive) format.
             if "ffmpeg" in str(e).lower():
                 log.warning("Merge failed (ffmpeg issue), retrying with progressive format.")
-                file_path = run_download(use_merge=False)
+                file_path, ig_caption = run_download(use_merge=False)
             else:
                 raise
 
@@ -797,12 +792,18 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lang = BOT_DATA["users"].get(uid, {}).get("lang")
         menu = BOT_DATA["menus"]["reel_result"]
         translation = menu.get("translations", {}).get(lang) if lang else None
-        caption = (translation or {}).get("text") or menu.get("text", "")
+        result_caption = (translation or {}).get("text") or menu.get("text", "")
         buttons = (translation or {}).get("buttons") or menu.get("buttons", [])
         kb = build_keyboard_from_buttons(buttons, "reel_result")
 
         with open(file_path, "rb") as vid:
-            sent = await update.message.reply_video(video=vid, caption=caption, reply_markup=kb)
+            sent = await update.message.reply_video(video=vid, caption=result_caption, reply_markup=kb)
+
+        # Cache the real Instagram caption so the "Get Caption" button under
+        # THIS specific video can show it, keyed to this exact message.
+        _caption_cache[(sent.chat_id, sent.message_id)] = ig_caption
+        if len(_caption_cache) > CAPTION_CACHE_MAX:
+            _caption_cache.pop(next(iter(_caption_cache)))
 
         seconds = menu.get("auto_delete_seconds")
         if seconds is None:
@@ -821,11 +822,16 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cb_get_caption(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    import random
-
     query = update.callback_query
     await query.answer()
-    await query.message.reply_text(random.choice(QUOTES))
+    key = (query.message.chat_id, query.message.message_id)
+    caption = _caption_cache.get(key)
+    if not caption:
+        await query.message.reply_text("ℹ️ Is post ka koi caption nahi mila (ya cache expire ho gaya).")
+        return
+    # Telegram message limit is 4096 chars — split if needed.
+    for i in range(0, len(caption), 4000):
+        await query.message.reply_text(caption[i:i + 4000])
 
 
 # ----------------------------------------------------------------------------
