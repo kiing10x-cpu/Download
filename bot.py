@@ -24,6 +24,7 @@ import time
 import shutil
 import logging
 import tempfile
+import functools
 from datetime import datetime, timedelta
 
 from telegram import (
@@ -300,9 +301,21 @@ DEFAULT_DATA = {
         "rate_limit_window_seconds": 60,
         "inactive_reengage_days": 0,
         "languages": [],  # e.g. ["en", "hi"] — admin-added via Settings > Languages
+        "lock_all_content": False,  # #4 — master forward-lock, ORs with protect_broadcasts
+        "force_join_channels": [],  # #12 — [{"chat_id"/"username": ..., "label": ...}]
+        "support_chat_id": None,  # #11
+        "owner_display_user_id": None,  # #10
+        "owner_display_label": None,  # #10
+        "send_as_document": False,  # #8 — global default fallback toggle
+        "logger_channel_id": None,  # #14
+        "logger_enabled": False,  # #14
     },
     "broadcast_log": [],
     "restore_log": [],
+    "sent_messages": {},  # #5 — chat_id -> [message_id, ...] ring buffer
+    "metrics": {},  # #13 — command usage counters
+    "error_log": [],  # #13 — capped ring buffer of recent errors
+    "activity_log": {},  # #13 — uid -> [ {action, at}, ... ]
 }
 
 # ----------------------------------------------------------------------------
@@ -502,6 +515,19 @@ async def _delete_message_job(context: ContextTypes.DEFAULT_TYPE):
         pass
 
 
+SENT_MESSAGES_MAX_PER_CHAT = 200
+
+
+def track_sent_message(chat_id: int, message_id: int):
+    """#5 — small ring buffer of message_ids the bot has sent per chat, so
+    'Delete All Bot Messages In This Chat' has something to loop through."""
+    key = str(chat_id)
+    bucket = BOT_DATA["sent_messages"].setdefault(key, [])
+    bucket.append(message_id)
+    if len(bucket) > SENT_MESSAGES_MAX_PER_CHAT:
+        del bucket[: len(bucket) - SENT_MESSAGES_MAX_PER_CHAT]
+
+
 async def schedule_delete(context, chat_id, message_id, seconds):
     if seconds and seconds > 0:
         context.job_queue.run_once(
@@ -562,6 +588,7 @@ async def render_menu(context: ContextTypes.DEFAULT_TYPE, chat_id: int, menu_id:
     kb = build_keyboard_from_buttons(buttons, menu_id)
     parse_mode = menu.get("parse_mode") or None
     image = menu.get("image_file_id")
+    protect = bool(BOT_DATA["settings"].get("lock_all_content"))  # #4 — master forward-lock
 
     try:
         await context.bot.send_chat_action(chat_id=chat_id, action="typing")
@@ -580,12 +607,12 @@ async def render_menu(context: ContextTypes.DEFAULT_TYPE, chat_id: int, menu_id:
             elif image and not has_photo:
                 await existing_message.delete()
                 sent_message = await context.bot.send_photo(
-                    chat_id, photo=image, caption=text, parse_mode=parse_mode, reply_markup=kb
+                    chat_id, photo=image, caption=text, parse_mode=parse_mode, reply_markup=kb, protect_content=protect
                 )
             elif not image and has_photo:
                 await existing_message.delete()
                 sent_message = await context.bot.send_message(
-                    chat_id, text=text, parse_mode=parse_mode, reply_markup=kb
+                    chat_id, text=text, parse_mode=parse_mode, reply_markup=kb, protect_content=protect
                 )
             else:
                 await existing_message.edit_text(text=text, parse_mode=parse_mode, reply_markup=kb)
@@ -593,22 +620,22 @@ async def render_menu(context: ContextTypes.DEFAULT_TYPE, chat_id: int, menu_id:
         else:
             if image:
                 sent_message = await context.bot.send_photo(
-                    chat_id, photo=image, caption=text, parse_mode=parse_mode, reply_markup=kb
+                    chat_id, photo=image, caption=text, parse_mode=parse_mode, reply_markup=kb, protect_content=protect
                 )
             else:
                 sent_message = await context.bot.send_message(
-                    chat_id, text=text, parse_mode=parse_mode, reply_markup=kb
+                    chat_id, text=text, parse_mode=parse_mode, reply_markup=kb, protect_content=protect
                 )
     except Exception:
         log.exception("render_menu failed for %s, sending fresh", menu_id)
         try:
             if image:
                 sent_message = await context.bot.send_photo(
-                    chat_id, photo=image, caption=text, parse_mode=parse_mode, reply_markup=kb
+                    chat_id, photo=image, caption=text, parse_mode=parse_mode, reply_markup=kb, protect_content=protect
                 )
             else:
                 sent_message = await context.bot.send_message(
-                    chat_id, text=text, parse_mode=parse_mode, reply_markup=kb
+                    chat_id, text=text, parse_mode=parse_mode, reply_markup=kb, protect_content=protect
                 )
         except Exception:
             log.exception("render_menu completely failed for %s", menu_id)
@@ -618,6 +645,7 @@ async def render_menu(context: ContextTypes.DEFAULT_TYPE, chat_id: int, menu_id:
     if seconds is None:
         seconds = BOT_DATA["settings"].get("global_auto_delete_seconds", 0)
     if sent_message:
+        track_sent_message(chat_id, sent_message.message_id)  # #5
         await schedule_delete(context, chat_id, sent_message.message_id, seconds)
 
 
@@ -847,9 +875,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         result_caption = (translation or {}).get("text") or menu.get("text", "")
         buttons = (translation or {}).get("buttons") or menu.get("buttons", [])
         kb = build_keyboard_from_buttons(buttons, "reel_result")
+        parse_mode = menu.get("parse_mode") or None
+        protect = bool(BOT_DATA["settings"].get("lock_all_content"))  # #4
 
         with open(file_path, "rb") as vid:
-            sent = await update.message.reply_video(video=vid, caption=result_caption, reply_markup=kb)
+            sent = await update.message.reply_video(
+                video=vid, caption=result_caption, parse_mode=parse_mode, reply_markup=kb,
+                protect_content=protect, supports_streaming=True,
+            )
 
         # Cache the real Instagram caption so the "Get Caption" button under
         # THIS specific video can show it, keyed to this exact message.
@@ -857,6 +890,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if len(_caption_cache) > CAPTION_CACHE_MAX:
             _caption_cache.pop(next(iter(_caption_cache)))
 
+        track_sent_message(sent.chat_id, sent.message_id)  # #5
+        BOT_DATA["metrics"]["reels_downloaded"] = BOT_DATA["metrics"].get("reels_downloaded", 0) + 1  # #13
         seconds = menu.get("auto_delete_seconds")
         if seconds is None:
             seconds = BOT_DATA["settings"].get("global_auto_delete_seconds", 0)
@@ -904,8 +939,17 @@ def admin_panel_keyboard():
     )
 
 
-def back_row(cb="adm_home", label="🔙 Back to Panel"):
-    return [styled_button(label, callback_data=cb)]
+def back_row(cb="adm_back", label="🔙 Back"):
+    return [styled_button(label, callback_data=cb, style="primary")]
+
+
+def home_row():
+    return [styled_button("🏠 Admin Home", callback_data="adm_home", style="primary")]
+
+
+def top_level_footer():
+    """#3 — top-level category screens get Back *and* a dedicated Home row."""
+    return [back_row(), home_row()]
 
 
 def _admin_home_text() -> str:
@@ -933,6 +977,7 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cb_adm_home(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    context.user_data["adm_nav_stack"] = []  # #3 — Home resets the back-stack
     await query.edit_message_text(
         _admin_home_text(), parse_mode="HTML", reply_markup=admin_panel_keyboard()
     )
@@ -958,7 +1003,7 @@ async def cb_adm_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"💾 Memory: {mem if mem is not None else 'n/a'} MB\n"
         f"🗄 Storage backend: {backend}\n"
     )
-    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup([back_row()]))
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(top_level_footer()))
 
 
 # ---- Users & Groups ----------------------------------------------------------
@@ -968,9 +1013,9 @@ async def cb_adm_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     kb = InlineKeyboardMarkup(
         [
-            [styled_button("📋 List Users (last 20)", callback_data="adm_users_list")],
-            [styled_button("✉️ Message a User", callback_data="adm_users_msg")],
-            back_row(),
+            [styled_button("📋 List Users (last 20)", callback_data="adm_users_list", style="primary")],
+            [styled_button("✉️ Message a User", callback_data="adm_users_msg", style="primary")],
+            *top_level_footer(),
         ]
     )
     await query.edit_message_text("👥 Users & Groups", reply_markup=kb)
@@ -1013,8 +1058,8 @@ async def cb_adm_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 callback_data="stgl:protect_broadcasts:adm_broadcast",
                 style="success" if protect else "danger",
             )],
-            [styled_button("📜 Broadcast Log", callback_data="adm_bc_log")],
-            back_row(),
+            [styled_button("📜 Broadcast Log", callback_data="adm_bc_log", style="primary")],
+            *top_level_footer(),
         ]
     )
     await query.edit_message_text("📢 Broadcast", reply_markup=kb)
@@ -1041,13 +1086,13 @@ async def cb_adm_bc_log(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for e in entries:
             lines.append(f"• {e['at']} — {e['recipients']} users ko bheja gaya")
         text = "\n".join(lines)
-    kb = InlineKeyboardMarkup([[styled_button("🔙 Back", callback_data="adm_broadcast")]])
+    kb = InlineKeyboardMarkup([back_row()])
     await query.edit_message_text(text, reply_markup=kb)
 
 
 async def do_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
-    protect = BOT_DATA["settings"].get("protect_broadcasts", True)
+    protect = bool(BOT_DATA["settings"].get("protect_broadcasts", True)) or bool(BOT_DATA["settings"].get("lock_all_content"))
     sent = 0
     failed = 0
     for uid in list(BOT_DATA["users"].keys()):
@@ -1074,9 +1119,9 @@ async def do_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cb_adm_menu_ui(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    rows = [[styled_button(f"📝 {mid}", callback_data=f"adm_menu_edit:{mid}")] for mid in BOT_DATA["menus"]]
-    rows.append(back_row())
-    await query.edit_message_text("🎨 Menu & UI — kaun sa menu edit karna hai?", reply_markup=InlineKeyboardMarkup(rows))
+    rows = [[styled_button(f"📝 {mid}", callback_data=f"adm_menu_edit:{mid}", style="primary")] for mid in BOT_DATA["menus"]]
+    rows.extend(top_level_footer())
+    await query.edit_message_text("🎨 <b>Menu &amp; UI</b> — which menu do you want to edit?", parse_mode="HTML", reply_markup=InlineKeyboardMarkup(rows))
 
 
 async def cb_adm_menu_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1284,23 +1329,28 @@ async def cb_adm_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
     s = BOT_DATA["settings"]
     kb = InlineKeyboardMarkup(
         [
-            [styled_button("🖼 Set Welcome Image", callback_data="adm_menu_img:start")],
+            [styled_button("🖼 Set Welcome Image", callback_data="adm_menu_img:start", style="primary")],
             [styled_button(
                 f"🔒 Maintenance: {'ON' if s.get('maintenance') else 'OFF'}",
                 callback_data="stgl:maintenance:adm_settings",
                 style="danger" if s.get("maintenance") else "success",
             )],
-            [styled_button(f"⏱ Global Auto-Delete: {s.get('global_auto_delete_seconds', 0)}s", callback_data="adm_set_autodelete")],
+            [styled_button(f"⏱ Global Auto-Delete: {s.get('global_auto_delete_seconds', 0)}s", callback_data="adm_set_autodelete", style="primary")],
             [styled_button(
                 f"🅰️ Small-Caps Buttons: {'ON' if s.get('small_caps_buttons_default') else 'OFF'}",
                 callback_data="stgl:small_caps_buttons_default:adm_settings",
                 style="success" if s.get("small_caps_buttons_default") else "danger",
             )],
-            [styled_button("💬 Auto-Replies", callback_data="adm_autoreply_list")],
-            [styled_button("🌐 Manage Languages", callback_data="adm_lang_manage")],
-            [styled_button("👤 Manage Admins", callback_data="adm_manage_admins")],
-            [styled_button("📥 Restore Backup", callback_data="adm_restore_info")],
-            back_row(),
+            [styled_button(
+                f"🔐 Lock All Forwarding: {'ON' if s.get('lock_all_content') else 'OFF'}",
+                callback_data="stgl:lock_all_content:adm_settings",
+                style="success" if s.get("lock_all_content") else "danger",
+            )],
+            [styled_button("💬 Auto-Replies", callback_data="adm_autoreply_list", style="primary")],
+            [styled_button("🌐 Manage Languages", callback_data="adm_lang_manage", style="primary")],
+            [styled_button("👤 Manage Admins", callback_data="adm_manage_admins", style="primary")],
+            [styled_button("📥 Restore Backup", callback_data="adm_restore_info", style="primary")],
+            *top_level_footer(),
         ]
     )
     await query.edit_message_text("⚙️ Settings & Admins", reply_markup=kb)
@@ -1329,7 +1379,7 @@ async def cb_adm_lang_manage(update: Update, context: ContextTypes.DEFAULT_TYPE)
         [
             [styled_button("➕ Add Language", callback_data="adm_lang_add", style="success")],
             [styled_button("➖ Remove Language", callback_data="adm_lang_remove", style="danger")],
-            [styled_button("🔙 Back", callback_data="adm_settings")],
+            back_row(),
         ]
     )
     await query.edit_message_text(text, reply_markup=kb)
@@ -1340,10 +1390,11 @@ async def cb_adm_lang_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     available = [c for c in LANG_NAMES if c not in BOT_DATA["settings"].get("languages", [])]
     if not available:
-        await query.message.reply_text("Saari suggested languages already add ho chuki hain.")
+        await query.edit_message_text("All suggested languages are already added.", reply_markup=InlineKeyboardMarkup([back_row()]))
         return
-    rows = [[styled_button(LANG_NAMES[c], callback_data=f"adm_lang_add_do:{c}")] for c in available]
-    await query.message.reply_text("Kaunsi language add karni hai?", reply_markup=InlineKeyboardMarkup(rows))
+    rows = [[styled_button(LANG_NAMES[c], callback_data=f"adm_lang_add_do:{c}", style="success")] for c in available]
+    rows.append(back_row())
+    await query.edit_message_text("Which language do you want to add?", reply_markup=InlineKeyboardMarkup(rows))
 
 
 async def cb_adm_lang_add_do(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1353,7 +1404,10 @@ async def cb_adm_lang_add_do(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if code not in BOT_DATA["settings"]["languages"]:
         BOT_DATA["settings"]["languages"].append(code)
         save_data()
-    await query.edit_message_text(f"✅ {LANG_NAMES.get(code, code)} add ho gayi. Ab har menu mein 🌐 Translations se text daal sakte ho.")
+    await query.edit_message_text(
+        f"✅ {LANG_NAMES.get(code, code)} added. You can now set text for it per menu via 🌐 Translations.",
+        reply_markup=InlineKeyboardMarkup([back_row("adm_lang_manage")]),
+    )
 
 
 async def cb_adm_lang_remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1361,10 +1415,11 @@ async def cb_adm_lang_remove(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.answer()
     langs = BOT_DATA["settings"].get("languages", [])
     if not langs:
-        await query.message.reply_text("Koi language add nahi hai abhi.")
+        await query.edit_message_text("No languages have been added yet.", reply_markup=InlineKeyboardMarkup([back_row()]))
         return
-    rows = [[styled_button(LANG_NAMES.get(c, c), callback_data=f"adm_lang_remove_do:{c}")] for c in langs]
-    await query.message.reply_text("Kaunsi language remove karni hai?", reply_markup=InlineKeyboardMarkup(rows))
+    rows = [[styled_button(LANG_NAMES.get(c, c), callback_data=f"adm_lang_remove_do:{c}", style="danger")] for c in langs]
+    rows.append(back_row())
+    await query.edit_message_text("Which language do you want to remove?", reply_markup=InlineKeyboardMarkup(rows))
 
 
 async def cb_adm_lang_remove_do(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1374,7 +1429,10 @@ async def cb_adm_lang_remove_do(update: Update, context: ContextTypes.DEFAULT_TY
     if code in BOT_DATA["settings"]["languages"]:
         BOT_DATA["settings"]["languages"].remove(code)
         save_data()
-    await query.edit_message_text(f"✅ {LANG_NAMES.get(code, code)} remove ho gayi.")
+    await query.edit_message_text(
+        f"✅ {LANG_NAMES.get(code, code)} removed.",
+        reply_markup=InlineKeyboardMarkup([back_row("adm_lang_manage")]),
+    )
 
 
 async def cb_adm_set_autodelete(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1467,10 +1525,11 @@ async def cb_adm_danger(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [styled_button("🧹 Clear Broadcast Log", callback_data="adm_clear_bclog", style="danger")],
             [styled_button("🔄 Reset Menus to Default", callback_data="adm_reset_menus_confirm", style="danger")],
             [styled_button("❌ Reset ALL Bot Data", callback_data="adm_reset_confirm", style="danger")],
-            back_row(),
+            [styled_button("🧹 Delete All Bot Messages In This Chat", callback_data="adm_wipe_chat_confirm", style="danger")],
+            *top_level_footer(),
         ]
     )
-    await query.edit_message_text("🛑 Danger Zone\n(Ye actions destructive hain.)", reply_markup=kb)
+    await query.edit_message_text("🛑 <b>Danger Zone</b>\n<i>These actions are destructive.</i>", parse_mode="HTML", reply_markup=kb)
 
 
 async def cb_adm_clear_bclog(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1478,7 +1537,44 @@ async def cb_adm_clear_bclog(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.answer()
     BOT_DATA["broadcast_log"] = []
     save_data()
-    await query.message.reply_text("✅ Broadcast log clear ho gaya.")
+    await query.edit_message_text("✅ Broadcast log cleared.", reply_markup=InlineKeyboardMarkup([back_row("adm_danger")]))
+
+
+# ---- #5 — Delete all bot messages in this chat -------------------------------
+
+async def cb_adm_wipe_chat_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    chat_id = query.message.chat_id
+    count = len(BOT_DATA["sent_messages"].get(str(chat_id), []))
+    kb = InlineKeyboardMarkup(
+        [
+            [styled_button(f"✅ Yes, delete {count} messages", callback_data="adm_wipe_chat_do", style="danger")],
+            back_row(),
+        ]
+    )
+    await query.edit_message_text(
+        f"🧹 This will try to delete the last {count} bot messages tracked in <b>this chat</b> "
+        "(Telegram only allows deleting messages up to 48h old — older ones are silently skipped). "
+        "Are you sure?",
+        parse_mode="HTML", reply_markup=kb,
+    )
+
+
+async def cb_adm_wipe_chat_do(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    chat_id = query.message.chat_id
+    ids = BOT_DATA["sent_messages"].pop(str(chat_id), [])
+    save_data()
+    deleted = 0
+    for mid in ids:
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=mid)
+            deleted += 1
+        except Exception:
+            pass  # too old (48h+) or already gone — ignore individually
+    await context.bot.send_message(chat_id, f"✅ Deleted {deleted}/{len(ids)} tracked bot messages in this chat.")
 
 
 async def cb_adm_reset_menus_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1904,6 +2000,92 @@ async def inactive_reengage_job(context: ContextTypes.DEFAULT_TYPE):
 
 
 # ----------------------------------------------------------------------------
+# #3 — Admin panel persistent back-stack
+# ----------------------------------------------------------------------------
+# Every admin "screen" handler is wrapped with nav_wrap, which pushes its own
+# callback_data onto context.user_data["adm_nav_stack"] before rendering.
+# "🔙 Back" (adm_back) pops the current screen, then re-dispatches whatever is
+# now on top of the stack — letting the admin walk back out N levels from
+# anywhere without hardcoding a fixed parent per screen.
+
+ADM_NAV_STACK_MAX = 20
+
+
+def push_nav(context: ContextTypes.DEFAULT_TYPE, cb_id: str):
+    stack = context.user_data.setdefault("adm_nav_stack", [])
+    if not stack or stack[-1] != cb_id:
+        stack.append(cb_id)
+    if len(stack) > ADM_NAV_STACK_MAX:
+        del stack[: len(stack) - ADM_NAV_STACK_MAX]
+
+
+def nav_wrap(func):
+    """Decorator: pushes this screen's callback_data onto the back-stack
+    before rendering it. Used for every top/sub-level admin *screen* (not
+    for one-off actions like toggles/deletes, which re-render an existing
+    screen themselves)."""
+
+    @functools.wraps(func)
+    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        if query is not None and query.data:
+            push_nav(context, query.data)
+        return await func(update, context)
+
+    return wrapper
+
+
+# (pattern, wrapped_handler) — reuses the exact same handlers registered
+# below, just decorated with nav_wrap, so adm_back can re-render any of them.
+ADM_SCREENS = [
+    (r"^adm_stats$", cb_adm_stats),
+    (r"^adm_users$", cb_adm_users),
+    (r"^adm_users_list$", cb_adm_users_list),
+    (r"^adm_broadcast$", cb_adm_broadcast),
+    (r"^adm_bc_log$", cb_adm_bc_log),
+    (r"^adm_menu_ui$", cb_adm_menu_ui),
+    (r"^adm_menu_edit:", cb_adm_menu_edit),
+    (r"^adm_menu_trans:", cb_adm_menu_trans),
+    (r"^adm_settings$", cb_adm_settings),
+    (r"^adm_lang_manage$", cb_adm_lang_manage),
+    (r"^adm_lang_add$", cb_adm_lang_add),
+    (r"^adm_lang_remove$", cb_adm_lang_remove),
+    (r"^adm_autoreply_list$", cb_adm_autoreply_list),
+    (r"^adm_manage_admins$", cb_adm_manage_admins),
+    (r"^adm_restore_info$", cb_adm_restore_info),
+    (r"^adm_danger$", cb_adm_danger),
+    (r"^adm_wipe_chat_confirm$", cb_adm_wipe_chat_confirm),
+]
+ADM_SCREENS_WRAPPED = [(re.compile(p), nav_wrap(f)) for p, f in ADM_SCREENS]
+
+
+async def cb_adm_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    stack = context.user_data.setdefault("adm_nav_stack", [])
+    if stack:
+        stack.pop()  # discard the screen we're currently viewing
+    target = stack.pop() if stack else None  # will be re-pushed by the handler itself
+    if not target:
+        await cb_adm_home(update, context)
+        return
+    handler = None
+    for pattern, wrapped in ADM_SCREENS_WRAPPED:
+        if pattern.match(target):
+            handler = wrapped
+            break
+    if handler is None:
+        await cb_adm_home(update, context)
+        return
+    original_data = query.data
+    query.data = target  # forge callback_data so the target handler parses it correctly
+    try:
+        await handler(update, context)
+    finally:
+        query.data = original_data
+
+
+# ----------------------------------------------------------------------------
 # App wiring
 # ----------------------------------------------------------------------------
 
@@ -1927,16 +2109,17 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(cb_noop, pattern="^noop$"))
 
     app.add_handler(CallbackQueryHandler(cb_adm_home, pattern="^adm_home$"))
-    app.add_handler(CallbackQueryHandler(cb_adm_stats, pattern="^adm_stats$"))
-    app.add_handler(CallbackQueryHandler(cb_adm_users, pattern="^adm_users$"))
-    app.add_handler(CallbackQueryHandler(cb_adm_users_list, pattern="^adm_users_list$"))
+    app.add_handler(CallbackQueryHandler(cb_adm_back, pattern="^adm_back$"))
+    app.add_handler(CallbackQueryHandler(nav_wrap(cb_adm_stats), pattern="^adm_stats$"))
+    app.add_handler(CallbackQueryHandler(nav_wrap(cb_adm_users), pattern="^adm_users$"))
+    app.add_handler(CallbackQueryHandler(nav_wrap(cb_adm_users_list), pattern="^adm_users_list$"))
     app.add_handler(CallbackQueryHandler(cb_adm_users_msg, pattern="^adm_users_msg$"))
-    app.add_handler(CallbackQueryHandler(cb_adm_broadcast, pattern="^adm_broadcast$"))
+    app.add_handler(CallbackQueryHandler(nav_wrap(cb_adm_broadcast), pattern="^adm_broadcast$"))
     app.add_handler(CallbackQueryHandler(cb_adm_bc_new, pattern="^adm_bc_new$"))
-    app.add_handler(CallbackQueryHandler(cb_adm_bc_log, pattern="^adm_bc_log$"))
+    app.add_handler(CallbackQueryHandler(nav_wrap(cb_adm_bc_log), pattern="^adm_bc_log$"))
 
-    app.add_handler(CallbackQueryHandler(cb_adm_menu_ui, pattern="^adm_menu_ui$"))
-    app.add_handler(CallbackQueryHandler(cb_adm_menu_edit, pattern="^adm_menu_edit:"))
+    app.add_handler(CallbackQueryHandler(nav_wrap(cb_adm_menu_ui), pattern="^adm_menu_ui$"))
+    app.add_handler(CallbackQueryHandler(nav_wrap(cb_adm_menu_edit), pattern="^adm_menu_edit:"))
     app.add_handler(CallbackQueryHandler(cb_adm_menu_txt, pattern="^adm_menu_txt:"))
     app.add_handler(CallbackQueryHandler(cb_adm_menu_style, pattern="^adm_menu_style:"))
     app.add_handler(CallbackQueryHandler(cb_adm_menu_parsemode, pattern="^adm_menu_parsemode:"))
@@ -1944,7 +2127,7 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(cb_adm_menu_rmimg, pattern="^adm_menu_rmimg:"))
     app.add_handler(CallbackQueryHandler(cb_adm_menu_autodel, pattern="^adm_menu_autodel:"))
     app.add_handler(CallbackQueryHandler(cb_adm_menu_btns, pattern="^adm_menu_btns:"))
-    app.add_handler(CallbackQueryHandler(cb_adm_menu_trans, pattern="^adm_menu_trans:"))
+    app.add_handler(CallbackQueryHandler(nav_wrap(cb_adm_menu_trans), pattern="^adm_menu_trans:"))
     app.add_handler(CallbackQueryHandler(cb_adm_menu_trans_edit, pattern="^adm_menu_trans_edit:"))
     app.add_handler(CallbackQueryHandler(cb_setlang, pattern="^setlang:"))
     app.add_handler(CallbackQueryHandler(cb_adm_btn_add, pattern="^adm_btn_add:"))
@@ -1952,23 +2135,25 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(cb_adm_btn_style, pattern="^adm_btn_style:"))
     app.add_handler(CallbackQueryHandler(cb_btn_type_pick, pattern="^btntype:"))
 
-    app.add_handler(CallbackQueryHandler(cb_adm_settings, pattern="^adm_settings$"))
-    app.add_handler(CallbackQueryHandler(cb_adm_lang_manage, pattern="^adm_lang_manage$"))
-    app.add_handler(CallbackQueryHandler(cb_adm_lang_add, pattern="^adm_lang_add$"))
+    app.add_handler(CallbackQueryHandler(nav_wrap(cb_adm_settings), pattern="^adm_settings$"))
+    app.add_handler(CallbackQueryHandler(nav_wrap(cb_adm_lang_manage), pattern="^adm_lang_manage$"))
+    app.add_handler(CallbackQueryHandler(nav_wrap(cb_adm_lang_add), pattern="^adm_lang_add$"))
     app.add_handler(CallbackQueryHandler(cb_adm_lang_add_do, pattern="^adm_lang_add_do:"))
-    app.add_handler(CallbackQueryHandler(cb_adm_lang_remove, pattern="^adm_lang_remove$"))
+    app.add_handler(CallbackQueryHandler(nav_wrap(cb_adm_lang_remove), pattern="^adm_lang_remove$"))
     app.add_handler(CallbackQueryHandler(cb_adm_lang_remove_do, pattern="^adm_lang_remove_do:"))
     app.add_handler(CallbackQueryHandler(cb_adm_set_autodelete, pattern="^adm_set_autodelete$"))
-    app.add_handler(CallbackQueryHandler(cb_adm_autoreply_list, pattern="^adm_autoreply_list$"))
+    app.add_handler(CallbackQueryHandler(nav_wrap(cb_adm_autoreply_list), pattern="^adm_autoreply_list$"))
     app.add_handler(CallbackQueryHandler(cb_adm_autoreply_add, pattern="^adm_autoreply_add$"))
     app.add_handler(CallbackQueryHandler(cb_adm_autoreply_del, pattern="^adm_autoreply_del$"))
-    app.add_handler(CallbackQueryHandler(cb_adm_manage_admins, pattern="^adm_manage_admins$"))
+    app.add_handler(CallbackQueryHandler(nav_wrap(cb_adm_manage_admins), pattern="^adm_manage_admins$"))
     app.add_handler(CallbackQueryHandler(cb_adm_add_admin, pattern="^adm_add_admin$"))
     app.add_handler(CallbackQueryHandler(cb_adm_remove_admin, pattern="^adm_remove_admin$"))
-    app.add_handler(CallbackQueryHandler(cb_adm_restore_info, pattern="^adm_restore_info$"))
+    app.add_handler(CallbackQueryHandler(nav_wrap(cb_adm_restore_info), pattern="^adm_restore_info$"))
 
-    app.add_handler(CallbackQueryHandler(cb_adm_danger, pattern="^adm_danger$"))
+    app.add_handler(CallbackQueryHandler(nav_wrap(cb_adm_danger), pattern="^adm_danger$"))
     app.add_handler(CallbackQueryHandler(cb_adm_clear_bclog, pattern="^adm_clear_bclog$"))
+    app.add_handler(CallbackQueryHandler(nav_wrap(cb_adm_wipe_chat_confirm), pattern="^adm_wipe_chat_confirm$"))
+    app.add_handler(CallbackQueryHandler(cb_adm_wipe_chat_do, pattern="^adm_wipe_chat_do$"))
     app.add_handler(CallbackQueryHandler(cb_adm_reset_menus_confirm, pattern="^adm_reset_menus_confirm$"))
     app.add_handler(CallbackQueryHandler(cb_adm_reset_menus_do, pattern="^adm_reset_menus_do$"))
     app.add_handler(CallbackQueryHandler(cb_adm_reset_confirm, pattern="^adm_reset_confirm$"))
