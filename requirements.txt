@@ -1,0 +1,4 @@
+python-telegram-bot[job-queue]>=22.7
+yt-dlp>=2024.8.6
+pymongo>=4.6         # optional — only needed if you set MONGO_URI
+psutil>=5.9          # optional — nicer /health memory reporting
