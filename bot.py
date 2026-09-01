@@ -199,15 +199,18 @@ def styled_button(text, callback_data=None, url=None, style=None):
 DEFAULT_MENUS = {
     "start": {
         "text": (
-            f"{to_deco(to_small_caps('welcome'))}\n\n"
-            f"{to_small_caps('send any instagram reel link below')}\n"
-            f"{to_small_caps('get it back in the best quality, instantly')}\n\n"
-            f"『 {to_small_caps('tap guide for the full walkthrough')} 』"
+            "<b>🎬 ReelGrab</b>\n"
+            "Send any Instagram Reel link and get it back in the best available quality — instantly.\n\n"
+            "<b>How it works</b>\n"
+            "1. Copy a Reel link from Instagram\n"
+            "2. Paste it here\n"
+            "3. Get your video back in seconds\n\n"
+            "Tap <b>Guide</b> below for a full walkthrough."
         ),
-        "parse_mode": None,
+        "parse_mode": "HTML",
         "image_file_id": None,
         "buttons": [
-            {"label": to_small_caps("📖 guide"), "type": "menu", "value": "help_user", "row": 1, "style": "primary"}
+            {"label": "📖 Guide", "type": "menu", "value": "help_user", "row": 1, "style": "primary"}
         ],
         "auto_delete_seconds": None,
         "updated_by": None,
@@ -216,15 +219,16 @@ DEFAULT_MENUS = {
     },
     "help_user": {
         "text": (
-            f"{to_deco(to_small_caps('guide'))}\n\n"
-            f"① {to_small_caps('send a reel link')}\n"
-            f"② {to_small_caps('get it in best quality')}\n"
-            f"③ {to_small_caps('tap get caption for a short quote')}"
+            "<b>📖 How It Works</b>\n\n"
+            "1. <b>Send a Reel link</b> — any public instagram.com/reel/... URL\n"
+            "2. <b>Get your video</b> — delivered in the best quality available\n"
+            "3. <b>Tap Get Caption</b> on the result to grab a short quote of the caption\n\n"
+            "No sign-up, no waiting — just paste and go."
         ),
-        "parse_mode": None,
+        "parse_mode": "HTML",
         "image_file_id": None,
         "buttons": [
-            {"label": to_small_caps("🏠 main menu"), "type": "menu", "value": "start", "row": 1, "style": "primary"}
+            {"label": "🏠 Main Menu", "type": "menu", "value": "start", "row": 1, "style": "primary"}
         ],
         "auto_delete_seconds": None,
         "updated_by": None,
@@ -232,12 +236,12 @@ DEFAULT_MENUS = {
         "translations": {},
     },
     "reel_result": {
-        "text": to_deco(to_small_caps("here's your reel")),
-        "parse_mode": None,
+        "text": "<b>✅ Here's your Reel</b>\nDelivered in the best quality available.",
+        "parse_mode": "HTML",
         "image_file_id": None,
         "buttons": [
-            {"label": to_small_caps("📝 get caption"), "type": "callback", "value": "get_caption", "row": 1, "style": "primary"},
-            {"label": to_small_caps("🏠 main menu"), "type": "menu", "value": "start", "row": 1, "style": "primary"},
+            {"label": "📝 Get Caption", "type": "callback", "value": "get_caption", "row": 1, "style": "primary"},
+            {"label": "🏠 Main Menu", "type": "menu", "value": "start", "row": 1, "style": "primary"},
         ],
         "auto_delete_seconds": None,
         "updated_by": None,
@@ -246,19 +250,33 @@ DEFAULT_MENUS = {
     },
     "help_admin": {
         "text": (
-            "❓ Admin Help\n\n"
-            "📊 Stats & Activity — bot ke numbers dekho\n"
-            "👥 Users & Groups — users list/message karo\n"
-            "📢 Broadcast — sabko bhejo (forward-lock ke saath)\n"
-            "🎨 Menu & UI — har menu ka text/image/buttons edit karo\n"
-            "⚙️ Settings & Admins — welcome/admins/maintenance/languages\n"
-            "🛑 Danger Zone — destructive actions"
+            "<b>⚙️ Admin Help</b>\n\n"
+            "📊 <b>Stats & Activity</b> — bot usage at a glance\n"
+            "👥 <b>Users & Groups</b> — manage and message users\n"
+            "📢 <b>Broadcast</b> — message everyone (forward-lock aware)\n"
+            "🎨 <b>Menu & UI</b> — edit any menu's text, image and buttons\n"
+            "⚙️ <b>Settings & Admins</b> — core settings, admins, maintenance, languages\n"
+            "🛑 <b>Danger Zone</b> — destructive actions"
         ),
-        "parse_mode": None,
+        "parse_mode": "HTML",
         "image_file_id": None,
         "buttons": [
             {"label": "🔙 Admin Panel", "type": "callback", "value": "adm_home", "row": 1, "style": "primary"}
         ],
+        "auto_delete_seconds": None,
+        "updated_by": None,
+        "updated_at": None,
+        "translations": {},
+    },
+    "maintenance": {
+        "text": (
+            "🛠 <b>Under Maintenance</b>\n"
+            "We're currently performing scheduled improvements.\n"
+            "Please check back in a little while — thanks for your patience!"
+        ),
+        "parse_mode": "HTML",
+        "image_file_id": None,
+        "buttons": [],
         "auto_delete_seconds": None,
         "updated_by": None,
         "updated_at": None,
@@ -408,23 +426,27 @@ def is_admin(user_id: int) -> bool:
     return is_owner(user_id) or user_id in BOT_DATA.get("admins", [])
 
 
-def touch_user(update: Update):
+def touch_user(update: Update) -> bool:
+    """Registers/updates the user. Returns True if this is a brand-new user."""
     user = update.effective_user
     if not user:
-        return
+        return False
     uid = str(user.id)
     now = datetime.utcnow().isoformat()
     users = BOT_DATA["users"]
-    if uid not in users:
+    is_new = uid not in users
+    if is_new:
         users[uid] = {
             "name": user.full_name, "username": user.username,
             "joined": now, "last_active": now, "last_reengaged": None,
-            "lang": None,
+            "lang": None, "lang_prompted": False,
         }
     else:
         users[uid]["last_active"] = now
         users[uid]["name"] = user.full_name
+        users[uid].setdefault("lang_prompted", False)
     save_data()
+    return is_new
 
 
 def check_rate_limit(user_id: int) -> bool:
@@ -664,13 +686,24 @@ async def cb_styleset(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ----------------------------------------------------------------------------
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    touch_user(update)
+    is_new = touch_user(update)
     if not check_rate_limit(update.effective_user.id):
         await update.message.reply_text("⏳ Thoda slow karo, bahut jaldi jaldi requests aa rahi hain.")
         return
     if BOT_DATA["settings"].get("maintenance") and not is_admin(update.effective_user.id):
-        await update.message.reply_text("🛠️ Bot abhi maintenance mode mein hai.")
+        await render_menu(context, update.effective_chat.id, "maintenance")
         return
+
+    uid = str(update.effective_user.id)
+    user_rec = BOT_DATA["users"].get(uid, {})
+    langs = BOT_DATA["settings"].get("languages", [])
+    # #1 — language picker only on this user's very first /start ever.
+    if is_new and langs and not user_rec.get("lang_prompted"):
+        user_rec["lang_prompted"] = True
+        save_data()
+        await show_language_picker(context, update.effective_chat.id)
+        return
+
     await render_menu(context, update.effective_chat.id, "start")
 
 
@@ -687,16 +720,34 @@ LANG_NAMES = {
 }
 
 
+def _language_picker_keyboard() -> InlineKeyboardMarkup:
+    langs = BOT_DATA["settings"].get("languages", [])
+    rows = [[styled_button("✨ Default (English)", callback_data="setlang:default", style="primary")]]
+    for code in langs:
+        rows.append([styled_button(LANG_NAMES.get(code, code), callback_data=f"setlang:{code}", style="primary")])
+    return InlineKeyboardMarkup(rows)
+
+
+async def show_language_picker(context: ContextTypes.DEFAULT_TYPE, chat_id: int, existing_message=None):
+    """#1 — shown automatically on a brand-new user's first /start, and manually via /language."""
+    text = (
+        "🌐 <b>Choose your language</b>\n"
+        "Pick one to continue — you can change this anytime with /language."
+    )
+    kb = _language_picker_keyboard()
+    if existing_message is not None:
+        await existing_message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    else:
+        await context.bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=kb)
+
+
 async def cmd_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
     touch_user(update)
     langs = BOT_DATA["settings"].get("languages", [])
     if not langs:
-        await update.message.reply_text("Abhi koi extra language configure nahi hui hai.")
+        await update.message.reply_text("No extra languages are configured yet.")
         return
-    rows = [[styled_button("✨ Default (Hinglish)", callback_data="setlang:default")]]
-    for code in langs:
-        rows.append([styled_button(LANG_NAMES.get(code, code), callback_data=f"setlang:{code}")])
-    await update.message.reply_text("🌐 Apni language choose karo:", reply_markup=InlineKeyboardMarkup(rows))
+    await show_language_picker(context, update.effective_chat.id)
 
 
 async def cb_setlang(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -706,6 +757,7 @@ async def cb_setlang(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = str(update.effective_user.id)
     if uid in BOT_DATA["users"]:
         BOT_DATA["users"][uid]["lang"] = None if code == "default" else code
+        BOT_DATA["users"][uid]["lang_prompted"] = True  # #1 — never re-prompt automatically again
         save_data()
     await render_menu(context, query.message.chat_id, "start", existing_message=query.message)
 
@@ -744,7 +796,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if BOT_DATA["settings"].get("maintenance") and not is_admin(user_id):
-        await update.message.reply_text("🛠️ Bot abhi maintenance mode mein hai.")
+        await render_menu(context, update.effective_chat.id, "maintenance")
         return
 
     url = match.group(1)
@@ -856,16 +908,34 @@ def back_row(cb="adm_home", label="🔙 Back to Panel"):
     return [styled_button(label, callback_data=cb)]
 
 
+def _admin_home_text() -> str:
+    """#2 — one-time friendly hint to set a banner image, shown only while the
+    bot still looks freshly-installed (no menu images, no languages yet)."""
+    text = "🛠️ <b>Admin Panel</b>"
+    no_images = all(not m.get("image_file_id") for m in BOT_DATA["menus"].values())
+    no_langs = not BOT_DATA["settings"].get("languages")
+    if no_images and no_langs:
+        text += (
+            "\n\n💡 <i>Tip: set a banner image for your Start menu from "
+            "Menu &amp; UI → start for a more premium first impression.</i>"
+        )
+    return text
+
+
 async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         return
-    await update.message.reply_text("🛠️ Admin Panel", reply_markup=admin_panel_keyboard())
+    await update.message.reply_text(
+        _admin_home_text(), parse_mode="HTML", reply_markup=admin_panel_keyboard()
+    )
 
 
 async def cb_adm_home(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text("🛠️ Admin Panel", reply_markup=admin_panel_keyboard())
+    await query.edit_message_text(
+        _admin_home_text(), parse_mode="HTML", reply_markup=admin_panel_keyboard()
+    )
 
 
 # ---- Stats & Activity -------------------------------------------------------
