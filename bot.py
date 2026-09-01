@@ -544,6 +544,27 @@ def build_keyboard_from_buttons(buttons, menu_id):
     return InlineKeyboardMarkup(kb_rows) if kb_rows else None
 
 
+def rendered_menu_text_length(menu: dict) -> int:
+    """Length Telegram will actually see, including <blockquote> wrapping
+    overhead when quote_style is on — used for the 1024-char caption checks."""
+    return caption_length_for(menu, menu.get("text", ""))
+
+
+def caption_length_for(menu: dict, candidate_text: str) -> int:
+    """Effective rendered length of `candidate_text` if it were saved as this
+    menu's text (accounts for blockquote wrap overhead when quote_style is on)."""
+    if menu.get("quote_style"):
+        return len(wrap_blockquote(candidate_text, expandable=menu.get("quote_expandable", False)))
+    return len(candidate_text)
+
+
+def menu_needs_caption_limit(menu: dict, menu_id: str) -> bool:
+    """True if this menu is ever sent as a photo/video caption (1024-char
+    Telegram limit) rather than a free-standing text message (4096 limit).
+    reel_result is ALWAYS a video caption regardless of image_file_id."""
+    return bool(menu.get("image_file_id")) or menu_id == "reel_result"
+
+
 async def render_menu(context: ContextTypes.DEFAULT_TYPE, chat_id: int, menu_id: str, existing_message=None, lang: str = None):
     menu = BOT_DATA["menus"].get(menu_id)
     if not menu:
@@ -674,9 +695,17 @@ async def cb_styleset(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if target.startswith("menu_text:"):
         menu_id = target.split(":", 1)[1]
-        BOT_DATA["menus"][menu_id]["text"] = styled_text
-        BOT_DATA["menus"][menu_id]["updated_by"] = update.effective_user.id
-        BOT_DATA["menus"][menu_id]["updated_at"] = datetime.utcnow().isoformat()
+        menu = BOT_DATA["menus"][menu_id]
+        would_be_length = caption_length_for(menu, styled_text)
+        if menu_needs_caption_limit(menu, menu_id) and would_be_length > 1024:
+            await query.edit_message_text(
+                f"⚠️ Ye menu ek caption ke roop mein bhejta hai, limit 1024 characters hai "
+                f"(styled/quote-wrapped text {would_be_length} hoga). Chhota source text try karo."
+            )
+            return
+        menu["text"] = styled_text
+        menu["updated_by"] = update.effective_user.id
+        menu["updated_at"] = datetime.utcnow().isoformat()
         save_data()
         await query.edit_message_text(f"✅ Menu text updated ({label} style).")
     elif target.startswith("button_label:"):
@@ -1526,10 +1555,11 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
         menu_id = awaiting.split(":", 1)[1]
         context.user_data.pop("awaiting", None)
         menu = BOT_DATA["menus"][menu_id]
-        if menu.get("image_file_id") and len(text) > 1024:
+        would_be_length = caption_length_for(menu, text)
+        if menu_needs_caption_limit(menu, menu_id) and would_be_length > 1024:
             await update.message.reply_text(
-                f"⚠️ Ye menu image ke saath hai, caption limit 1024 characters hai, tumhara text {len(text)} hai. "
-                "Chhota karo ya pehle image hatao."
+                f"⚠️ Ye menu ek caption ke roop mein bhejta hai (image/video ke saath), limit 1024 characters hai "
+                f"(quote-wrap ke saath tumhara text {would_be_length} hoga). Chhota karo."
             )
             return
         menu["text"] = text
@@ -1563,6 +1593,13 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
         _, menu_id, code = awaiting.split(":", 2)
         context.user_data.pop("awaiting", None)
         menu = BOT_DATA["menus"][menu_id]
+        would_be_length = caption_length_for(menu, text)
+        if menu_needs_caption_limit(menu, menu_id) and would_be_length > 1024:
+            await update.message.reply_text(
+                f"⚠️ Ye menu ek caption ke roop mein bhejta hai, limit 1024 characters hai "
+                f"(quote-wrap ke saath ye translation {would_be_length} hoga). Chhota karo."
+            )
+            return
         menu.setdefault("translations", {})
         menu["translations"][code] = {"text": text, "buttons": None}
         save_data()
@@ -1704,9 +1741,9 @@ async def handle_admin_media(update: Update, context: ContextTypes.DEFAULT_TYPE)
         context.user_data.pop("awaiting", None)
         file_id = update.message.photo[-1].file_id
         menu = BOT_DATA["menus"][menu_id]
-        if len(menu.get("text", "")) > 1024:
+        if menu_needs_caption_limit(menu, menu_id) and rendered_menu_text_length(menu) > 1024:
             await update.message.reply_text(
-                "⚠️ Is menu ka text 1024 characters se lamba hai, image caption mein fit nahi hoga. "
+                "⚠️ Is menu ka text (quote-wrap ke saath) 1024 characters se lamba hai, image caption mein fit nahi hoga. "
                 "Pehle text chhota karo, fir image lagao."
             )
             return
