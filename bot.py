@@ -21,6 +21,7 @@ import re
 import json
 import csv
 import time
+import shutil
 import logging
 import tempfile
 from datetime import datetime, timedelta
@@ -60,11 +61,36 @@ MAX_LOCAL_BACKUPS = 10
 os.makedirs(BACKUP_DIR, exist_ok=True)
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
+# ffmpeg is only needed when yt-dlp has to MERGE separate video+audio streams.
+# Most Instagram reels are already a single muxed file, so we don't strictly
+# need it — but when a merge is required and ffmpeg is missing, downloads
+# used to crash. We now auto-detect ffmpeg (system install, or the portable
+# binary from the `imageio-ffmpeg` package) and gracefully fall back to a
+# no-merge format if neither is available.
+FFMPEG_PATH = shutil.which("ffmpeg")
+if not FFMPEG_PATH:
+    try:
+        import imageio_ffmpeg
+
+        FFMPEG_PATH = imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        FFMPEG_PATH = None
+FFMPEG_AVAILABLE = bool(FFMPEG_PATH)
+
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     level=logging.INFO,
 )
 log = logging.getLogger("bot")
+
+if FFMPEG_AVAILABLE:
+    log.info("ffmpeg found at: %s", FFMPEG_PATH)
+else:
+    log.warning(
+        "ffmpeg not found. Downloads will use a no-merge format (still works, "
+        "occasionally slightly lower max quality). Install ffmpeg or "
+        "`pip install imageio-ffmpeg` to always get the absolute best quality."
+    )
 
 START_TIME = time.time()
 
@@ -180,31 +206,51 @@ def styled_button(text, callback_data=None, url=None, style=None):
 
 DEFAULT_MENUS = {
     "start": {
-        "text": "👋 Welcome!\n\nInstagram reel ka link bhejo, main use best quality mein download karke bhej dunga.",
-        "parse_mode": None,
-        "image_file_id": None,
-        "buttons": [
-            {"label": "📖 Guide", "type": "menu", "value": "help_user", "row": 1, "style": "primary"}
-        ],
-        "auto_delete_seconds": None,
-        "updated_by": None,
-        "updated_at": None,
-    },
-    "help_user": {
         "text": (
-            "📖 Guide\n\n"
-            "1️⃣ Reel ka link bhejo\n"
-            "2️⃣ Best quality mein video milega\n"
-            "3️⃣ 'Get Caption' button se ek short quote milega"
+            f"{to_deco(to_small_caps('welcome'))}\n\n"
+            f"{to_small_caps('send any instagram reel link below')}\n"
+            f"{to_small_caps('get it back in the best quality, instantly')}\n\n"
+            f"『 {to_small_caps('tap guide for the full walkthrough')} 』"
         ),
         "parse_mode": None,
         "image_file_id": None,
         "buttons": [
-            {"label": "🏠 Main Menu", "type": "menu", "value": "start", "row": 1, "style": "primary"}
+            {"label": to_small_caps("📖 guide"), "type": "menu", "value": "help_user", "row": 1, "style": "primary"}
         ],
         "auto_delete_seconds": None,
         "updated_by": None,
         "updated_at": None,
+        "translations": {},
+    },
+    "help_user": {
+        "text": (
+            f"{to_deco(to_small_caps('guide'))}\n\n"
+            f"① {to_small_caps('send a reel link')}\n"
+            f"② {to_small_caps('get it in best quality')}\n"
+            f"③ {to_small_caps('tap get caption for a short quote')}"
+        ),
+        "parse_mode": None,
+        "image_file_id": None,
+        "buttons": [
+            {"label": to_small_caps("🏠 main menu"), "type": "menu", "value": "start", "row": 1, "style": "primary"}
+        ],
+        "auto_delete_seconds": None,
+        "updated_by": None,
+        "updated_at": None,
+        "translations": {},
+    },
+    "reel_result": {
+        "text": to_deco(to_small_caps("here's your reel")),
+        "parse_mode": None,
+        "image_file_id": None,
+        "buttons": [
+            {"label": to_small_caps("📝 get caption"), "type": "callback", "value": "get_caption", "row": 1, "style": "primary"},
+            {"label": to_small_caps("🏠 main menu"), "type": "menu", "value": "start", "row": 1, "style": "primary"},
+        ],
+        "auto_delete_seconds": None,
+        "updated_by": None,
+        "updated_at": None,
+        "translations": {},
     },
     "help_admin": {
         "text": (
@@ -213,7 +259,7 @@ DEFAULT_MENUS = {
             "👥 Users & Groups — users list/message karo\n"
             "📢 Broadcast — sabko bhejo (forward-lock ke saath)\n"
             "🎨 Menu & UI — har menu ka text/image/buttons edit karo\n"
-            "⚙️ Settings & Admins — welcome/admins/maintenance\n"
+            "⚙️ Settings & Admins — welcome/admins/maintenance/languages\n"
             "🛑 Danger Zone — destructive actions"
         ),
         "parse_mode": None,
@@ -224,6 +270,7 @@ DEFAULT_MENUS = {
         "auto_delete_seconds": None,
         "updated_by": None,
         "updated_at": None,
+        "translations": {},
     },
 }
 
@@ -242,6 +289,7 @@ DEFAULT_DATA = {
         "rate_limit_max": 20,
         "rate_limit_window_seconds": 60,
         "inactive_reengage_days": 0,
+        "languages": [],  # e.g. ["en", "hi"] — admin-added via Settings > Languages
     },
     "broadcast_log": [],
     "restore_log": [],
@@ -265,9 +313,14 @@ def _deep_merge_defaults(data: dict) -> dict:
             merged[k].update(v)
         else:
             merged[k] = v
-    # ensure any newly-added default menus exist even in old data
+    # ensure any newly-added default menus (and newly-added fields on
+    # existing menus, e.g. "translations") exist even in old data files
     for menu_id, menu in DEFAULT_MENUS.items():
-        merged["menus"].setdefault(menu_id, json.loads(json.dumps(menu)))
+        if menu_id not in merged["menus"]:
+            merged["menus"][menu_id] = json.loads(json.dumps(menu))
+        else:
+            for field, default_val in menu.items():
+                merged["menus"][menu_id].setdefault(field, json.loads(json.dumps(default_val)))
     return merged
 
 
@@ -372,6 +425,7 @@ def touch_user(update: Update):
         users[uid] = {
             "name": user.full_name, "username": user.username,
             "joined": now, "last_active": now, "last_reengaged": None,
+            "lang": None,
         }
     else:
         users[uid]["last_active"] = now
@@ -476,14 +530,20 @@ def build_keyboard_from_buttons(buttons, menu_id):
     return InlineKeyboardMarkup(kb_rows) if kb_rows else None
 
 
-async def render_menu(context: ContextTypes.DEFAULT_TYPE, chat_id: int, menu_id: str, existing_message=None):
+async def render_menu(context: ContextTypes.DEFAULT_TYPE, chat_id: int, menu_id: str, existing_message=None, lang: str = None):
     menu = BOT_DATA["menus"].get(menu_id)
     if not menu:
         await context.bot.send_message(chat_id, f"⚠️ Menu '{menu_id}' nahi mila.")
         return
 
-    kb = build_keyboard_from_buttons(menu.get("buttons", []), menu_id)
-    text = menu.get("text", "")
+    # Resolve language: explicit arg > saved user preference > base (default) text.
+    if lang is None:
+        lang = BOT_DATA["users"].get(str(chat_id), {}).get("lang")
+    translation = menu.get("translations", {}).get(lang) if lang else None
+
+    buttons = (translation or {}).get("buttons") or menu.get("buttons", [])
+    text = (translation or {}).get("text") or menu.get("text", "")
+    kb = build_keyboard_from_buttons(buttons, menu_id)
     parse_mode = menu.get("parse_mode") or None
     image = menu.get("image_file_id")
 
@@ -626,6 +686,36 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await render_menu(context, update.effective_chat.id, menu_id)
 
 
+LANG_NAMES = {
+    "en": "🇬🇧 English", "hi": "🇮🇳 हिन्दी", "es": "🇪🇸 Español",
+    "fr": "🇫🇷 Français", "ar": "🇸🇦 العربية", "pt": "🇵🇹 Português",
+    "id": "🇮🇩 Indonesia", "bn": "🇧🇩 বাংলা", "ur": "🇵🇰 اردو",
+}
+
+
+async def cmd_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    touch_user(update)
+    langs = BOT_DATA["settings"].get("languages", [])
+    if not langs:
+        await update.message.reply_text("Abhi koi extra language configure nahi hui hai.")
+        return
+    rows = [[styled_button("✨ Default (Hinglish)", callback_data="setlang:default")]]
+    for code in langs:
+        rows.append([styled_button(LANG_NAMES.get(code, code), callback_data=f"setlang:{code}")])
+    await update.message.reply_text("🌐 Apni language choose karo:", reply_markup=InlineKeyboardMarkup(rows))
+
+
+async def cb_setlang(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    code = query.data.split(":", 1)[1]
+    uid = str(update.effective_user.id)
+    if uid in BOT_DATA["users"]:
+        BOT_DATA["users"][uid]["lang"] = None if code == "default" else code
+        save_data()
+    await render_menu(context, query.message.chat_id, "start", existing_message=query.message)
+
+
 # ----------------------------------------------------------------------------
 # Reel download
 # ----------------------------------------------------------------------------
@@ -667,31 +757,57 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status_msg = await update.message.reply_text("⏳ Download ho raha hai, best quality mein...")
 
     out_template = os.path.join(DOWNLOAD_DIR, f"%(id)s_{int(time.time())}.%(ext)s")
-    ydl_opts = {
-        "format": "bestvideo+bestaudio/best",
-        "outtmpl": out_template,
-        "merge_output_format": "mp4",
-        "quiet": True,
-        "no_warnings": True,
-    }
+
+    def build_ydl_opts(use_merge: bool) -> dict:
+        opts = {
+            "format": "bestvideo+bestaudio/best" if use_merge else "best",
+            "outtmpl": out_template,
+            "quiet": True,
+            "no_warnings": True,
+        }
+        if use_merge:
+            opts["merge_output_format"] = "mp4"
+            if FFMPEG_PATH:
+                opts["ffmpeg_location"] = FFMPEG_PATH
+        return opts
+
+    def run_download(use_merge: bool):
+        opts = build_ydl_opts(use_merge)
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            fp = ydl.prepare_filename(info)
+            if not fp.endswith(".mp4") and os.path.exists(fp.rsplit(".", 1)[0] + ".mp4"):
+                fp = fp.rsplit(".", 1)[0] + ".mp4"
+            return fp
 
     file_path = None
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            file_path = ydl.prepare_filename(info)
-            if not file_path.endswith(".mp4") and os.path.exists(file_path.rsplit(".", 1)[0] + ".mp4"):
-                file_path = file_path.rsplit(".", 1)[0] + ".mp4"
+        try:
+            file_path = run_download(use_merge=FFMPEG_AVAILABLE)
+        except Exception as e:
+            # Self-heal: if a merge was attempted and ffmpeg turned out to be
+            # the problem, retry once with a no-merge (progressive) format.
+            if "ffmpeg" in str(e).lower():
+                log.warning("Merge failed (ffmpeg issue), retrying with progressive format.")
+                file_path = run_download(use_merge=False)
+            else:
+                raise
+
+        uid = str(update.effective_user.id)
+        lang = BOT_DATA["users"].get(uid, {}).get("lang")
+        menu = BOT_DATA["menus"]["reel_result"]
+        translation = menu.get("translations", {}).get(lang) if lang else None
+        caption = (translation or {}).get("text") or menu.get("text", "")
+        buttons = (translation or {}).get("buttons") or menu.get("buttons", [])
+        kb = build_keyboard_from_buttons(buttons, "reel_result")
 
         with open(file_path, "rb") as vid:
-            sent = await update.message.reply_video(
-                video=vid,
-                caption="✅ Ho gaya! Best quality mein download ho gaya.",
-                reply_markup=InlineKeyboardMarkup(
-                    [[styled_button("📝 Get Caption", callback_data="get_caption", style="primary")]]
-                ),
-            )
-        await schedule_delete(context, sent.chat_id, sent.message_id, BOT_DATA["settings"].get("global_auto_delete_seconds", 0))
+            sent = await update.message.reply_video(video=vid, caption=caption, reply_markup=kb)
+
+        seconds = menu.get("auto_delete_seconds")
+        if seconds is None:
+            seconds = BOT_DATA["settings"].get("global_auto_delete_seconds", 0)
+        await schedule_delete(context, sent.chat_id, sent.message_id, seconds)
         await status_msg.delete()
     except Exception as e:  # noqa: BLE001
         log.exception("Download failed")
@@ -904,10 +1020,41 @@ async def cb_adm_menu_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
              styled_button("🗑️ Remove Image", callback_data=f"adm_menu_rmimg:{menu_id}")],
             [styled_button("🔘 Manage Buttons", callback_data=f"adm_menu_btns:{menu_id}")],
             [styled_button(f"⏱ Auto-Delete: {override_label}", callback_data=f"adm_menu_autodel:{menu_id}")],
+            [styled_button("🌐 Translations", callback_data=f"adm_menu_trans:{menu_id}")],
             [styled_button("🔙 Back", callback_data="adm_menu_ui")],
         ]
     )
     await query.edit_message_text(f"📝 Editing: {menu_id}", reply_markup=kb)
+
+
+async def cb_adm_menu_trans(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    menu_id = query.data.split(":", 1)[1]
+    langs = BOT_DATA["settings"].get("languages", [])
+    if not langs:
+        await query.message.reply_text(
+            "Pehle Settings & Admins → 🌐 Manage Languages se kam se kam ek language add karo."
+        )
+        return
+    rows = []
+    have = BOT_DATA["menus"][menu_id].get("translations", {})
+    for code in langs:
+        mark = "✅" if code in have else "➕"
+        rows.append([styled_button(f"{mark} {LANG_NAMES.get(code, code)}", callback_data=f"adm_menu_trans_edit:{menu_id}:{code}")])
+    rows.append([styled_button("🔙 Back", callback_data=f"adm_menu_edit:{menu_id}")])
+    await query.edit_message_text(f"🌐 Translations for {menu_id}", reply_markup=InlineKeyboardMarkup(rows))
+
+
+async def cb_adm_menu_trans_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    _, menu_id, code = query.data.split(":", 2)
+    context.user_data["awaiting"] = f"menu_trans_text:{menu_id}:{code}"
+    await query.message.reply_text(
+        f"'{menu_id}' ka {LANG_NAMES.get(code, code)} translation text bhejo "
+        "(buttons wahi rahenge jo base menu mein hain, translate nahi honge)."
+    )
 
 
 async def cb_adm_menu_txt(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1074,6 +1221,7 @@ async def cb_adm_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 style="success" if s.get("small_caps_buttons_default") else "danger",
             )],
             [styled_button("💬 Auto-Replies", callback_data="adm_autoreply_list")],
+            [styled_button("🌐 Manage Languages", callback_data="adm_lang_manage")],
             [styled_button("👤 Manage Admins", callback_data="adm_manage_admins")],
             [styled_button("📥 Restore Backup", callback_data="adm_restore_info")],
             back_row(),
@@ -1094,6 +1242,63 @@ async def cb_settings_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await cb_adm_settings(update, context)
     elif return_to == "adm_broadcast":
         await cb_adm_broadcast(update, context)
+
+
+async def cb_adm_lang_manage(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    langs = BOT_DATA["settings"].get("languages", [])
+    text = "🌐 Enabled Languages\n\n" + ("\n".join(f"• {LANG_NAMES.get(c, c)}" for c in langs) if langs else "Koi nahi — sirf Default (Hinglish).")
+    kb = InlineKeyboardMarkup(
+        [
+            [styled_button("➕ Add Language", callback_data="adm_lang_add", style="success")],
+            [styled_button("➖ Remove Language", callback_data="adm_lang_remove", style="danger")],
+            [styled_button("🔙 Back", callback_data="adm_settings")],
+        ]
+    )
+    await query.edit_message_text(text, reply_markup=kb)
+
+
+async def cb_adm_lang_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    available = [c for c in LANG_NAMES if c not in BOT_DATA["settings"].get("languages", [])]
+    if not available:
+        await query.message.reply_text("Saari suggested languages already add ho chuki hain.")
+        return
+    rows = [[styled_button(LANG_NAMES[c], callback_data=f"adm_lang_add_do:{c}")] for c in available]
+    await query.message.reply_text("Kaunsi language add karni hai?", reply_markup=InlineKeyboardMarkup(rows))
+
+
+async def cb_adm_lang_add_do(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    code = query.data.split(":", 1)[1]
+    if code not in BOT_DATA["settings"]["languages"]:
+        BOT_DATA["settings"]["languages"].append(code)
+        save_data()
+    await query.edit_message_text(f"✅ {LANG_NAMES.get(code, code)} add ho gayi. Ab har menu mein 🌐 Translations se text daal sakte ho.")
+
+
+async def cb_adm_lang_remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    langs = BOT_DATA["settings"].get("languages", [])
+    if not langs:
+        await query.message.reply_text("Koi language add nahi hai abhi.")
+        return
+    rows = [[styled_button(LANG_NAMES.get(c, c), callback_data=f"adm_lang_remove_do:{c}")] for c in langs]
+    await query.message.reply_text("Kaunsi language remove karni hai?", reply_markup=InlineKeyboardMarkup(rows))
+
+
+async def cb_adm_lang_remove_do(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    code = query.data.split(":", 1)[1]
+    if code in BOT_DATA["settings"]["languages"]:
+        BOT_DATA["settings"]["languages"].remove(code)
+        save_data()
+    await query.edit_message_text(f"✅ {LANG_NAMES.get(code, code)} remove ho gayi.")
 
 
 async def cb_adm_set_autodelete(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1285,6 +1490,15 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
             return
         save_data()
         await update.message.reply_text(f"✅ Auto-delete override set for '{menu_id}'.")
+
+    elif awaiting.startswith("menu_trans_text:"):
+        _, menu_id, code = awaiting.split(":", 2)
+        context.user_data.pop("awaiting", None)
+        menu = BOT_DATA["menus"][menu_id]
+        menu.setdefault("translations", {})
+        menu["translations"][code] = {"text": text, "buttons": None}
+        save_data()
+        await update.message.reply_text(f"✅ '{menu_id}' ka {LANG_NAMES.get(code, code)} translation save ho gaya.")
 
     elif awaiting == "global_autodelete":
         context.user_data.pop("awaiting", None)
@@ -1622,6 +1836,7 @@ def build_app() -> Application:
 
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
+    app.add_handler(CommandHandler("language", cmd_language))
     app.add_handler(CommandHandler("admin", cmd_admin))
     app.add_handler(CommandHandler("dbstatus", cmd_dbstatus))
     app.add_handler(CommandHandler("health", cmd_health))
@@ -1653,12 +1868,20 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(cb_adm_menu_rmimg, pattern="^adm_menu_rmimg:"))
     app.add_handler(CallbackQueryHandler(cb_adm_menu_autodel, pattern="^adm_menu_autodel:"))
     app.add_handler(CallbackQueryHandler(cb_adm_menu_btns, pattern="^adm_menu_btns:"))
+    app.add_handler(CallbackQueryHandler(cb_adm_menu_trans, pattern="^adm_menu_trans:"))
+    app.add_handler(CallbackQueryHandler(cb_adm_menu_trans_edit, pattern="^adm_menu_trans_edit:"))
+    app.add_handler(CallbackQueryHandler(cb_setlang, pattern="^setlang:"))
     app.add_handler(CallbackQueryHandler(cb_adm_btn_add, pattern="^adm_btn_add:"))
     app.add_handler(CallbackQueryHandler(cb_adm_btn_del, pattern="^adm_btn_del:"))
     app.add_handler(CallbackQueryHandler(cb_adm_btn_style, pattern="^adm_btn_style:"))
     app.add_handler(CallbackQueryHandler(cb_btn_type_pick, pattern="^btntype:"))
 
     app.add_handler(CallbackQueryHandler(cb_adm_settings, pattern="^adm_settings$"))
+    app.add_handler(CallbackQueryHandler(cb_adm_lang_manage, pattern="^adm_lang_manage$"))
+    app.add_handler(CallbackQueryHandler(cb_adm_lang_add, pattern="^adm_lang_add$"))
+    app.add_handler(CallbackQueryHandler(cb_adm_lang_add_do, pattern="^adm_lang_add_do:"))
+    app.add_handler(CallbackQueryHandler(cb_adm_lang_remove, pattern="^adm_lang_remove$"))
+    app.add_handler(CallbackQueryHandler(cb_adm_lang_remove_do, pattern="^adm_lang_remove_do:"))
     app.add_handler(CallbackQueryHandler(cb_adm_set_autodelete, pattern="^adm_set_autodelete$"))
     app.add_handler(CallbackQueryHandler(cb_adm_autoreply_list, pattern="^adm_autoreply_list$"))
     app.add_handler(CallbackQueryHandler(cb_adm_autoreply_add, pattern="^adm_autoreply_add$"))
