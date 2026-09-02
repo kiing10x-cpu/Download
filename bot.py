@@ -129,7 +129,7 @@ except ImportError:
         pass
 
 try:
-    from PIL import Image, ImageDraw, ImageFont
+    from PIL import Image, ImageDraw, ImageFont, ImageOps
 
     PIL_AVAILABLE = True
 except ImportError:
@@ -147,64 +147,155 @@ else:
         "nicer, fully local QR codes that don't depend on a third party."
     )
 
-UPI_QR_BRAND_COLOR = (0, 135, 90)  # UPI-style green
+UPI_QR_BRAND_COLOR = (0, 135, 90)  # UPI-style green (kept as a fallback tint)
+
+# Dark neon-card look (matches the requested reference design): near-black
+# card, purple -> cyan gradient border, white rounded panel holding the
+# actual black-on-white QR (max contrast = most reliably scannable), and a
+# circular center logo with a soft colored ring.
+QR_CARD_BG = (10, 10, 14)
+QR_GRADIENT_A = (147, 51, 234)   # purple
+QR_GRADIENT_B = (56, 189, 248)   # cyan
+QR_TEXT_LIGHT = (235, 235, 245)
+QR_TEXT_MUTED = (150, 150, 165)
+
+# Keep the logo comfortably inside the ~30% recovery budget of
+# ERROR_CORRECT_H so the code stays scannable even after we cover the
+# center with a photo. 20% of the QR's own width (not the outer card) is a
+# safe, well-tested ratio.
+QR_LOGO_RATIO = 0.20
 
 
-def generate_branded_qr(data: str, amount=None, caption: str = "Scan with any UPI app"):
-    """Build a rounded, branded QR code card (amount + caption baked into
-    the image) as an in-memory PNG. Returns None if qrcode/Pillow aren't
-    installed, so callers can fall back to the old remote-URL QR."""
+def _diagonal_gradient(size, c1, c2):
+    """A simple top-left -> bottom-right gradient image, built with row/col
+    interpolation (fast enough for a one-off card, no numpy dependency)."""
+    w, h = size
+    grad = Image.new("RGB", size)
+    max_t = (w - 1) + (h - 1) or 1
+    row_cache = {}
+    pixels = grad.load()
+    for y in range(h):
+        for x in range(w):
+            key = x + y
+            rgb = row_cache.get(key)
+            if rgb is None:
+                t = key / max_t
+                rgb = (
+                    int(c1[0] + (c2[0] - c1[0]) * t),
+                    int(c1[1] + (c2[1] - c1[1]) * t),
+                    int(c1[2] + (c2[2] - c1[2]) * t),
+                )
+                row_cache[key] = rgb
+            pixels[x, y] = rgb
+    return grad
+
+
+def _paste_center_logo(qr_img: "Image.Image", logo_bytes: bytes):
+    """Paste a circular avatar in the middle of the QR with a white buffer
+    ring underneath it, sized so the code is still reliably scannable."""
+    logo = Image.open(io.BytesIO(logo_bytes)).convert("RGBA")
+    logo_size = int(qr_img.width * QR_LOGO_RATIO)
+    logo = ImageOps.fit(logo, (logo_size, logo_size), Image.LANCZOS)
+
+    mask = Image.new("L", (logo_size, logo_size), 0)
+    ImageDraw.Draw(mask).ellipse((0, 0, logo_size, logo_size), fill=255)
+
+    # white buffer ring so no QR module directly under the logo's edge is
+    # left half-covered/ambiguous to a scanner
+    ring_size = int(logo_size * 1.22)
+    ring_mask = Image.new("L", (ring_size, ring_size), 0)
+    ImageDraw.Draw(ring_mask).ellipse((0, 0, ring_size, ring_size), fill=255)
+
+    qr_rgba = qr_img.convert("RGBA")
+    rx = (qr_rgba.width - ring_size) // 2
+    ry = (qr_rgba.height - ring_size) // 2
+    white_ring = Image.new("RGBA", (ring_size, ring_size), (255, 255, 255, 255))
+    qr_rgba.paste(white_ring, (rx, ry), ring_mask)
+
+    lx = (qr_rgba.width - logo_size) // 2
+    ly = (qr_rgba.height - logo_size) // 2
+    qr_rgba.paste(logo, (lx, ly), mask)
+    return qr_rgba.convert("RGB")
+
+
+def generate_branded_qr(data: str, amount=None, caption: str = "Scan with any UPI app", logo_bytes: bytes = None):
+    """Build the dark, gradient-bordered branded QR card (amount + caption
+    baked into the image), optionally with a circular logo (e.g. the paying
+    user's Telegram profile photo) in the center. Returns an in-memory PNG,
+    or None if qrcode/Pillow aren't installed so callers can fall back to
+    the old remote-URL QR."""
     if not (QRCODE_AVAILABLE and PIL_AVAILABLE):
         return None
     try:
+        # ERROR_CORRECT_H = up to ~30% of the code can be damaged/covered
+        # and it still scans — required here since the center gets covered
+        # by the logo. Plain black-on-white modules (not colored/rounded)
+        # keep contrast at its safest maximum for real-world UPI scanners.
         qr = qrcode.QRCode(
             error_correction=qrcode.constants.ERROR_CORRECT_H,
             box_size=10,
-            border=2,
+            border=3,
         )
         qr.add_data(data)
         qr.make(fit=True)
+        qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
 
-        if QRCODE_STYLED_AVAILABLE:
-            qr_img = qr.make_image(
-                image_factory=StyledPilImage,
-                module_drawer=RoundedModuleDrawer(),
-                color_mask=SolidFillColorMask(
-                    front_color=UPI_QR_BRAND_COLOR, back_color=(255, 255, 255)
-                ),
-            ).convert("RGB")
-        else:
-            qr_img = qr.make_image(fill_color=UPI_QR_BRAND_COLOR, back_color="white").convert("RGB")
+        if logo_bytes:
+            try:
+                qr_img = _paste_center_logo(qr_img, logo_bytes)
+            except Exception:
+                log.exception("Failed to paste center logo onto QR — continuing without it")
 
-        pad = 40
-        header_h = 50 if amount is not None else 0
+        pad = 36
+        panel_pad = 20  # white rounded panel margin around the raw QR
+        header_h = 56 if amount is not None else 0
         footer_h = 40
-        canvas_w = qr_img.width + pad * 2
-        canvas_h = qr_img.height + pad * 2 + header_h + footer_h
-        canvas = Image.new("RGB", (canvas_w, canvas_h), "white")
+        border_w = 6
+        radius = 40
+
+        panel_w = qr_img.width + panel_pad * 2
+        panel_h = qr_img.height + panel_pad * 2
+        canvas_w = panel_w + pad * 2
+        canvas_h = panel_h + pad * 2 + header_h + footer_h
+
+        canvas = Image.new("RGB", (canvas_w, canvas_h), QR_CARD_BG)
         draw = ImageDraw.Draw(canvas)
 
+        # gradient border (purple -> cyan), drawn as a stroke via a mask so
+        # it only affects the outline, not the whole card
+        border_mask = Image.new("L", (canvas_w, canvas_h), 0)
+        ImageDraw.Draw(border_mask).rounded_rectangle(
+            [0, 0, canvas_w - 1, canvas_h - 1], radius=radius, outline=255, width=border_w
+        )
+        gradient = _diagonal_gradient((canvas_w, canvas_h), QR_GRADIENT_A, QR_GRADIENT_B)
+        canvas.paste(gradient, (0, 0), border_mask)
+
         try:
-            font_big = ImageFont.truetype("DejaVuSans-Bold.ttf", 28)
+            font_big = ImageFont.truetype("DejaVuSans-Bold.ttf", 30)
             font_small = ImageFont.truetype("DejaVuSans.ttf", 16)
         except Exception:
             font_big = ImageFont.load_default()
             font_small = ImageFont.load_default()
 
-        y = pad // 2
+        y = pad // 2 + 6
         if amount is not None:
             amt_text = f"₹{amount}"
             w = draw.textlength(amt_text, font=font_big)
-            draw.text(((canvas_w - w) / 2, y), amt_text, fill=UPI_QR_BRAND_COLOR, font=font_big)
+            draw.text(((canvas_w - w) / 2, y), amt_text, fill=QR_TEXT_LIGHT, font=font_big)
             y += header_h
 
-        canvas.paste(qr_img, (pad, y))
-        y += qr_img.height + 12
+        # white rounded panel behind the QR — maximum contrast for scanning,
+        # matches the reference card's "white square in a dark frame" look
+        panel_x, panel_y = pad, y
+        draw.rounded_rectangle(
+            [panel_x, panel_y, panel_x + panel_w - 1, panel_y + panel_h - 1],
+            radius=24, fill=(255, 255, 255),
+        )
+        canvas.paste(qr_img, (panel_x + panel_pad, panel_y + panel_pad))
+        y = panel_y + panel_h + 14
 
         w = draw.textlength(caption, font=font_small)
-        draw.text(((canvas_w - w) / 2, y), caption, fill=(100, 100, 100), font=font_small)
-
-        draw.rectangle([0, 0, canvas_w - 1, canvas_h - 1], outline=UPI_QR_BRAND_COLOR, width=4)
+        draw.text(((canvas_w - w) / 2, y), caption, fill=QR_TEXT_MUTED, font=font_small)
 
         buf = io.BytesIO()
         canvas.save(buf, format="PNG")
@@ -213,6 +304,24 @@ def generate_branded_qr(data: str, amount=None, caption: str = "Scan with any UP
         return buf
     except Exception:
         log.exception("Local QR generation failed, falling back to remote QR service")
+        return None
+
+
+async def fetch_user_avatar_bytes(context: ContextTypes.DEFAULT_TYPE, user_id: int):
+    """Fetch the user's current Telegram profile photo (highest available
+    resolution) as raw bytes, for use as the QR's center logo. Returns None
+    if the user has no profile photo or it can't be fetched — callers must
+    treat that as "no logo" and continue, never as an error."""
+    try:
+        photos = await context.bot.get_user_profile_photos(user_id, limit=1)
+        if not photos or not photos.photos:
+            return None
+        file_id = photos.photos[0][-1].file_id  # last = largest size available
+        tg_file = await context.bot.get_file(file_id)
+        data = await tg_file.download_as_bytearray()
+        return bytes(data)
+    except Exception:
+        log.exception("Could not fetch Telegram avatar for user %s, QR will use no logo", user_id)
         return None
 
 
@@ -547,8 +656,11 @@ DEFAULT_DATA = {
         "send_as_document": False,    # v3 §8 — send reels as document instead of video
         "document_mode_threshold_mb": 45,  # auto-switch to document above this size
         "premium_plans": [],  # v4 — admin-defined plans: {id, name, days, price_inr, price_stars, enabled}
+        "detailed_join_alerts": True,  # new-user/group-start full details -> admin DMs + logger
+        "user_activity_dm": True,      # every reel-link a user sends -> owner DM (misuse monitoring)
     },
     "broadcast_log": [],
+    "activity_log": [],         # ring buffer: {time, user_id, name, username, chat_type, url}
     "restore_log": [],
     "sent_messages": {},        # #5 — chat_id (str) -> [message_id, ...] ring buffer, last 200
     "copyright_reports": [],    # PDF #3 — DMCA-style user reports
@@ -859,6 +971,90 @@ async def log_event(context: ContextTypes.DEFAULT_TYPE, text: str):
         await context.bot.send_message(chat_id=settings["logger_channel_id"], text=text)
     except Exception:
         log.exception("Failed to send to logger channel")
+
+
+async def dm_all_admins(context: ContextTypes.DEFAULT_TYPE, text: str, reply_markup=None):
+    """Send a message to every admin's private chat (owner + BOT_DATA['admins']).
+    One admin having blocked the bot / never opened a DM must never stop the
+    others from getting it, so each send is isolated."""
+    targets = set(BOT_DATA.get("admins", []))
+    if OWNER_ID:
+        targets.add(OWNER_ID)
+    for admin_id in targets:
+        try:
+            await context.bot.send_message(chat_id=admin_id, text=text, reply_markup=reply_markup)
+        except Exception:
+            log.warning("Could not DM admin %s (bot blocked / never started a DM)", admin_id)
+
+
+def build_join_details(update: Update, is_new: bool) -> str:
+    """Full detail card for a /start — new user OR bot started inside a
+    group — so admins get the complete picture in one glance."""
+    user = update.effective_user
+    chat = update.effective_chat
+    lines = [
+        "🆕 " + ("New User Started Bot" if is_new else "Bot Started In Group") + "",
+        "",
+        f"👤 Name: {user.full_name}",
+        f"🔗 Username: @{user.username}" if user.username else "🔗 Username: (none)",
+        f"🆔 User ID: {user.id}",
+        f"🌐 Language: {user.language_code or 'unknown'}",
+        f"⭐ Telegram Premium: {'Yes' if getattr(user, 'is_premium', False) else 'No'}",
+        f"💬 Chat type: {chat.type}",
+    ]
+    if chat.type in ("group", "supergroup"):
+        lines.append(f"👨‍👩‍👧 Group: {chat.title}")
+        lines.append(f"🆔 Group ID: {chat.id}")
+    lines.append(f"🕒 Time (UTC): {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}")
+    return "\n".join(lines)
+
+
+async def notify_admins_new_start(context: ContextTypes.DEFAULT_TYPE, update: Update, is_new: bool):
+    """New user starts the bot, OR the bot is (re-)started inside a group —
+    full details go to every admin's DM, and to the logger group if one is
+    configured, per spec."""
+    if not BOT_DATA["settings"].get("detailed_join_alerts", True):
+        return
+    is_group = update.effective_chat.type in ("group", "supergroup")
+    if not (is_new or is_group):
+        return
+    text = build_join_details(update, is_new)
+    await dm_all_admins(context, text)
+    await log_event(context, text)
+
+
+async def log_user_activity(context: ContextTypes.DEFAULT_TYPE, update: Update, url: str):
+    """Anti-misuse monitoring: record what a user pastes into the bot and
+    surface it live to the owner's DM (+ logger group), with a one-tap Ban
+    button — this is a check/monitoring tool only, not automatic action."""
+    user = update.effective_user
+    chat = update.effective_chat
+    entry = {
+        "time": datetime.utcnow().isoformat(),
+        "user_id": user.id,
+        "name": user.full_name,
+        "username": user.username,
+        "chat_type": chat.type,
+        "url": url,
+    }
+    buf = BOT_DATA.setdefault("activity_log", [])
+    buf.append(entry)
+    if len(buf) > 300:
+        del buf[: len(buf) - 300]
+    save_data()
+
+    if not BOT_DATA["settings"].get("user_activity_dm", True):
+        return
+    uname = f"@{user.username}" if user.username else "(no username)"
+    text = (
+        "🕵️ Live Activity\n\n"
+        f"👤 {user.full_name} {uname}\n"
+        f"🆔 {user.id}\n"
+        f"🕒 {entry['time'][11:19]} UTC\n"
+        f"🔗 {url}"
+    )
+    await dm_all_admins(context, text)
+    await log_event(context, text)
 
 
 def track_sent_message(chat_id: int, message_id: int):
@@ -1271,12 +1467,10 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     BOT_DATA["metrics"]["start_count"] = BOT_DATA["metrics"].get("start_count", 0) + 1
-    if is_new:
-        await log_event(
-            context,
-            f"👋 New user — {user_obj.id} (@{user_obj.username or 'no username'})",
-        )
     save_data()
+    # New user, or bot (re)started inside a group — full detail card to
+    # every admin's DM + the logger group (if configured).
+    await notify_admins_new_start(context, update, is_new)
 
     sent = await show_post_onboarding(context, update.effective_chat.id, str(user_obj.id))
     await track_and_refresh_panel(context, update.effective_chat.id, "start", sent)
@@ -1468,6 +1662,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     url = match.group(1)
+
+    # Anti-misuse monitoring: every reel link a user pastes is logged and,
+    # by default, forwarded live to admin DMs (+ logger group) with a
+    # one-tap ban button — this is a check-only feed, no automatic action.
+    if not is_admin(user_id):
+        await log_user_activity(context, update, url)
 
     if is_link_blocked(url) and not is_admin(user_id):
         await update.message.reply_text("🚫 " + to_small_caps("this link/domain has been blocked by admin."))
@@ -1847,7 +2047,22 @@ async def show_usage_screen(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"{bar} {pct}%"
     )
     kb_rows = []
-    if BOT_DATA["settings"].get("premium_enabled"):
+    # v4 — admin-added premium plans now list directly under Usage (not just
+    # buried behind a generic "upgrade" button), so a newly-added plan is
+    # visible to every user right away.
+    s = BOT_DATA["settings"]
+    plans = [p for p in s.get("premium_plans", []) if p.get("enabled")] if s.get("premium_enabled") else []
+    if plans:
+        text += "\n\n💎 " + to_small_caps("available plans") + "\n"
+        for p in plans:
+            price_bits = []
+            if p.get("price_inr"):
+                price_bits.append(f"₹{p['price_inr']}")
+            if p.get("price_stars"):
+                price_bits.append(f"{p['price_stars']}⭐")
+            text += f"• {p['name']} — {' / '.join(price_bits)} — {p.get('days', 30)}{to_small_caps('d')}\n"
+            kb_rows.append([styled_button(f"💎 {p['name']}", callback_data=f"gift_plan:{p['id']}", style="success")])
+    elif s.get("premium_enabled"):
         kb_rows.append([styled_button(to_small_caps("🚀 upgrade for more"), callback_data="gift_menu", style="success")])
     try:
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
@@ -1901,23 +2116,12 @@ async def show_developer_button(update: Update, context: ContextTypes.DEFAULT_TY
 # ----------------------------------------------------------------------------
 
 async def show_gift_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    kb_rows = []
-    s = BOT_DATA["settings"]
-    plans = [p for p in s.get("premium_plans", []) if p.get("enabled")] if s.get("premium_enabled") else []
-    if plans:
-        for p in plans:
-            price_bits = []
-            if p.get("price_inr"):
-                price_bits.append(f"₹{p['price_inr']}")
-            if p.get("price_stars"):
-                price_bits.append(f"{p['price_stars']}⭐")
-            label = f"💎 {p['name']} — {' / '.join(price_bits)} ({p.get('days', 30)}d)"
-            kb_rows.append([styled_button(label, callback_data=f"gift_plan:{p['id']}", style="success")])
-        kb_rows.append([styled_button("⭐ Send Stars (any amount)", callback_data="gift_stars")])
-    else:
-        kb_rows.append([styled_button("⭐ Send Stars", callback_data="gift_stars", style="success")])
+    """v4 — pure voluntary support/tip flow. This is separate from Premium
+    Plans (those live under Usage now) — this is just 'send a gift to
+    support the bot', any amount, no plan attached."""
+    kb_rows = [[styled_button("⭐ Send Stars", callback_data="gift_stars", style="success")]]
     if BOT_DATA["settings"].get("upi_id"):
-        kb_rows.append([styled_button("💳 Pay via UPI (custom amount)", callback_data="gift_upi", style="primary")])
+        kb_rows.append([styled_button("💳 Pay via UPI", callback_data="gift_upi", style="primary")])
     target = update.callback_query.message if update.callback_query else update.message
     await target.reply_text("🎁 " + to_small_caps("send a gift — pick a method:"), reply_markup=InlineKeyboardMarkup(kb_rows))
 
@@ -2036,15 +2240,29 @@ async def cmd_successful_payment(update: Update, context: ContextTypes.DEFAULT_T
     plan = find_premium_plan(plan_id) if plan_id else None
     if plan:
         days = plan.get("days", 30)
-        plan_label = f" ({plan['name']})"
+        grant_premium(uid, days)
+        text = (
+            "✅ " + to_small_caps("payment successful!") + "\n\n"
+            f"💎 {to_small_caps('plan')}: {plan['name']}\n"
+            f"⭐ {to_small_caps('paid')}: {sp.total_amount} {to_small_caps('stars')}\n"
+            f"⏳ {to_small_caps('premium unlocked for')} {days} {to_small_caps('days')}"
+        )
+        log_line = f"⭐ Plan purchased — {sp.total_amount} stars from {update.effective_user.id} ({plan['name']}), premium granted"
     else:
+        # v4 — this is a voluntary support gift, not a plan purchase, so the
+        # thank-you reads like a thank-you (not an invoice receipt), and it
+        # no longer mixes plan-shaped wording in.
         days = BOT_DATA["settings"].get("premium_days_per_star_gift", 30)
-        plan_label = ""
-    grant_premium(uid, days)
-    await update.message.reply_text(
-        f"✅ " + to_small_caps(f"thanks for the {sp.total_amount}⭐ payment! premium{plan_label} unlocked for {days} days.")
-    )
-    await log_event(context, f"⭐ Payment received — {sp.total_amount} stars from {update.effective_user.id}{plan_label}, premium granted")
+        grant_premium(uid, days)
+        text = (
+            "🎉 " + to_small_caps("thank you so much for the support!") + "\n\n"
+            f"💫 {to_small_caps('you sent')}: {sp.total_amount} ⭐\n"
+            f"🎁 {to_small_caps('as a small thank-you, premium has been added for')} {days} {to_small_caps('days')}\n\n"
+            + to_small_caps("it really means a lot — thank you! ❤️")
+        )
+        log_line = f"⭐ Gift received — {sp.total_amount} stars from {update.effective_user.id}, premium granted"
+    await update.message.reply_text(text)
+    await log_event(context, log_line)
 
 
 async def cb_gift_upi(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2070,10 +2288,15 @@ async def start_upi_order(update: Update, context: ContextTypes.DEFAULT_TYPE, am
     save_data()
     upi_uri = f"upi://pay?pa={upi_id}&am={amount}&cu=INR&tn=Gift%20Order%20{oid}"
     # BUGFIX/UPGRADE — was a plain black-square QR from a third-party URL
-    # (api.qrserver.com). Now generated locally: rounded modules, on-brand
-    # color, amount + caption baked right into the image. Falls back to the
-    # old remote URL automatically if qrcode/Pillow aren't installed.
-    qr_photo = generate_branded_qr(upi_uri, amount=amount, caption=to_small_caps("scan with any upi app"))
+    # (api.qrserver.com). Now generated locally: dark gradient-bordered
+    # card, fixed amount + caption baked in, and the paying user's own
+    # Telegram profile photo as the center logo. Falls back to the old
+    # remote URL automatically if qrcode/Pillow aren't installed.
+    avatar_bytes = await fetch_user_avatar_bytes(context, update.effective_user.id)
+    qr_photo = generate_branded_qr(
+        upi_uri, amount=amount, caption=to_small_caps("scan with any upi app"),
+        logo_bytes=avatar_bytes,
+    )
     if qr_photo is None:
         qr_photo = f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={quote(upi_uri)}"
     kb = InlineKeyboardMarkup([[styled_button("✅ I've Paid", callback_data=f"gift_upi_paid:{oid}", style="success")]])
@@ -2100,11 +2323,30 @@ async def upi_countdown_job(context: ContextTypes.DEFAULT_TYPE):
     if remaining <= 0:
         order["status"] = "expired"
         save_data()
+        # Auto-delete the QR photo from the chat on expiry (10 min), rather
+        # than leaving a dead/expired QR sitting there. A small follow-up
+        # notice replaces it so the user still has a way to retry.
+        deleted = False
         try:
-            kb = InlineKeyboardMarkup([[styled_button("🔁 Generate New QR", callback_data="gift_upi", style="primary")]])
-            await context.bot.edit_message_caption(chat_id=chat_id, message_id=message_id, caption="❌ QR expired, generate new one", reply_markup=kb)
+            await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+            deleted = True
         except Exception:
-            pass
+            log.exception("Could not delete expired QR message %s/%s, falling back to caption edit", chat_id, message_id)
+        kb = InlineKeyboardMarkup([[styled_button("🔁 Generate New QR", callback_data="gift_upi", style="primary")]])
+        if deleted:
+            try:
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text="❌ " + to_small_caps("qr expired and was removed. generate a new one:"),
+                    reply_markup=kb,
+                )
+            except Exception:
+                pass
+        else:
+            try:
+                await context.bot.edit_message_caption(chat_id=chat_id, message_id=message_id, caption="❌ QR expired, generate new one", reply_markup=kb)
+            except Exception:
+                pass
         job.schedule_removal()
         return
     mm, ss = remaining // 60, remaining % 60
@@ -2132,6 +2374,8 @@ async def cb_gift_upi_paid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_data()
     await query.message.reply_text("✅ " + to_small_caps("marked as paid — an admin will verify shortly."))
     targets = BOT_DATA.get("admins", [])
+    plan = find_premium_plan(order.get("plan_id")) if order.get("plan_id") else None
+    kind = f"Plan purchase ({plan['name']})" if plan else "Support gift"
     admin_kb = InlineKeyboardMarkup([[
         styled_button("✅ Confirm & Upgrade", callback_data=f"gift_upi_confirm:{oid}", style="success"),
     ]])
@@ -2139,7 +2383,7 @@ async def cb_gift_upi_paid(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             await context.bot.send_message(
                 target,
-                f"💳 UPI order #{oid} — ₹{order['amount']} — user {order['user_id']} claims paid.",
+                f"💳 UPI order #{oid} — {kind} — ₹{order['amount']} — user {order['user_id']} claims paid.",
                 reply_markup=admin_kb,
             )
         except Exception:
@@ -2162,20 +2406,31 @@ async def cb_gift_upi_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE
     save_data()
     uid = str(order["user_id"])
     # v4 — an order tied to a specific admin-defined plan grants THAT plan's
-    # day count; a generic/free-amount UPI gift keeps the old flat setting.
+    # day count and reads like a purchase receipt; a generic/free-amount
+    # UPI gift is a voluntary support tip, so it gets a proper thank-you
+    # instead of plan-shaped wording.
     plan = find_premium_plan(order.get("plan_id")) if order.get("plan_id") else None
     if plan:
         days = plan.get("days", 30)
-        plan_label = f" ({plan['name']})"
+        user_text = (
+            "✅ " + to_small_caps("payment confirmed!") + "\n\n"
+            f"💎 {to_small_caps('plan')}: {plan['name']}\n"
+            f"💳 {to_small_caps('paid')}: ₹{order['amount']}\n"
+            f"⏳ {to_small_caps('premium unlocked for')} {days} {to_small_caps('days')}"
+        )
+        log_line = f"💳 UPI order #{oid} confirmed by admin {update.effective_user.id} ({plan['name']}), premium granted"
     else:
         days = BOT_DATA["settings"].get("premium_days_per_upi_gift", 30)
-        plan_label = ""
+        user_text = (
+            "🎉 " + to_small_caps("thank you so much for the support!") + "\n\n"
+            f"💫 {to_small_caps('you sent')}: ₹{order['amount']}\n"
+            f"🎁 {to_small_caps('as a small thank-you, premium has been added for')} {days} {to_small_caps('days')}\n\n"
+            + to_small_caps("it really means a lot — thank you! ❤️")
+        )
+        log_line = f"💳 UPI order #{oid} confirmed by admin {update.effective_user.id}, premium granted"
     grant_premium(uid, days)
     try:
-        await context.bot.send_message(
-            order["user_id"],
-            "✅ " + to_small_caps(f"payment confirmed! premium{plan_label} unlocked for {days} days."),
-        )
+        await context.bot.send_message(order["user_id"], user_text)
     except Exception:
         pass
     try:
@@ -2183,7 +2438,7 @@ async def cb_gift_upi_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.message.reply_text(f"✅ Order #{oid} confirmed, user upgraded.")
     except Exception:
         pass
-    await log_event(context, f"💳 UPI order #{oid} confirmed by admin {update.effective_user.id}{plan_label}, premium granted")
+    await log_event(context, log_line)
 
 
 # ----------------------------------------------------------------------------
@@ -2371,6 +2626,7 @@ def admin_panel_keyboard():
              styled_button("🛑 Danger Zone", callback_data="adm_danger")],
             [styled_button("📋 Activity Log", callback_data="adm_activity"),
              styled_button("🧪 Self-Test", callback_data="adm_selftest")],
+            [styled_button("🕵️ Live User Feed", callback_data="adm_live")],
         ]
     )
 
@@ -2443,6 +2699,61 @@ async def cb_adm_selftest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     results.append(("Download dir", "✅ writable" if os.access(DOWNLOAD_DIR, os.W_OK) else "❌ not writable"))
     body = "🧪 " + to_small_caps("self-test results") + "\n\n" + "\n".join(f"{k}: {v}" for k, v in results)
     await query.edit_message_text(body, reply_markup=InlineKeyboardMarkup([back_row("adm_home")]))
+
+
+# ---- Live User Feed (anti-misuse monitoring) ---------------------------------
+
+async def _render_adm_live(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    col = get_mongo_collection()
+    backend = "MongoDB ✅ (synced)" if col is not None else "Local (in-memory/JSON, no Mongo connected)"
+    entries = BOT_DATA.get("activity_log", [])[-15:][::-1]
+    lines = [f"🕵️ Live User Feed\n🗄 Backend: {backend}\n👥 Total tracked users: {len(BOT_DATA['users'])}\n"]
+    if not entries:
+        lines.append("Abhi tak koi activity record nahi hui.")
+    else:
+        for e in entries:
+            uname = f"@{e['username']}" if e.get("username") else "(no username)"
+            lines.append(f"• {e.get('time', '?')[11:19]} — {e.get('name')} {uname} [{e.get('user_id')}]\n  ↳ {e.get('url')}")
+    body = "\n".join(lines)
+    s = BOT_DATA["settings"]
+    kb = InlineKeyboardMarkup(
+        [
+            [styled_button("🚫 Ban / Unban User (by ID)", callback_data="adm_quickban", style="danger")],
+            [styled_button(
+                f"📡 Feed To Admin DM: {'ON' if s.get('user_activity_dm', True) else 'OFF'}",
+                callback_data="stgl:user_activity_dm:adm_live",
+            )],
+            [styled_button(
+                f"🆕 Detailed Join Alerts: {'ON' if s.get('detailed_join_alerts', True) else 'OFF'}",
+                callback_data="stgl:detailed_join_alerts:adm_live",
+            )],
+            back_row("adm_home"),
+        ]
+    )
+    await query.edit_message_text(body, reply_markup=kb)
+
+
+async def cb_adm_live(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if not is_admin(update.effective_user.id):
+        return
+    await _render_adm_live(update, context)
+
+
+async def cb_adm_quickban(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Ban/Unban a user by ID, entered from the admin panel — this is the
+    only place a ban actually happens; the Live Feed is view-only."""
+    query = update.callback_query
+    await query.answer()
+    if not is_admin(update.effective_user.id):
+        return
+    context.user_data["awaiting"] = "adm_ban_unban_userid"
+    await query.message.reply_text(
+        "🚫 User ki numeric ID bhejo — agar already banned hai to unban ho jayega, "
+        "warna ban ho jayega."
+    )
 
 
 # ---- #3 — generic back-stack navigation --------------------------------------
@@ -2520,12 +2831,28 @@ async def _render_adm_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = InlineKeyboardMarkup(
         [
             [styled_button("📋 List Users (last 20)", callback_data="adm_users_list")],
+            [styled_button("👨‍👩‍👧 List Groups", callback_data="adm_groups_list")],
             [styled_button("✉️ Message a User", callback_data="adm_users_msg")],
             back_row(),
             home_row(),
         ]
     )
     await query.edit_message_text("👥 Users & Groups", reply_markup=kb)
+
+
+async def cb_adm_groups_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    groups = list(BOT_DATA["groups"].items())
+    if not groups:
+        text = "Bot abhi kisi group mein nahi hai."
+    else:
+        lines = [f"👨‍👩‍👧 Groups ({len(groups)})\n"]
+        for gid, info in groups:
+            lines.append(f"• {info.get('title', '(no title)')} — {gid}")
+        text = "\n".join(lines)
+    kb = InlineKeyboardMarkup([[styled_button("🔙 Back", callback_data="adm_users")]])
+    await query.edit_message_text(text, reply_markup=kb)
 
 
 async def cb_adm_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3876,6 +4203,23 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
                 + ("" if refreshed else "\n(reopen the premium panel to confirm)")
             )
 
+    elif awaiting == "adm_ban_unban_userid":
+        context.user_data.pop("awaiting", None)
+        if not text.isdigit():
+            await update.message.reply_text("Valid numeric user ID bhejo.")
+            return
+        uid_int = int(text)
+        if uid_int in BOT_DATA["blocked"]:
+            BOT_DATA["blocked"].remove(uid_int)
+            save_data()
+            await update.message.reply_text(f"✅ User {uid_int} unbanned.")
+            await log_event(context, f"✅ Admin unbanned user {uid_int} (via panel)")
+        else:
+            BOT_DATA["blocked"].append(uid_int)
+            save_data()
+            await update.message.reply_text(f"🚫 User {uid_int} banned.")
+            await log_event(context, f"🚫 Admin banned user {uid_int} (via panel)")
+
     elif awaiting == "message_user_id":
         if not text.isdigit():
             await update.message.reply_text("Valid numeric user ID bhejo.")
@@ -4276,6 +4620,7 @@ SCREEN_RENDERERS.update(
         "adm_home": _render_adm_home,
         "adm_stats": _render_adm_stats,
         "adm_users": _render_adm_users,
+        "adm_live": _render_adm_live,
         "adm_broadcast": _render_adm_broadcast,
         "adm_menu_ui": _render_adm_menu_ui,
         "adm_settings": _render_adm_settings,
@@ -4355,7 +4700,10 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_stats")(cb_adm_stats), pattern="^adm_stats$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_users")(cb_adm_users), pattern="^adm_users$"))
     app.add_handler(CallbackQueryHandler(cb_adm_users_list, pattern="^adm_users_list$"))
+    app.add_handler(CallbackQueryHandler(cb_adm_groups_list, pattern="^adm_groups_list$"))
     app.add_handler(CallbackQueryHandler(cb_adm_users_msg, pattern="^adm_users_msg$"))
+    app.add_handler(CallbackQueryHandler(nav_tracked("adm_live")(cb_adm_live), pattern="^adm_live$"))
+    app.add_handler(CallbackQueryHandler(cb_adm_quickban, pattern="^adm_quickban$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_broadcast")(cb_adm_broadcast), pattern="^adm_broadcast$"))
     app.add_handler(CallbackQueryHandler(cb_adm_bc_new, pattern="^adm_bc_new$"))
     app.add_handler(CallbackQueryHandler(cb_adm_bc_log, pattern="^adm_bc_log$"))
