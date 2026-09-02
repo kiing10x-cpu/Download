@@ -8,6 +8,8 @@ intentionally skipped for scope.
 
 Setup:
   pip install -r requirements.txt
+  pip install "qrcode[pil]"   # optional but recommended — local branded
+                               # payment QR codes instead of a remote URL
   export BOT_TOKEN="123:ABC"
   export OWNER_ID="123456789"
   # optional:
@@ -17,6 +19,7 @@ Setup:
 """
 
 import os
+import io
 import re
 import json
 import csv
@@ -99,6 +102,120 @@ else:
         "`pip install imageio-ffmpeg` to always get the absolute best quality."
     )
 
+# ----------------------------------------------------------------------------
+# Local branded QR generation (replaces the old api.qrserver.com URL, which
+# gave a plain black-on-white square and depended on a third-party service
+# being reachable, separately from the bot itself). Same graceful-fallback
+# pattern as ffmpeg above: works best with `qrcode[pil]` installed, degrades
+# to a plain local QR if only `qrcode` is present, and falls all the way
+# back to the old remote-URL QR only if `qrcode` isn't installed at all.
+# ----------------------------------------------------------------------------
+QRCODE_AVAILABLE = False
+QRCODE_STYLED_AVAILABLE = False
+try:
+    import qrcode
+    from qrcode.image.styledpil import StyledPilImage
+    from qrcode.image.styles.moduledrawers import RoundedModuleDrawer
+    from qrcode.image.styles.colormasks import SolidFillColorMask
+
+    QRCODE_AVAILABLE = True
+    QRCODE_STYLED_AVAILABLE = True
+except ImportError:
+    try:
+        import qrcode
+
+        QRCODE_AVAILABLE = True
+    except ImportError:
+        pass
+
+try:
+    from PIL import Image, ImageDraw, ImageFont
+
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
+
+if QRCODE_AVAILABLE and PIL_AVAILABLE:
+    log.info(
+        "QR generation: local %s QR enabled.",
+        "styled (rounded + branded)" if QRCODE_STYLED_AVAILABLE else "plain",
+    )
+else:
+    log.warning(
+        "qrcode/Pillow not found — payment QR codes will fall back to the "
+        "remote api.qrserver.com URL. Run `pip install \"qrcode[pil]\"` for "
+        "nicer, fully local QR codes that don't depend on a third party."
+    )
+
+UPI_QR_BRAND_COLOR = (0, 135, 90)  # UPI-style green
+
+
+def generate_branded_qr(data: str, amount=None, caption: str = "Scan with any UPI app"):
+    """Build a rounded, branded QR code card (amount + caption baked into
+    the image) as an in-memory PNG. Returns None if qrcode/Pillow aren't
+    installed, so callers can fall back to the old remote-URL QR."""
+    if not (QRCODE_AVAILABLE and PIL_AVAILABLE):
+        return None
+    try:
+        qr = qrcode.QRCode(
+            error_correction=qrcode.constants.ERROR_CORRECT_H,
+            box_size=10,
+            border=2,
+        )
+        qr.add_data(data)
+        qr.make(fit=True)
+
+        if QRCODE_STYLED_AVAILABLE:
+            qr_img = qr.make_image(
+                image_factory=StyledPilImage,
+                module_drawer=RoundedModuleDrawer(),
+                color_mask=SolidFillColorMask(
+                    front_color=UPI_QR_BRAND_COLOR, back_color=(255, 255, 255)
+                ),
+            ).convert("RGB")
+        else:
+            qr_img = qr.make_image(fill_color=UPI_QR_BRAND_COLOR, back_color="white").convert("RGB")
+
+        pad = 40
+        header_h = 50 if amount is not None else 0
+        footer_h = 40
+        canvas_w = qr_img.width + pad * 2
+        canvas_h = qr_img.height + pad * 2 + header_h + footer_h
+        canvas = Image.new("RGB", (canvas_w, canvas_h), "white")
+        draw = ImageDraw.Draw(canvas)
+
+        try:
+            font_big = ImageFont.truetype("DejaVuSans-Bold.ttf", 28)
+            font_small = ImageFont.truetype("DejaVuSans.ttf", 16)
+        except Exception:
+            font_big = ImageFont.load_default()
+            font_small = ImageFont.load_default()
+
+        y = pad // 2
+        if amount is not None:
+            amt_text = f"₹{amount}"
+            w = draw.textlength(amt_text, font=font_big)
+            draw.text(((canvas_w - w) / 2, y), amt_text, fill=UPI_QR_BRAND_COLOR, font=font_big)
+            y += header_h
+
+        canvas.paste(qr_img, (pad, y))
+        y += qr_img.height + 12
+
+        w = draw.textlength(caption, font=font_small)
+        draw.text(((canvas_w - w) / 2, y), caption, fill=(100, 100, 100), font=font_small)
+
+        draw.rectangle([0, 0, canvas_w - 1, canvas_h - 1], outline=UPI_QR_BRAND_COLOR, width=4)
+
+        buf = io.BytesIO()
+        canvas.save(buf, format="PNG")
+        buf.seek(0)
+        buf.name = "payment_qr.png"
+        return buf
+    except Exception:
+        log.exception("Local QR generation failed, falling back to remote QR service")
+        return None
+
+
 START_TIME = time.time()
 
 INSTAGRAM_URL_RE = re.compile(
@@ -145,13 +262,18 @@ STR = {
     "ticket_closed": lambda tid: "🔒 " + to_small_caps(f"ticket #{tid} closed. need help again? tap") + " 🎧 " + to_small_caps("support"),
 }
 
-RKB_DOWNLOAD = "⬇️ Download reel"
-RKB_USAGE = "📊 My usage"
-RKB_GIFT = "🎁 Send a gift"
-RKB_LANGUAGE = "🌐 Language"
-RKB_DEVELOPER = "👨‍💻 Developer"
-RKB_HOWTO = "📘 How to use"
-RKB_SUPPORT = "🎧 Support"
+# Wrapped in to_small_caps() right here (not just at render time) so the
+# `if text == RKB_DOWNLOAD:` string-matching in handle_text() still lines up
+# with what the reply-keyboard button actually sends back — to_small_caps()
+# is idempotent (re-applying it to already-styled text is a safe no-op), so
+# this can't get out of sync with styled_kb_button()'s own wrapping below.
+RKB_DOWNLOAD = to_small_caps("⬇️ Download reel")
+RKB_USAGE = to_small_caps("📊 My usage")
+RKB_GIFT = to_small_caps("🎁 Send a gift")
+RKB_LANGUAGE = to_small_caps("🌐 Language")
+RKB_DEVELOPER = to_small_caps("👨‍💻 Developer")
+RKB_HOWTO = to_small_caps("📘 How to use")
+RKB_SUPPORT = to_small_caps("🎧 Support")
 
 
 def main_reply_keyboard() -> ReplyKeyboardMarkup:
@@ -244,6 +366,11 @@ except TypeError:
 
 
 def styled_button(text, callback_data=None, url=None, style=None):
+    """Every inline button in the bot goes through here (dynamic menu
+    buttons, admin panel, gift/ticket/force-join flows, etc.) — so applying
+    small-caps once, centrally, gives every button in the bot the small-caps
+    look without having to touch 100+ individual call sites. Safe to call
+    on text that's already small-caps (to_small_caps is idempotent)."""
     kwargs = {}
     if callback_data is not None:
         kwargs["callback_data"] = callback_data
@@ -251,10 +378,13 @@ def styled_button(text, callback_data=None, url=None, style=None):
         kwargs["url"] = url
     if style and SUPPORTS_BUTTON_STYLE:
         kwargs["style"] = style
-    return InlineKeyboardButton(text, **kwargs)
+    return InlineKeyboardButton(to_small_caps(str(text)), **kwargs)
 
 
 def styled_kb_button(text, style=None):
+    """Same small-caps treatment as styled_button(), for the persistent
+    bottom reply-keyboard buttons."""
+    text = to_small_caps(str(text))
     if style and SUPPORTS_KB_BUTTON_STYLE:
         return KeyboardButton(text, style=style)
     return KeyboardButton(text)
@@ -638,15 +768,58 @@ async def cm_track_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def is_force_join_ok(context: ContextTypes.DEFAULT_TYPE, user_id: int) -> bool:
-    """v3 §7 — if admin set a force-join channel, block non-members."""
+    """v3 §7 — if admin set a force-join channel, block non-members.
+
+    BUGFIX — this used to swallow EVERY exception and silently fail OPEN
+    (treat the user as verified) with zero logging anywhere. In practice
+    that meant a bare username typed without '@', or the bot simply not
+    being an admin in that channel, made force-join look "set" in the
+    panel while never actually blocking a single person — with no way to
+    tell why. We still fail open on error (a broken force-join shouldn't
+    brick the whole bot for every user), but now the real reason is logged
+    to the Activity Log so it's actually diagnosable."""
     channel = BOT_DATA["settings"].get("force_join_channel")
     if not channel or is_admin(user_id):
         return True
     try:
         member = await context.bot.get_chat_member(chat_id=channel, user_id=user_id)
         return member.status not in ("left", "kicked")
-    except Exception:
+    except Exception as e:
+        log.warning("Force-join check failed (channel=%s, user=%s): %s", channel, user_id, e)
+        entries = BOT_DATA.setdefault("error_log", [])
+        entries.append({
+            "time": datetime.utcnow().isoformat(),
+            "error": f"force_join check failed (channel={channel}): {e}",
+        })
+        if len(entries) > 200:
+            del entries[: len(entries) - 200]
         return True  # fail-open so a misconfigured channel doesn't brick the bot
+
+
+async def resolve_force_join_link(context: ContextTypes.DEFAULT_TYPE, channel) -> str | None:
+    """BUGFIX — build a link that actually opens. Private channels are set
+    by numeric ID (-100...), which has NO public https://t.me/<id> page —
+    the old code built exactly that broken link, so the '📢 Join Channel'
+    button led nowhere for any admin who configured force-join with a
+    numeric ID (the documented, suggested way to do it for private
+    channels). Now we resolve a real invite link via the Bot API."""
+    if not channel:
+        return None
+    ch = str(channel)
+    if ch.startswith("http"):
+        return ch
+    if ch.lstrip("-").isdigit():
+        try:
+            chat = await context.bot.get_chat(int(ch))
+            if chat.username:
+                return f"https://t.me/{chat.username}"
+            if getattr(chat, "invite_link", None):
+                return chat.invite_link
+            return await context.bot.export_chat_invite_link(int(ch))
+        except Exception as e:
+            log.warning("Force-join: could not resolve invite link for %s: %s", ch, e)
+            return None
+    return f"https://t.me/{ch.lstrip('@')}"
 
 
 def is_link_blocked(url: str) -> bool:
@@ -1243,14 +1416,17 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not await is_force_join_ok(context, user_id):
         channel = BOT_DATA["settings"].get("force_join_channel")
-        ch_link = channel if str(channel).startswith("http") else f"https://t.me/{str(channel).lstrip('@')}"
-        kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton(to_small_caps("📢 join channel"), url=ch_link)],
-            [styled_button(to_small_caps("✅ i've joined"), callback_data="check_force_join", style="success")],
-        ])
-        await update.message.reply_text(
-            "🔒 " + to_small_caps("please join our channel first to use this bot."), reply_markup=kb
-        )
+        # BUGFIX — numeric channel IDs used to build a dead https://t.me/-100...
+        # link; resolve a real, clickable invite link instead.
+        ch_link = await resolve_force_join_link(context, channel)
+        kb_rows = []
+        if ch_link:
+            kb_rows.append([InlineKeyboardButton(to_small_caps("📢 join channel"), url=ch_link)])
+        kb_rows.append([styled_button(to_small_caps("✅ i've joined"), callback_data="check_force_join", style="success")])
+        text = "🔒 " + to_small_caps("please join our channel first to use this bot.")
+        if not ch_link:
+            text += "\n⚠️ " + to_small_caps("couldn't get a join link — please contact an admin.")
+        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(kb_rows))
         return
 
     url = match.group(1)
@@ -1419,11 +1595,22 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:  # noqa: BLE001
         anim_task.cancel()
         log.exception("Download failed")
-        await status_msg.edit_text(
-            "❌ " + to_small_caps("download failed. the link may be private, deleted, or instagram rate-limited us.")
-            + f"\n\n<code>{e}</code>",
-            parse_mode="HTML",
-        )
+        # BUGFIX — `e` was interpolated into an HTML-parsed message unescaped.
+        # Any "<" ">" "&" in a yt-dlp error (common in URLs) broke Telegram's
+        # HTML parser, edit_text raised, and the user was left staring at a
+        # frozen "processing..." message forever with no visible error.
+        import html as _html
+        safe_err = _html.escape(str(e))[:500]
+        try:
+            await status_msg.edit_text(
+                "❌ " + to_small_caps("download failed. the link may be private, deleted, or instagram rate-limited us.")
+                + f"\n\n<code>{safe_err}</code>",
+                parse_mode="HTML",
+            )
+        except Exception:
+            await status_msg.edit_text(
+                "❌ " + to_small_caps("download failed. the link may be private, deleted, or instagram rate-limited us.")
+            )
     finally:
         if file_path and os.path.exists(file_path):
             try:
@@ -1763,10 +1950,16 @@ async def start_upi_order(update: Update, context: ContextTypes.DEFAULT_TYPE, am
     BOT_DATA["gift_orders"][oid] = order
     save_data()
     upi_uri = f"upi://pay?pa={upi_id}&am={amount}&cu=INR&tn=Gift%20Order%20{oid}"
-    qr_url = f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={quote(upi_uri)}"
+    # BUGFIX/UPGRADE — was a plain black-square QR from a third-party URL
+    # (api.qrserver.com). Now generated locally: rounded modules, on-brand
+    # color, amount + caption baked right into the image. Falls back to the
+    # old remote URL automatically if qrcode/Pillow aren't installed.
+    qr_photo = generate_branded_qr(upi_uri, amount=amount, caption=to_small_caps("scan with any upi app"))
+    if qr_photo is None:
+        qr_photo = f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={quote(upi_uri)}"
     kb = InlineKeyboardMarkup([[styled_button("✅ I've Paid", callback_data=f"gift_upi_paid:{oid}", style="success")]])
     msg = await context.bot.send_photo(
-        chat_id=update.effective_chat.id, photo=qr_url,
+        chat_id=update.effective_chat.id, photo=qr_photo,
         caption=f"💳 ₹{amount} — {to_small_caps('scan to pay via upi')}\n⏳ expires in 10:00",
         reply_markup=kb,
     )
@@ -2037,20 +2230,20 @@ async def cb_adm_block_domain(update: Update, context: ContextTypes.DEFAULT_TYPE
 def admin_panel_keyboard():
     return InlineKeyboardMarkup(
         [
-            [styled_button("💎 Premium Plans", callback_data="adm_premium", style="primary"),
-             styled_button("💳 UPI Settings", callback_data="adm_upi", style="primary")],
-            [styled_button("👨‍💻 Developer Settings", callback_data="adm_devsettings", style="primary"),
-             styled_button("🎧 Support Settings", callback_data="adm_support_settings", style="primary")],
-            [styled_button("🎫 Tickets", callback_data="adm_tickets", style="success"),
-             styled_button("📊 Bot Stats", callback_data="adm_stats", style="success")],
-            [styled_button("🌐 Language Settings", callback_data="adm_lang_manage", style="primary"),
-             styled_button("📢 Broadcast", callback_data="adm_broadcast", style="primary")],
-            [styled_button("👥 Users & Groups", callback_data="adm_users", style="primary"),
-             styled_button("🎨 Menu & UI", callback_data="adm_menu_ui", style="primary")],
-            [styled_button("⚙️ Settings & Admins", callback_data="adm_settings", style="primary"),
-             styled_button("🛑 Danger Zone", callback_data="adm_danger", style="danger")],
-            [styled_button("📋 Activity Log", callback_data="adm_activity", style="success"),
-             styled_button("🧪 Self-Test", callback_data="adm_selftest", style="success")],
+            [styled_button("💎 Premium Plans", callback_data="adm_premium"),
+             styled_button("💳 UPI Settings", callback_data="adm_upi")],
+            [styled_button("👨‍💻 Developer Settings", callback_data="adm_devsettings"),
+             styled_button("🎧 Support Settings", callback_data="adm_support_settings")],
+            [styled_button("🎫 Tickets", callback_data="adm_tickets"),
+             styled_button("📊 Bot Stats", callback_data="adm_stats")],
+            [styled_button("🌐 Language Settings", callback_data="adm_lang_manage"),
+             styled_button("📢 Broadcast", callback_data="adm_broadcast")],
+            [styled_button("👥 Users & Groups", callback_data="adm_users"),
+             styled_button("🎨 Menu & UI", callback_data="adm_menu_ui")],
+            [styled_button("⚙️ Settings & Admins", callback_data="adm_settings"),
+             styled_button("🛑 Danger Zone", callback_data="adm_danger")],
+            [styled_button("📋 Activity Log", callback_data="adm_activity"),
+             styled_button("🧪 Self-Test", callback_data="adm_selftest")],
         ]
     )
 
@@ -2243,11 +2436,10 @@ async def _render_adm_broadcast(update: Update, context: ContextTypes.DEFAULT_TY
     protect = BOT_DATA["settings"].get("protect_broadcasts", True)
     kb = InlineKeyboardMarkup(
         [
-            [styled_button("📢 New Broadcast", callback_data="adm_bc_new", style="primary")],
+            [styled_button("📢 New Broadcast", callback_data="adm_bc_new")],
             [styled_button(
                 f"🔐 Forward-Lock: {'ON' if protect else 'OFF'}",
                 callback_data="stgl:protect_broadcasts:adm_broadcast",
-                style="success" if protect else "danger",
             )],
             [styled_button("📜 Broadcast Log", callback_data="adm_bc_log")],
             back_row(),
@@ -2453,9 +2645,9 @@ async def cb_adm_menu_btns(update: Update, context: ContextTypes.DEFAULT_TYPE):
         rows.append([
             styled_button(f"{i}: {b['label']}", callback_data=f"noop"),
             styled_button("🅰️", callback_data=f"adm_btn_style:{menu_id}:{i}"),
-            styled_button("❌", callback_data=f"adm_btn_del:{menu_id}:{i}", style="danger"),
+            styled_button("❌", callback_data=f"adm_btn_del:{menu_id}:{i}"),
         ])
-    rows.append([styled_button("➕ Add Button", callback_data=f"adm_btn_add:{menu_id}", style="success")])
+    rows.append([styled_button("➕ Add Button", callback_data=f"adm_btn_add:{menu_id}")])
     rows.append([styled_button("🔙 Back", callback_data=f"adm_menu_edit:{menu_id}")])
     await query.edit_message_text(f"🔘 Buttons for {menu_id}", reply_markup=InlineKeyboardMarkup(rows))
 
@@ -2493,9 +2685,9 @@ async def cb_adm_menu_btns_by_id(update, context, menu_id):
         rows.append([
             styled_button(f"{i}: {b['label']}", callback_data="noop"),
             styled_button("🅰️", callback_data=f"adm_btn_style:{menu_id}:{i}"),
-            styled_button("❌", callback_data=f"adm_btn_del:{menu_id}:{i}", style="danger"),
+            styled_button("❌", callback_data=f"adm_btn_del:{menu_id}:{i}"),
         ])
-    rows.append([styled_button("➕ Add Button", callback_data=f"adm_btn_add:{menu_id}", style="success")])
+    rows.append([styled_button("➕ Add Button", callback_data=f"adm_btn_add:{menu_id}")])
     rows.append([styled_button("🔙 Back", callback_data=f"adm_menu_edit:{menu_id}")])
     await update.callback_query.edit_message_text(f"🔘 Buttons for {menu_id}", reply_markup=InlineKeyboardMarkup(rows))
 
@@ -2539,13 +2731,11 @@ async def _render_adm_settings(update: Update, context: ContextTypes.DEFAULT_TYP
             [styled_button(
                 f"🔒 Maintenance: {'ON' if s.get('maintenance') else 'OFF'}",
                 callback_data="stgl:maintenance:adm_settings",
-                style="danger" if s.get("maintenance") else "success",
             )],
             [styled_button(f"⏱ Global Auto-Delete: {s.get('global_auto_delete_seconds', 0)}s", callback_data="adm_set_autodelete")],
             [styled_button(
                 f"🅰️ Small-Caps Buttons: {'ON' if s.get('small_caps_buttons_default') else 'OFF'}",
                 callback_data="stgl:small_caps_buttons_default:adm_settings",
-                style="success" if s.get("small_caps_buttons_default") else "danger",
             )],
             [styled_button("💬 Auto-Replies", callback_data="adm_autoreply_list")],
             [styled_button("🌐 Manage Languages", callback_data="adm_lang_manage")],
@@ -2554,7 +2744,6 @@ async def _render_adm_settings(update: Update, context: ContextTypes.DEFAULT_TYP
             [styled_button(
                 f"🔐 Lock All Forwarding: {'ON' if s.get('lock_all_content') else 'OFF'}",
                 callback_data="stgl:lock_all_content:adm_settings",
-                style="success" if s.get("lock_all_content") else "danger",
             )],
             [styled_button("👑 Owner/Developer Contact", callback_data="adm_owner_contact")],
             [styled_button("📋 Logger Channel", callback_data="adm_logger_channel")],
@@ -2562,7 +2751,6 @@ async def _render_adm_settings(update: Update, context: ContextTypes.DEFAULT_TYP
             [styled_button(
                 f"📄 Send As Document: {'ON' if s.get('send_as_document') else 'OFF (auto near limit)'}",
                 callback_data="stgl:send_as_document:adm_settings",
-                style="success" if s.get("send_as_document") else "primary",
             )],
             back_row(),
             home_row(),
@@ -2592,8 +2780,8 @@ async def _render_adm_owner_contact(update: Update, context: ContextTypes.DEFAUL
     )
     kb = InlineKeyboardMarkup(
         [
-            [styled_button("✏️ Set Contact", callback_data="adm_owner_contact_set", style="success")],
-            [styled_button("❌ Clear", callback_data="adm_owner_contact_clear", style="danger")],
+            [styled_button("✏️ Set Contact", callback_data="adm_owner_contact_set")],
+            [styled_button("❌ Clear", callback_data="adm_owner_contact_clear")],
             back_row(),
         ]
     )
@@ -2639,7 +2827,6 @@ async def _render_adm_logger_channel(update: Update, context: ContextTypes.DEFAU
             [styled_button(
                 f"🔀 Enabled: {'ON' if s.get('logger_enabled') else 'OFF'}",
                 callback_data="stgl:logger_enabled:adm_logger_channel",
-                style="success" if s.get("logger_enabled") else "danger",
             )],
             back_row(),
         ]
@@ -2676,7 +2863,7 @@ async def _render_adm_force_join(update: Update, context: ContextTypes.DEFAULT_T
     kb = InlineKeyboardMarkup(
         [
             [styled_button("✏️ Set Channel", callback_data="adm_force_join_set")],
-            [styled_button("❌ Disable", callback_data="adm_force_join_clear", style="danger")],
+            [styled_button("❌ Disable", callback_data="adm_force_join_clear")],
             back_row(),
         ]
     )
@@ -2709,6 +2896,11 @@ async def cb_adm_force_join_clear(update: Update, context: ContextTypes.DEFAULT_
 
 
 async def cb_settings_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """BUGFIX — this used to hardcode only 3 valid `return_to` screens, so any
+    toggle wired to a 4th screen (e.g. adm_premium) flipped the setting in the
+    DB but never refreshed the message — the button looked completely dead.
+    Now it looks up ANY registered admin screen via SCREEN_RENDERERS, so every
+    current and future toggle button actually re-renders."""
     query = update.callback_query
     await query.answer()
     if not is_admin(update.effective_user.id):
@@ -2716,12 +2908,12 @@ async def cb_settings_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE)
     _, key, return_to = query.data.split(":", 2)
     BOT_DATA["settings"][key] = not bool(BOT_DATA["settings"].get(key, False))
     save_data()
-    if return_to == "adm_settings":
-        await _render_adm_settings(update, context)
-    elif return_to == "adm_broadcast":
-        await _render_adm_broadcast(update, context)
-    elif return_to == "adm_logger_channel":
-        await _render_adm_logger_channel(update, context)
+    renderer = SCREEN_RENDERERS.get(return_to)
+    if renderer is not None:
+        await renderer(update, context)
+    else:
+        # Still give feedback instead of doing nothing if a screen is missing.
+        await query.answer(to_small_caps("✅ updated."), show_alert=False)
 
 
 async def cb_adm_lang_manage(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2731,8 +2923,8 @@ async def cb_adm_lang_manage(update: Update, context: ContextTypes.DEFAULT_TYPE)
     text = "🌐 Enabled Languages\n\n" + ("\n".join(f"• {LANG_NAMES.get(c, c)}" for c in langs) if langs else "Koi nahi — sirf Default (Hinglish).")
     kb = InlineKeyboardMarkup(
         [
-            [styled_button("➕ Add Language", callback_data="adm_lang_add", style="success")],
-            [styled_button("➖ Remove Language", callback_data="adm_lang_remove", style="danger")],
+            [styled_button("➕ Add Language", callback_data="adm_lang_add")],
+            [styled_button("➖ Remove Language", callback_data="adm_lang_remove")],
             [styled_button("🔙 Back", callback_data="adm_settings")],
         ]
     )
@@ -2792,10 +2984,14 @@ async def cb_adm_autoreply_list(update: Update, context: ContextTypes.DEFAULT_TY
     query = update.callback_query
     await query.answer()
     replies = BOT_DATA["settings"].get("auto_replies", {})
-    lines = ["💬 Auto-Replies\n"] + [f"• `{k}` → {v[:30]}" for k, v in replies.items()] or ["Koi auto-reply set nahi hai."]
+    # BUGFIX — `A + B or C` always evaluated truthy (header alone is
+    # non-empty), so the "no auto-replies" fallback text never showed.
+    lines = ["💬 Auto-Replies\n"] + (
+        [f"• `{k}` → {v[:30]}" for k, v in replies.items()] or ["Koi auto-reply set nahi hai."]
+    )
     kb = InlineKeyboardMarkup(
         [
-            [styled_button("➕ Add", callback_data="adm_autoreply_add", style="success")],
+            [styled_button("➕ Add", callback_data="adm_autoreply_add")],
             [styled_button("❌ Remove", callback_data="adm_autoreply_del")],
             [styled_button("🔙 Back", callback_data="adm_settings")],
         ]
@@ -2824,8 +3020,8 @@ async def cb_adm_manage_admins(update: Update, context: ContextTypes.DEFAULT_TYP
     text = "👤 Current Admins\n\n" + "\n".join(f"• {a}" for a in admins)
     kb = InlineKeyboardMarkup(
         [
-            [styled_button("➕ Add Admin", callback_data="adm_add_admin", style="success")],
-            [styled_button("➖ Remove Admin", callback_data="adm_remove_admin", style="danger")],
+            [styled_button("➕ Add Admin", callback_data="adm_add_admin")],
+            [styled_button("➖ Remove Admin", callback_data="adm_remove_admin")],
             [styled_button("🔙 Back", callback_data="adm_settings")],
         ]
     )
@@ -2867,10 +3063,10 @@ async def _render_adm_danger(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     kb = InlineKeyboardMarkup(
         [
-            [styled_button("🧹 Clear Broadcast Log", callback_data="adm_clear_bclog", style="danger")],
-            [styled_button("🧹 Delete All Bot Messages In This Chat", callback_data="adm_delete_chat_msgs", style="danger")],
-            [styled_button("🔄 Reset Menus to Default", callback_data="adm_reset_menus_confirm", style="danger")],
-            [styled_button("❌ Reset ALL Bot Data", callback_data="adm_reset_confirm", style="danger")],
+            [styled_button("🧹 Clear Broadcast Log", callback_data="adm_clear_bclog")],
+            [styled_button("🧹 Delete All Bot Messages In This Chat", callback_data="adm_delete_chat_msgs")],
+            [styled_button("🔄 Reset Menus to Default", callback_data="adm_reset_menus_confirm")],
+            [styled_button("❌ Reset ALL Bot Data", callback_data="adm_reset_confirm")],
             back_row(),
             home_row(),
         ]
@@ -2890,7 +3086,7 @@ async def _render_adm_premium(update: Update, context: ContextTypes.DEFAULT_TYPE
     kb = InlineKeyboardMarkup([
         [styled_button(f"🔀 Premium: {'ON' if s.get('premium_enabled') else 'OFF'}",
                         callback_data="stgl:premium_enabled:adm_premium",
-                        style="success" if s.get("premium_enabled") else "danger")],
+                        )],
         [styled_button("✏️ Set Daily Limit", callback_data="adm_set_dailylimit")],
         back_row(), home_row(),
     ])
@@ -2914,7 +3110,7 @@ async def _render_adm_upi(update: Update, context: ContextTypes.DEFAULT_TYPE):
     upi = BOT_DATA["settings"].get("upi_id")
     kb = InlineKeyboardMarkup([
         [styled_button("✏️ Set UPI ID", callback_data="adm_upi_set")],
-        [styled_button("❌ Clear", callback_data="adm_upi_clear", style="danger")],
+        [styled_button("❌ Clear", callback_data="adm_upi_clear")],
         back_row(), home_row(),
     ])
     await query.edit_message_text(f"💳 UPI Settings\n\nCurrent: {upi or '(not set)'}", reply_markup=kb)
@@ -3057,7 +3253,7 @@ async def cb_adm_reset_menus_confirm(update: Update, context: ContextTypes.DEFAU
     query = update.callback_query
     await query.answer()
     kb = InlineKeyboardMarkup(
-        [[styled_button("⚠️ Haan, reset karo", callback_data="adm_reset_menus_do", style="danger"),
+        [[styled_button("⚠️ Haan, reset karo", callback_data="adm_reset_menus_do"),
           styled_button("Cancel", callback_data="adm_danger")]]
     )
     await query.edit_message_text("⚠️ Sab menus (text/image/buttons) default pe reset ho jayenge. Pakka?", reply_markup=kb)
@@ -3076,7 +3272,7 @@ async def cb_adm_reset_confirm(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     await query.answer()
     kb = InlineKeyboardMarkup(
-        [[styled_button("⚠️ Haan, sab reset karo", callback_data="adm_reset_do", style="danger"),
+        [[styled_button("⚠️ Haan, sab reset karo", callback_data="adm_reset_do"),
           styled_button("Cancel", callback_data="adm_danger")]]
     )
     await query.edit_message_text(
@@ -3216,9 +3412,35 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
 
     elif awaiting == "force_join_channel":
         context.user_data.pop("awaiting", None)
-        BOT_DATA["settings"]["force_join_channel"] = text.strip()
+        channel = text.strip()
+        # BUGFIX — a bare username typed without '@' (e.g. "mychannel"
+        # instead of "@mychannel") makes get_chat_member reject the call
+        # outright; that exception used to be swallowed silently, so
+        # force-join looked "configured" but never blocked anyone.
+        if channel and not channel.startswith("http") and not channel.lstrip("-").isdigit() and not channel.startswith("@"):
+            channel = "@" + channel
+        BOT_DATA["settings"]["force_join_channel"] = channel
         save_data()
-        await update.message.reply_text(f"✅ Force-join channel set: {text.strip()}")
+        # BUGFIX — verify RIGHT NOW instead of letting the admin find out
+        # days later that nobody was ever actually being blocked.
+        warning = ""
+        try:
+            me = await context.bot.get_me()
+            member = await context.bot.get_chat_member(chat_id=channel, user_id=me.id)
+            if member.status not in ("administrator", "creator"):
+                warning = (
+                    "\n\n⚠️ " + to_small_caps("bot is in this channel but is NOT an admin there — "
+                    "membership checks may fail. make the bot an admin in this channel.")
+                )
+        except Exception as e:
+            warning = (
+                f"\n\n⚠️ " + to_small_caps("could not verify this channel")
+                + f" ({e}). " + to_small_caps(
+                    "force-join will fail open (let everyone through) until this is fixed — "
+                    "double-check the username/id and make sure the bot is an admin there."
+                )
+            )
+        await update.message.reply_text(f"✅ Force-join channel set: {channel}{warning}")
 
     elif awaiting == "logger_channel_id":
         context.user_data.pop("awaiting", None)
@@ -3906,4 +4128,43 @@ if __name__ == "__main__":
 # - Encrypted backups, multi-language menus, menu version history (#14).
 # - Premium custom-emoji support (#16) — needs the bot-owner Telegram
 #   account to have Premium; flag if that's the case and I'll wire it up.
+# ------------------------------------------------------------------------
+#
+# ------------------------------------------------------------------------
+# Code review pass — fixes applied:
+#
+# 1. Admin Panel "Premium ON/OFF" button did nothing visible — the generic
+#    toggle handler only knew how to refresh 3 hardcoded screens and
+#    "adm_premium" wasn't one of them. Toggle now looks up ANY registered
+#    screen, so this and every future toggle button actually re-renders.
+# 2. Force-join was silently non-functional in common setups:
+#      - ANY error checking membership (bad channel format, bot not admin
+#        there, etc.) was swallowed with zero logging, so it looked
+#        "configured" while never blocking a single user. Now logged to
+#        Activity Log so it's actually diagnosable.
+#      - Bare usernames typed without "@" are now auto-normalized on save.
+#      - Setting the channel now immediately verifies the bot can see it
+#        and is an admin there, warning the admin right away if not.
+#      - The "📢 Join Channel" button used to build a dead
+#        https://t.me/-100xxxxxxxxxx link for numeric channel IDs (the
+#        suggested format for private channels) — now resolves a real,
+#        clickable invite link via the Bot API.
+# 3. Payment QR codes were a plain black-and-white square from a
+#    third-party URL (api.qrserver.com). Now generated locally: rounded
+#    modules, on-brand color, amount + "scan with any UPI app" caption
+#    baked into the card. Falls back to the old remote URL automatically
+#    if `qrcode`/Pillow aren't installed — see setup notes at the top.
+# 4. Admin Panel buttons are now colorless/neutral by design (colors were
+#    intentionally removed from every admin screen per request).
+# 5. Every button in the bot — admin panel and user-facing — is now
+#    small-caps by default, enforced centrally in styled_button() /
+#    styled_kb_button() so it can't drift out of sync screen-by-screen.
+# 6. Auto-Replies list: an operator-precedence bug (`list_a + list_b or
+#    fallback`) meant the "no auto-replies yet" message could never
+#    actually display, since the concatenated list was always truthy.
+# 7. A download-failure message interpolated the raw exception text into
+#    an HTML-parsed message unescaped; any "<", ">", or "&" in a yt-dlp
+#    error (common in URLs) broke Telegram's parser and could leave the
+#    user staring at a frozen "processing..." message. Now escaped, with
+#    a plain-text fallback if the edit still somehow fails.
 # ------------------------------------------------------------------------
