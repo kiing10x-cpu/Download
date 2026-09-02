@@ -703,16 +703,17 @@ def styled_kb_button(text, style=None):
 DEFAULT_MENUS = {
     "start": {
         "text": (
-            f"{to_deco(to_small_caps('welcome'))}\n\n"
-            f"{to_small_caps('send any instagram reel link below')}\n"
-            f"{to_small_caps('get it back in the best quality, instantly')}\n\n"
-            f"『 {to_small_caps('tap guide for the full walkthrough')} 』"
+            f"『 {to_small_caps('welcome')}, {{first_name}} 』\n\n"
+            f"{to_small_caps('welcome to')} {{bot_link}}\n\n"
+            f"{to_small_caps('send any instagram reel link and get your video back in high quality, quickly and effortlessly.')}\n\n"
+            "<blockquote>"
+            + to_small_caps("fast • simple • high quality")
+            + "</blockquote>\n\n"
+            f"{to_small_caps('use the buttons below to get started, explore the bot, and discover more features.')}"
         ),
-        "parse_mode": None,
+        "parse_mode": "HTML",
         "image_file_id": None,
-        "buttons": [
-            {"label": to_small_caps("📖 guide"), "type": "menu", "value": "help_user", "row": 1, "style": "primary"}
-        ],
+        "buttons": [],
         "auto_delete_seconds": None,
         "updated_by": None,
         "updated_at": None,
@@ -1433,6 +1434,27 @@ async def render_menu(context: ContextTypes.DEFAULT_TYPE, chat_id: int, menu_id:
     parse_mode = menu.get("parse_mode") or None
     image = menu.get("image_file_id")
 
+    # Welcome-screen personalization — {first_name} / {bot_link} placeholders
+    # are only resolved for the "start" menu so an admin editing other menu
+    # text doesn't need to worry about stray curly braces breaking anything.
+    if menu_id == "start" and ("{first_name}" in text or "{bot_link}" in text):
+        if "{first_name}" in text:
+            stored_name = BOT_DATA["users"].get(str(chat_id), {}).get("name") or ""
+            first_name = stored_name.split(" ")[0] if stored_name else "there"
+            text = text.replace("{first_name}", html.escape(first_name))
+        if "{bot_link}" in text:
+            bot_link = "our bot"
+            try:
+                me = await context.bot.get_me()
+                display_name = html.escape(me.first_name or "our bot")
+                if me.username:
+                    bot_link = f'<a href="https://t.me/{me.username}">{display_name}</a>'
+                else:
+                    bot_link = display_name
+            except Exception:
+                pass
+            text = text.replace("{bot_link}", bot_link)
+
     # #10 — owner/developer credit button, injected at render time (not part
     # of the admin-editable button list) so it can't be accidentally deleted
     # by editing menu buttons.
@@ -2045,6 +2067,18 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # right alongside the bot's replies) and routes its reply through the
     # same replace-in-place screen, so repeat taps on ANY of these buttons
     # — not just My Usage — leave only the most recent copy behind.
+    # RKB_ADMINPANEL is excluded here — cmd_admin() replies to this exact
+    # message first (reply_text) and only then deletes it itself, so
+    # deleting it up-front would break that reply-to reference.
+    _RKB_BUTTON_TEXTS = {
+        RKB_DOWNLOAD, RKB_USAGE, RKB_GIFT, RKB_LANGUAGE,
+        RKB_DEVELOPER, RKB_HOWTO, RKB_SUPPORT,
+    }
+    if text in _RKB_BUTTON_TEXTS:
+        # This was previously missing — the comment above described this
+        # behaviour but no code actually deleted the tapped message, so old
+        # button-tap messages from the user kept piling up in the chat.
+        await delete_incoming(update)
     if text == RKB_DOWNLOAD:
         await _replace_rkb_screen(
             context, update.effective_chat.id, "download",
@@ -3231,12 +3265,15 @@ async def handle_user_awaiting_input(update: Update, context: ContextTypes.DEFAU
     if awaiting == "support_message":
         context.user_data.pop("awaiting", None)
         mention = f'<a href="tg://user?id={user_obj.id}">{html.escape(user_obj.full_name)}</a>'
+        username_line = f"@{user_obj.username}" if user_obj.username else to_small_caps("no username")
+        sent_at = datetime.utcnow().strftime("%d %b %Y, %H:%M UTC")
         payload = (
             "╭━━━━━━━━━━━━━━━━━━╮\n"
             "✦ 𝗡𝗘𝗪 𝗦𝗨𝗣𝗣𝗢𝗥𝗧 𝗠𝗘𝗦𝗦𝗔𝗚𝗘 ✦\n"
             "╰━━━━━━━━━━━━━━━━━━╯\n\n"
-            f"👤 {mention}\n"
-            f"🆔 <code>{user_obj.id}</code>\n\n"
+            f"👤 {mention} · {username_line}\n"
+            f"🆔 <code>{user_obj.id}</code>\n"
+            f"🕒 {sent_at}\n\n"
             f"💬 {html.escape(text)}\n\n"
             "↩️ Reply to this message to contact the user directly.\n"
             "🛠 An admin will try to resolve the issue as soon as possible."
