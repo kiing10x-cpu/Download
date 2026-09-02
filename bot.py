@@ -43,6 +43,7 @@ from telegram import (
 from telegram.ext import (
     Application,
     ApplicationBuilder,
+    ApplicationHandlerStop,
     CommandHandler,
     MessageHandler,
     CallbackQueryHandler,
@@ -510,21 +511,25 @@ RKB_LANGUAGE = to_small_caps("🌐 Language")
 RKB_DEVELOPER = to_small_caps("👨‍💻 Developer")
 RKB_HOWTO = to_small_caps("📘 How to use")
 RKB_SUPPORT = to_small_caps("🎧 Support")
+RKB_ADMINPANEL = to_small_caps("🛠 Admin Panel")
 
 
-def main_reply_keyboard() -> ReplyKeyboardMarkup:
+def main_reply_keyboard(is_admin_user: bool = False) -> ReplyKeyboardMarkup:
     """v2 Section 1 — persistent bottom keyboard, alongside the existing
     inline /start menu (doesn't replace it). Colors via Bot API 9.4 `style`
-    (needs PTB 22.7+, already pinned in requirements.txt)."""
-    return ReplyKeyboardMarkup(
-        [
-            [styled_kb_button(RKB_DOWNLOAD, style="success")],
-            [styled_kb_button(RKB_USAGE, style="primary"), styled_kb_button(RKB_GIFT, style="primary")],
-            [styled_kb_button(RKB_LANGUAGE, style="primary"), styled_kb_button(RKB_DEVELOPER, style="primary")],
-            [styled_kb_button(RKB_HOWTO, style="danger"), styled_kb_button(RKB_SUPPORT, style="danger")],
-        ],
-        resize_keyboard=True,
-    )
+    (needs PTB 22.7+, already pinned in requirements.txt).
+    v5 — an extra 🛠 Admin Panel row appears below How to Use/Support, but
+    ONLY when this keyboard is built for an admin's own chat — every other
+    user's keyboard is completely unchanged."""
+    rows = [
+        [styled_kb_button(RKB_DOWNLOAD, style="success")],
+        [styled_kb_button(RKB_USAGE, style="primary"), styled_kb_button(RKB_GIFT, style="primary")],
+        [styled_kb_button(RKB_LANGUAGE, style="primary"), styled_kb_button(RKB_DEVELOPER, style="primary")],
+        [styled_kb_button(RKB_HOWTO, style="danger"), styled_kb_button(RKB_SUPPORT, style="danger")],
+    ]
+    if is_admin_user:
+        rows.append([styled_kb_button(RKB_ADMINPANEL, style="primary")])
+    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
 
 
@@ -673,8 +678,7 @@ DEFAULT_MENUS = {
         "image_file_id": None,
         "buttons": [
             {"label": to_small_caps("📝 caption"), "type": "callback", "value": "get_caption", "row": 1, "style": "primary"},
-            {"label": to_small_caps("🔁 download another"), "type": "callback", "value": "download_another", "row": 1, "style": "primary"},
-            {"label": to_small_caps("🏠 main menu"), "type": "menu", "value": "start", "row": 2, "style": "primary"},
+            {"label": to_small_caps("🎵 audio"), "type": "callback", "value": "get_audio", "row": 1, "style": "primary"},
         ],
         "auto_delete_seconds": None,
         "updated_by": None,
@@ -785,6 +789,9 @@ DEFAULT_DATA = {
         "premium_plans": [],  # v4 — admin-defined plans: {id, name, days, price_inr, price_stars, enabled}
         "detailed_join_alerts": True,  # new-user/group-start full details -> admin DMs + logger
         "user_activity_dm": True,      # every reel-link a user sends -> owner DM (misuse monitoring)
+        "leaderboard_enabled": False,  # admin toggle — top-donor ranking shown inside Send Gift
+        "share_enabled": True,         # admin toggle — "📤 Share" button under My Usage
+        "share_url": None,             # link the Share button points to; falls back to the bot link
     },
     "broadcast_log": [],
     "activity_log": [],         # ring buffer: {time, user_id, name, username, chat_type, url}
@@ -802,6 +809,7 @@ DEFAULT_DATA = {
     "gift_orders": {},            # v2 §4 — order_id(str) -> {...} (UPI pending payments)
     "next_gift_id": 1,
     "next_plan_id": 1,            # v4 — admin-defined premium plans
+    "donations": {},              # uid(str) -> {"name", "stars", "inr", "score"} — leaderboard source
 }
 
 # ----------------------------------------------------------------------------
@@ -813,7 +821,7 @@ _mongo_client = None
 _mongo_collection = None
 _mongo_last_error = None
 _rate_state = {}  # in-memory only, not persisted
-_caption_cache = {}  # (chat_id, message_id) -> real Instagram caption, in-memory only
+_caption_cache = {}  # (chat_id, message_id) -> {"caption": str, "url": str}, in-memory only
 CAPTION_CACHE_MAX = 500
 
 
@@ -1518,9 +1526,11 @@ async def delete_incoming(update: Update):
 
 
 async def require_disclaimer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """PDF #1 — gate every command behind the disclaimer/agree flow.
-    Returns True if the user may proceed; otherwise shows the disclaimer
-    and returns False. Admins are exempt."""
+    """PDF #1 — gate behind the disclaimer/agree flow only (no force-join
+    check). Kept as a standalone building block for require_gate() below;
+    most call sites should use require_gate() instead, which also enforces
+    force-join. Returns True if the user may proceed; otherwise shows the
+    disclaimer and returns False. Admins are exempt."""
     user_obj = update.effective_user
     if not user_obj:
         return True
@@ -1531,6 +1541,73 @@ async def require_disclaimer(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return True
     await render_menu(context, update.effective_chat.id, "disclaimer")
     return False
+
+
+async def show_force_join_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Shared force-join prompt, used both by require_gate() and by the
+    '✅ I've Joined' recheck button when the check still fails."""
+    channel = BOT_DATA["settings"].get("force_join_channel")
+    ch_link = await resolve_force_join_link(context, channel)
+    kb_rows = []
+    if ch_link:
+        kb_rows.append([InlineKeyboardButton(to_small_caps("📢 join channel"), url=ch_link)])
+    kb_rows.append([styled_button(to_small_caps("✅ i've joined"), callback_data="check_force_join", style="success")])
+    text = "🔒 " + to_small_caps("please join our channel first to use this bot.")
+    if not ch_link:
+        text += "\n⚠️ " + to_small_caps("couldn't get a join link — please contact an admin.")
+    chat_id = update.effective_chat.id
+    if update.callback_query:
+        try:
+            await update.callback_query.message.reply_text(text, reply_markup=InlineKeyboardMarkup(kb_rows))
+            return
+        except Exception:
+            pass
+    await context.bot.send_message(chat_id, text, reply_markup=InlineKeyboardMarkup(kb_rows))
+
+
+async def require_gate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """The single source of truth for 'is this user allowed to do anything
+    yet'. Combines the disclaimer-acceptance gate AND the force-join gate —
+    until BOTH are satisfied, nothing else in the bot should run: no
+    command, no inline button, no reply-keyboard button. Admins are exempt
+    from both. Returns True if the user may proceed; otherwise shows
+    whichever screen is still pending (disclaimer takes priority over
+    force-join, since there's no point sending someone to join a channel
+    before they've even agreed to use the bot) and returns False."""
+    user_obj = update.effective_user
+    if not user_obj:
+        return True
+    if is_admin(user_obj.id):
+        return True
+    if not await require_disclaimer(update, context):
+        return False
+    if not await is_force_join_ok(context, user_obj.id):
+        await show_force_join_prompt(update, context)
+        return False
+    return True
+
+
+async def cb_global_button_gate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Registered in handler group -1, ahead of EVERY other handler — this
+    is what makes 'no button works until agree + join' actually true,
+    instead of each of 100+ individual callback handlers needing its own
+    check (which is exactly how it stayed half-enforced before: some
+    screens checked, most didn't). is_admin() inside require_gate() exempts
+    admins as usual. The two callbacks that ARE the gate itself
+    (agree_terms, check_force_join) must fall through untouched, or the
+    user would have no way to ever pass the gate."""
+    query = update.callback_query
+    if not query:
+        return
+    data = query.data or ""
+    if data in ("agree_terms", "check_force_join"):
+        return
+    if not await require_gate(update, context):
+        try:
+            await query.answer()
+        except Exception:
+            pass
+        raise ApplicationHandlerStop
 
 
 LANG_NAMES = {
@@ -1567,7 +1644,7 @@ async def show_post_onboarding(context: ContextTypes.DEFAULT_TYPE, chat_id: int,
     sent = await render_menu(context, chat_id, "start")
     if not BOT_DATA["users"].get(uid, {}).get("reply_kb_sent"):
         try:
-            await context.bot.send_message(chat_id, "⌨️", reply_markup=main_reply_keyboard())
+            await context.bot.send_message(chat_id, "⌨️", reply_markup=main_reply_keyboard(is_admin(int(uid))))
         except Exception:
             pass
         BOT_DATA["users"].setdefault(uid, {})["reply_kb_sent"] = True
@@ -1589,7 +1666,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await delete_incoming(update)
         return
 
-    if not await require_disclaimer(update, context):
+    if not await require_gate(update, context):
         await delete_incoming(update)
         return
 
@@ -1609,7 +1686,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if is_blocked(user_obj.id) and not is_admin(user_obj.id):
         return
     touch_user(update)
-    if not await require_disclaimer(update, context):
+    if not await require_gate(update, context):
         await delete_incoming(update)
         return
     menu_id = "help_admin" if is_admin(user_obj.id) else "help_user"
@@ -1622,7 +1699,7 @@ async def cmd_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if is_blocked(user_obj.id) and not is_admin(user_obj.id):
         return
     touch_user(update)
-    if not await require_disclaimer(update, context):
+    if not await require_gate(update, context):
         await delete_incoming(update)
         return
     langs = BOT_DATA["settings"].get("languages", [])
@@ -1661,6 +1738,13 @@ async def cb_agree_terms(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.delete()
     except Exception:
         pass
+    # Disclaimer accepted — now check the OTHER half of the gate before
+    # letting the user any further in. If a force-join channel is set, they
+    # see the join prompt right here instead of skipping straight to the
+    # start menu.
+    if not await is_force_join_ok(context, update.effective_user.id):
+        await show_force_join_prompt(update, context)
+        return
     await show_post_onboarding(context, query.message.chat_id, uid)
 
 
@@ -1700,6 +1784,15 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not text and not context.user_data.get("awaiting"):
         return
 
+    # Gate check comes before EVERY reply-keyboard/button dispatch below —
+    # this used to sit much further down (after the awaiting-input checks),
+    # which meant a user who hadn't agreed to the disclaimer yet (or hadn't
+    # joined the force-join channel) could still tap "📊 My Usage", "🎁 Send
+    # a Gift", etc. and have them actually work. Nothing past this point
+    # should run until require_gate() clears.
+    if not await require_gate(update, context):
+        return
+
     # v2 §1 — persistent reply-keyboard routing
     if text == RKB_DOWNLOAD:
         await update.message.reply_text("🔗 " + to_small_caps("paste your instagram reel link here"))
@@ -1722,6 +1815,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == RKB_SUPPORT:
         await support_button_entry(update, context)
         return
+    if text == RKB_ADMINPANEL and is_admin(user_id):
+        await cmd_admin(update, context)
+        return
 
     awaiting = context.user_data.get("awaiting")
 
@@ -1737,9 +1833,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if awaiting and is_admin(user_id):
         await handle_admin_text_input(update, context, awaiting)
-        return
-
-    if not await require_disclaimer(update, context):
         return
 
     if not check_rate_limit(user_id):
@@ -1773,20 +1866,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await render_menu(context, update.effective_chat.id, "maintenance")
         return
 
-    if not await is_force_join_ok(context, user_id):
-        channel = BOT_DATA["settings"].get("force_join_channel")
-        # BUGFIX — numeric channel IDs used to build a dead https://t.me/-100...
-        # link; resolve a real, clickable invite link instead.
-        ch_link = await resolve_force_join_link(context, channel)
-        kb_rows = []
-        if ch_link:
-            kb_rows.append([InlineKeyboardButton(to_small_caps("📢 join channel"), url=ch_link)])
-        kb_rows.append([styled_button(to_small_caps("✅ i've joined"), callback_data="check_force_join", style="success")])
-        text = "🔒 " + to_small_caps("please join our channel first to use this bot.")
-        if not ch_link:
-            text += "\n⚠️ " + to_small_caps("couldn't get a join link — please contact an admin.")
-        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(kb_rows))
-        return
+    # (disclaimer + force-join already verified by require_gate() above —
+    # no need to re-check either one here)
 
     url = match.group(1)
 
@@ -1937,9 +2018,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     video=vid, caption=result_caption, parse_mode=parse_mode, reply_markup=kb, protect_content=protect
                 )
 
-        # Cache the real Instagram caption so the "Get Caption" button under
-        # THIS specific video can show it, keyed to this exact message.
-        _caption_cache[(sent.chat_id, sent.message_id)] = ig_caption
+        # Cache the real Instagram caption + source URL so the "Caption" and
+        # "🎵 Audio" buttons under THIS specific video can use them, keyed
+        # to this exact message. The video file itself is deleted right
+        # after sending (see finally: below), so Audio re-downloads
+        # audio-only from the cached URL rather than needing the video kept
+        # around on disk.
+        _caption_cache[(sent.chat_id, sent.message_id)] = {"caption": ig_caption, "url": url}
         if len(_caption_cache) > CAPTION_CACHE_MAX:
             _caption_cache.pop(next(iter(_caption_cache)))
 
@@ -1988,7 +2073,8 @@ async def cb_get_caption(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     key = (query.message.chat_id, query.message.message_id)
-    caption = _caption_cache.get(key)
+    entry = _caption_cache.get(key)
+    caption = entry.get("caption") if entry else None
     if not caption:
         await query.message.reply_text("ℹ️ " + to_small_caps("no caption found for this post (or cache expired)."))
         return
@@ -1997,15 +2083,98 @@ async def cb_get_caption(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text(caption[i:i + 4000])
 
 
+async def cb_get_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """v5 — 🎵 Audio button under a delivered reel. The video file is
+    already deleted by the time this is tapped (cleaned up right after
+    sending), so this re-runs yt-dlp against the cached source URL with an
+    audio-only format and sends back just the audio track."""
+    query = update.callback_query
+    await query.answer()
+    key = (query.message.chat_id, query.message.message_id)
+    entry = _caption_cache.get(key)
+    url = entry.get("url") if entry else None
+    if not url:
+        await query.message.reply_text("ℹ️ " + to_small_caps("couldn't find the source link for this post (cache expired)."))
+        return
+
+    status_msg = await query.message.reply_text("🎵 " + to_small_caps("extracting audio..."))
+
+    def build_audio_opts():
+        opts = {
+            "format": "bestaudio/best",
+            "outtmpl": os.path.join(DOWNLOAD_DIR, "%(id)s_audio.%(ext)s"),
+            "quiet": True,
+            "no_warnings": True,
+            "postprocessors": [{
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "192",
+            }],
+        }
+        if FFMPEG_PATH:
+            opts["ffmpeg_location"] = FFMPEG_PATH
+        return opts
+
+    def run_audio_download():
+        opts = build_audio_opts()
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            fp = ydl.prepare_filename(info)
+            base, _ = os.path.splitext(fp)
+            mp3_path = base + ".mp3"
+            return mp3_path if os.path.exists(mp3_path) else fp
+
+    audio_path = None
+    try:
+        if not FFMPEG_AVAILABLE:
+            # Audio extraction (muxing out just the audio track) genuinely
+            # needs ffmpeg, unlike plain video download — no safe fallback.
+            await status_msg.edit_text(
+                "❌ " + to_small_caps("audio extraction needs ffmpeg, which isn't available on this server.")
+            )
+            return
+        audio_path = await asyncio.to_thread(run_audio_download)
+        if not audio_path or not os.path.exists(audio_path):
+            await status_msg.edit_text("❌ " + to_small_caps("couldn't extract audio from this post."))
+            return
+        protect = bool(BOT_DATA["settings"].get("lock_all_content", False))
+        with open(audio_path, "rb") as aud:
+            await query.message.reply_audio(audio=aud, protect_content=protect)
+        await status_msg.delete()
+    except Exception as e:
+        import html as _html
+        safe_err = _html.escape(str(e))[:500]
+        try:
+            await status_msg.edit_text(
+                "❌ " + to_small_caps("audio extraction failed.") + f"\n\n<code>{safe_err}</code>",
+                parse_mode="HTML",
+            )
+        except Exception:
+            await status_msg.edit_text("❌ " + to_small_caps("audio extraction failed."))
+    finally:
+        if audio_path and os.path.exists(audio_path):
+            try:
+                os.remove(audio_path)
+            except OSError:
+                pass
+
+
 async def cb_check_force_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     ok = await is_force_join_ok(context, update.effective_user.id)
     if ok:
-        await query.answer(to_small_caps("✅ verified! send your reel link again."), show_alert=True)
+        await query.answer(to_small_caps("✅ verified!"), show_alert=True)
         try:
             await query.message.delete()
         except Exception:
             pass
+        # Both gates are clear now — land the user in the start menu (this
+        # covers the onboarding path; if they were already past onboarding
+        # and just got re-blocked later, show_post_onboarding is a no-op
+        # past the language-picker/reply-keyboard first-run bits and just
+        # re-renders start, which is fine here).
+        uid = str(update.effective_user.id)
+        await show_post_onboarding(context, query.message.chat_id, uid)
     else:
         await query.answer(to_small_caps("❌ still not joined."), show_alert=True)
 
@@ -2191,6 +2360,10 @@ async def show_usage_screen(update: Update, context: ContextTypes.DEFAULT_TYPE):
             kb_rows.append([styled_button(f"💎 {p['name']}", callback_data=f"gift_plan:{p['id']}", style="success")])
     elif s.get("premium_enabled"):
         kb_rows.append([styled_button(to_small_caps("🚀 upgrade for more"), callback_data="gift_menu", style="success")])
+    # v5 — colored Share button under My Usage, admin-toggleable.
+    if s.get("share_enabled", True):
+        share_url = await resolve_share_url(context)
+        kb_rows.append([styled_button("📤 " + to_small_caps("share"), url=share_url, style="primary")])
     try:
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     except Exception:
@@ -2207,6 +2380,20 @@ def _normalize_username_link(value: str) -> str:
     if value.startswith("http://") or value.startswith("https://") or value.startswith("tg://"):
         return value
     return f"https://t.me/{value.lstrip('@')}"
+
+
+async def resolve_share_url(context: ContextTypes.DEFAULT_TYPE) -> str:
+    """v5 — where the 'My Usage' Share button points. Admin can set a
+    custom link (e.g. a channel/landing page) in Admin Panel > Leaderboard
+    & Sharing; otherwise it falls back to the bot's own t.me link."""
+    url = BOT_DATA["settings"].get("share_url")
+    if url:
+        return url
+    try:
+        me = await context.bot.get_me()
+        return f"https://t.me/{me.username}"
+    except Exception:
+        return "https://t.me/"
 
 
 async def resolve_developer_url(context: ContextTypes.DEFAULT_TYPE) -> str | None:
@@ -2245,12 +2432,19 @@ async def show_developer_button(update: Update, context: ContextTypes.DEFAULT_TY
 async def show_gift_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """v4 — pure voluntary support/tip flow. This is separate from Premium
     Plans (those live under Usage now) — this is just 'send a gift to
-    support the bot', any amount, no plan attached."""
+    support the bot', any amount, no plan attached.
+    v5 — the top-donor leaderboard now lives right inside this screen
+    (not a separate top-level menu button), and only when the admin has
+    turned it on in the Admin Panel."""
     kb_rows = [[styled_button("⭐ Send Stars", callback_data="gift_stars", style="success")]]
     if BOT_DATA["settings"].get("upi_id"):
         kb_rows.append([styled_button("💳 Pay via UPI", callback_data="gift_upi", style="primary")])
+    text = "🎁 " + to_small_caps("send a gift — pick a method:")
+    if BOT_DATA["settings"].get("leaderboard_enabled"):
+        text += "\n\n" + build_leaderboard_text(limit=3)
+        kb_rows.append([styled_button("🏆 Full Leaderboard", callback_data="view_leaderboard")])
     target = update.callback_query.message if update.callback_query else update.message
-    await target.reply_text("🎁 " + to_small_caps("send a gift — pick a method:"), reply_markup=InlineKeyboardMarkup(kb_rows))
+    await target.reply_text(text, reply_markup=InlineKeyboardMarkup(kb_rows))
 
 
 async def cb_gift_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2259,15 +2453,38 @@ async def cb_gift_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await show_gift_menu(update, context)
 
 
+async def cb_view_leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if not BOT_DATA["settings"].get("leaderboard_enabled"):
+        return
+    await query.message.reply_text(build_leaderboard_text())
+
+
 async def cb_gift_stars(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     kb = InlineKeyboardMarkup([
-        [styled_button("50⭐", callback_data="gift_stars_amt:50"), styled_button("100⭐", callback_data="gift_stars_amt:100")],
-        [styled_button("250⭐", callback_data="gift_stars_amt:250"), styled_button("500⭐", callback_data="gift_stars_amt:500")],
-        [styled_button("✏️ Enter custom amount", callback_data="gift_stars_custom")],
+        [
+            styled_button("⭐ 10", callback_data="gift_stars_amt:10"),
+            styled_button("⭐ 50", callback_data="gift_stars_amt:50"),
+            styled_button("⭐ 100", callback_data="gift_stars_amt:100"),
+        ],
+        [
+            styled_button("➕ Another amount", callback_data="gift_stars_custom"),
+            styled_button("🗑 Dismiss", callback_data="gift_dismiss"),
+        ],
     ])
     await query.message.reply_text("⭐ " + to_small_caps("choose an amount:"), reply_markup=kb)
+
+
+async def cb_gift_dismiss(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    try:
+        await query.message.delete()
+    except Exception:
+        pass
 
 
 async def cb_gift_stars_custom(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2275,6 +2492,43 @@ async def cb_gift_stars_custom(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.answer()
     context.user_data["awaiting"] = "gift_stars_custom_amount"
     await query.message.reply_text("✏️ " + to_small_caps("enter a numeric star amount (e.g. 150)."))
+
+
+def record_donation(uid: str, name: str, amount: float, kind: str):
+    """v5 — leaderboard bookkeeping. kind is 'stars' or 'inr'. Both
+    currencies are combined into one 'score' for ranking purposes (1 star
+    == 1 rupee of ranking weight — simple and good enough for a fun
+    leaderboard; admin can adjust the weighting later if it ever matters)."""
+    if amount <= 0:
+        return
+    entry = BOT_DATA["donations"].setdefault(uid, {"name": name, "stars": 0, "inr": 0, "score": 0})
+    entry["name"] = name or entry.get("name") or f"User {uid}"
+    if kind == "stars":
+        entry["stars"] = entry.get("stars", 0) + amount
+    else:
+        entry["inr"] = entry.get("inr", 0) + amount
+    entry["score"] = entry.get("stars", 0) + entry.get("inr", 0)
+    save_data()
+
+
+def build_leaderboard_text(limit: int = 10) -> str:
+    """'Best form' ranked list of top supporters, medal-styled for the top 3."""
+    donors = [d for d in BOT_DATA.get("donations", {}).values() if d.get("score", 0) > 0]
+    donors.sort(key=lambda d: d.get("score", 0), reverse=True)
+    donors = donors[:limit]
+    if not donors:
+        return "🏆 " + to_small_caps("top supporters") + "\n\n" + to_small_caps("no donations yet — be the first!")
+    medals = ["🥇", "🥈", "🥉"]
+    lines = ["🏆 " + to_small_caps("top supporters"), ""]
+    for i, d in enumerate(donors):
+        rank = medals[i] if i < 3 else f"{i + 1}."
+        bits = []
+        if d.get("stars"):
+            bits.append(f"{int(d['stars'])}⭐")
+        if d.get("inr"):
+            bits.append(f"₹{int(d['inr'])}")
+        lines.append(f"{rank} {d.get('name', 'Anonymous')} — {' + '.join(bits)}")
+    return "\n".join(lines)
 
 
 def find_premium_plan(pid: str):
@@ -2358,6 +2612,9 @@ async def cmd_precheckout(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_successful_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sp = update.message.successful_payment
     uid = str(update.effective_user.id)
+    # v5 — every completed star payment counts toward the leaderboard,
+    # whether it was a plan purchase or a free-amount support gift.
+    record_donation(uid, update.effective_user.full_name, sp.total_amount, "stars")
     # v4 — a star payment for a specific admin-defined plan grants THAT plan's
     # day count; a generic/free-amount star gift keeps the old flat setting.
     plan_id = None
@@ -2532,6 +2789,10 @@ async def cb_gift_upi_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE
     order["status"] = "paid"
     save_data()
     uid = str(order["user_id"])
+    # v5 — every confirmed UPI order counts toward the leaderboard, whether
+    # it was a plan purchase or a free-amount support gift.
+    donor_name = BOT_DATA["users"].get(uid, {}).get("name") or f"User {uid}"
+    record_donation(uid, donor_name, order["amount"], "inr")
     # v4 — an order tied to a specific admin-defined plan grants THAT plan's
     # day count and reads like a purchase receipt; a generic/free-amount
     # UPI gift is a voluntary support tip, so it gets a proper thank-you
@@ -2741,6 +3002,7 @@ def admin_panel_keyboard():
         [
             [styled_button("💎 Premium Plans", callback_data="adm_premium"),
              styled_button("💳 UPI Settings", callback_data="adm_upi")],
+            [styled_button("🏆 Leaderboard & Sharing", callback_data="adm_leaderboard")],
             [styled_button("👨‍💻 Developer Settings", callback_data="adm_devsettings"),
              styled_button("🎧 Support Settings", callback_data="adm_support_settings")],
             [styled_button("🎫 Tickets", callback_data="adm_tickets"),
@@ -3534,6 +3796,92 @@ async def cb_adm_force_join_test(update: Update, context: ContextTypes.DEFAULT_T
     await query.message.reply_text("\n".join(lines))
 
 
+def _build_adm_leaderboard_view():
+    s = BOT_DATA["settings"]
+    lb_on = s.get("leaderboard_enabled", False)
+    share_on = s.get("share_enabled", True)
+    share_url = s.get("share_url") or to_small_caps("(default — bot's own link)")
+    donor_count = len([d for d in BOT_DATA.get("donations", {}).values() if d.get("score", 0) > 0])
+    text = (
+        "🏆 Leaderboard & Sharing\n\n"
+        f"Leaderboard: {'✅ ON' if lb_on else '❌ OFF'} — shown inside 🎁 Send Gift, "
+        f"{donor_count} donor(s) ranked so far.\n\n"
+        f"Share button (under My Usage): {'✅ ON' if share_on else '❌ OFF'}\n"
+        f"Share URL: {share_url}\n\n"
+        "Premium Plans are managed separately — see 💎 Premium Plans in the Admin Panel."
+    )
+    kb_rows = [
+        [styled_button(
+            f"{'✅' if lb_on else '❌'} Leaderboard",
+            callback_data="stgl:leaderboard_enabled:adm_leaderboard",
+        )],
+        [styled_button("📢 Post Leaderboard", callback_data="adm_post_leaderboard")],
+        [styled_button(
+            f"{'✅' if share_on else '❌'} Share Button",
+            callback_data="stgl:share_enabled:adm_leaderboard",
+        )],
+        [styled_button("✏️ Set Share URL", callback_data="adm_share_url_set")],
+    ]
+    if s.get("share_url"):
+        kb_rows.append([styled_button("🗑️ Reset Share URL", callback_data="adm_share_url_clear")])
+    kb_rows.append(back_row())
+    return text, InlineKeyboardMarkup(kb_rows)
+
+
+async def _render_adm_leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    text, kb = _build_adm_leaderboard_view()
+    await query.edit_message_text(text, reply_markup=kb)
+
+
+async def cb_adm_leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    await _render_adm_leaderboard(update, context)
+
+
+async def cb_adm_post_leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin can post the current leaderboard into the configured logger
+    channel (if set) as a shareable card, in addition to it showing up
+    inside Send Gift. Falls back to posting it right here in the admin's
+    own chat if no logger channel is configured, so the button always does
+    something useful."""
+    query = update.callback_query
+    await query.answer()
+    if not is_admin(update.effective_user.id):
+        return
+    text = build_leaderboard_text()
+    channel = BOT_DATA["settings"].get("logger_channel_id") if BOT_DATA["settings"].get("logger_enabled") else None
+    if channel:
+        try:
+            await context.bot.send_message(channel, text)
+            await query.message.reply_text("✅ " + to_small_caps("posted to the logger channel."))
+            return
+        except Exception as e:
+            await query.message.reply_text(f"⚠️ Couldn't post to logger channel ({e}). Posting here instead:")
+    await query.message.reply_text(text)
+
+
+async def cb_adm_share_url_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    remember_panel_message(context, query, "leaderboard")
+    context.user_data["awaiting"] = "share_url"
+    await query.message.reply_text(
+        "Type the URL the '📤 Share' button (under My Usage) should open — "
+        "e.g. your channel link or a landing page. Send /cancel to leave it as-is."
+    )
+
+
+async def cb_adm_share_url_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if not is_admin(update.effective_user.id):
+        return
+    BOT_DATA["settings"]["share_url"] = None
+    save_data()
+    await _render_adm_leaderboard(update, context)
+
+
 async def cb_settings_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """BUGFIX — this used to hardcode only 3 valid `return_to` screens, so any
     toggle wired to a 4th screen (e.g. adm_premium) flipped the setting in the
@@ -4167,6 +4515,19 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
         refreshed = await refresh_panel_after_save(context, "force_join", lambda: _build_adm_force_join_view())
         await update.message.reply_text(f"✅ Force-join channel set: {channel}{warning}" + ("" if refreshed else "\n(reopen the force-join panel to confirm)"))
 
+    elif awaiting == "share_url":
+        context.user_data.pop("awaiting", None)
+        url = text.strip()
+        if url.lower() in ("/cancel", "cancel", "-"):
+            await update.message.reply_text("Cancelled — share URL left unchanged.")
+            return
+        if not (url.startswith("http://") or url.startswith("https://") or url.startswith("tg://")):
+            url = "https://t.me/" + url.lstrip("@")
+        BOT_DATA["settings"]["share_url"] = url
+        save_data()
+        refreshed = await refresh_panel_after_save(context, "leaderboard", _build_adm_leaderboard_view)
+        await update.message.reply_text(f"✅ Share URL set: {url}" + ("" if refreshed else "\n(reopen the leaderboard panel to confirm)"))
+
     elif awaiting == "logger_channel_id":
         context.user_data.pop("awaiting", None)
         chat_id = None
@@ -4760,12 +5121,18 @@ SCREEN_RENDERERS.update(
         "adm_devsettings": _render_adm_devsettings,
         "adm_support_settings": _render_adm_support_settings,
         "adm_tickets": _render_adm_tickets,
+        "adm_leaderboard": _render_adm_leaderboard,
     }
 )
 
 
 def build_app() -> Application:
     app = ApplicationBuilder().token(BOT_TOKEN).build()
+
+    # Group -1 runs BEFORE every handler added below (group 0, the default).
+    # This is the actual enforcement point for "no button works until
+    # agree + join" — see cb_global_button_gate's docstring.
+    app.add_handler(CallbackQueryHandler(cb_global_button_gate), group=-1)
 
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
@@ -4790,11 +5157,16 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(cb_adm_owner_contact_clear, pattern="^adm_owner_contact_clear$"))
     app.add_handler(CallbackQueryHandler(cb_adm_logger_channel_set, pattern="^adm_logger_channel_set$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_force_join")(cb_adm_force_join), pattern="^adm_force_join$"))
+    app.add_handler(CallbackQueryHandler(nav_tracked("adm_leaderboard")(cb_adm_leaderboard), pattern="^adm_leaderboard$"))
+    app.add_handler(CallbackQueryHandler(cb_adm_post_leaderboard, pattern="^adm_post_leaderboard$"))
+    app.add_handler(CallbackQueryHandler(cb_adm_share_url_set, pattern="^adm_share_url_set$"))
+    app.add_handler(CallbackQueryHandler(cb_adm_share_url_clear, pattern="^adm_share_url_clear$"))
     app.add_handler(CallbackQueryHandler(cb_adm_force_join_set, pattern="^adm_force_join_set$"))
     app.add_handler(CallbackQueryHandler(cb_adm_force_join_clear, pattern="^adm_force_join_clear$"))
     app.add_handler(CallbackQueryHandler(cb_adm_force_join_test, pattern="^adm_force_join_test$"))
 
     app.add_handler(CallbackQueryHandler(cb_get_caption, pattern="^get_caption$"))
+    app.add_handler(CallbackQueryHandler(cb_get_audio, pattern="^get_audio$"))
     app.add_handler(CallbackQueryHandler(cb_download_another, pattern="^download_another$"))
     app.add_handler(CallbackQueryHandler(cb_check_force_join, pattern="^check_force_join$"))
     app.add_handler(ChatMemberHandler(cm_track_groups, ChatMemberHandler.MY_CHAT_MEMBER))
@@ -4809,6 +5181,8 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(cb_gift_stars, pattern="^gift_stars$"))
     app.add_handler(CallbackQueryHandler(cb_gift_stars_custom, pattern="^gift_stars_custom$"))
     app.add_handler(CallbackQueryHandler(cb_gift_stars_amount, pattern="^gift_stars_amt:"))
+    app.add_handler(CallbackQueryHandler(cb_gift_dismiss, pattern="^gift_dismiss$"))
+    app.add_handler(CallbackQueryHandler(cb_view_leaderboard, pattern="^view_leaderboard$"))
     app.add_handler(CallbackQueryHandler(cb_gift_upi, pattern="^gift_upi$"))
     app.add_handler(CallbackQueryHandler(cb_gift_upi_paid, pattern="^gift_upi_paid:"))
     app.add_handler(CallbackQueryHandler(cb_gift_upi_confirm, pattern="^gift_upi_confirm:"))
