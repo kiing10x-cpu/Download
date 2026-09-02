@@ -1,4 +1,20 @@
+# Core bot framework
 python-telegram-bot[job-queue]>=22.7
-yt-dlp>=2024.8.6
-pymongo>=4.6         # optional — only needed if you set MONGO_URI
-psutil>=5.9          # optional — nicer /health memory reporting
+
+# Instagram reel downloading
+yt-dlp>=2024.1.0
+
+# Branded QR code generation (dark card + gradient border + center logo).
+# Without these, QR generation silently falls back to a plain remote QR.
+qrcode[pil]>=7.4
+Pillow>=10.0
+
+# Optional — portable ffmpeg binary if the server has none installed
+# (only needed when yt-dlp has to merge separate video+audio streams)
+imageio-ffmpeg>=0.4.9
+
+# Optional — persistent storage backend instead of the local JSON file
+pymongo>=4.6
+
+# Optional — used for /health memory reporting if available
+psutil>=5.9
