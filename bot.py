@@ -1923,8 +1923,25 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     out_template = os.path.join(DOWNLOAD_DIR, f"%(id)s_{int(time.time())}.%(ext)s")
 
     def build_ydl_opts(use_merge: bool) -> dict:
+        # FIX — "video+audio hamesha clear download ho": the old format string
+        # ("bestvideo+bestaudio/best") had no format_sort, so yt-dlp could
+        # pick mismatched/lower-quality video+audio pairs, or a codec combo
+        # that plays back muted/glitchy on some devices. Now:
+        #  1. The no-merge path explicitly requires a format that already
+        #     has BOTH video and audio, so it can never silently pick a
+        #     video-only stream and ship a muted reel.
+        #  2. format_sort prefers resolution first, then mp4/h264/aac — the
+        #     combo every Telegram client can always play cleanly.
+        #  3. Audio is re-encoded to AAC on merge (video is left untouched
+        #     via -c:v copy) so a rare opus/vorbis track from IG can't end
+        #     up silent or unplayable inside Telegram's in-app player.
         opts = {
-            "format": "bestvideo+bestaudio/best" if use_merge else "best",
+            "format": (
+                "bestvideo*+bestaudio/best"
+                if use_merge
+                else "best[vcodec!=none][acodec!=none]/best"
+            ),
+            "format_sort": ["res", "ext:mp4:m4a", "vcodec:h264", "acodec:aac"],
             "outtmpl": out_template,
             "quiet": True,
             "no_warnings": True,
@@ -1932,6 +1949,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
         if use_merge:
             opts["merge_output_format"] = "mp4"
+            opts["postprocessor_args"] = {
+                "ffmpeg_merger": ["-c:v", "copy", "-c:a", "aac", "-movflags", "+faststart"]
+            }
             if FFMPEG_PATH:
                 opts["ffmpeg_location"] = FFMPEG_PATH
         return opts
@@ -2358,12 +2378,26 @@ async def show_usage_screen(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 price_bits.append(f"{p['price_stars']}⭐")
             text += f"• {p['name']} — {' / '.join(price_bits)} — {p.get('days', 30)}{to_small_caps('d')}\n"
             kb_rows.append([styled_button(f"💎 {p['name']}", callback_data=f"gift_plan:{p['id']}", style="success")])
-    elif s.get("premium_enabled"):
-        kb_rows.append([styled_button(to_small_caps("🚀 upgrade for more"), callback_data="gift_menu", style="success")])
+    # FIX — Upgrade button under "My Usage" must ONLY appear once the admin
+    # has actually added a real plan in Admin Panel > Premium, and tapping
+    # it must always lead straight to that plan's fixed price (no generic
+    # "pick any amount" gift flow). The old `elif s.get("premium_enabled")`
+    # fallback showed a generic "🚀 Upgrade for more" button (-> cb_gift_menu,
+    # a free-amount Stars/UPI flow) even when zero plans existed, which is
+    # exactly the mismatch reported. Removed: no plans = no Upgrade button.
     # v5 — colored Share button under My Usage, admin-toggleable.
+    # FIX — "share button workable nahi hai": it was a plain url= button
+    # pointing straight at the bot/channel link, so tapping it just opened
+    # that link in-app instead of actually sharing anything — there was
+    # nothing to "share" to a friend. Switched to Telegram's native
+    # t.me/share/url deep link, which opens Telegram's own chat picker with
+    # the link + a message pre-filled, so one tap lets the user forward it
+    # straight into any chat — the same menu, now an actually working share.
     if s.get("share_enabled", True):
         share_url = await resolve_share_url(context)
-        kb_rows.append([styled_button("📤 " + to_small_caps("share"), url=share_url, style="primary")])
+        share_text = to_small_caps("check out this bot! 🎬 instagram reel downloader")
+        share_deeplink = f"https://t.me/share/url?url={quote(share_url, safe='')}&text={quote(share_text, safe='')}"
+        kb_rows.append([styled_button("📤 " + to_small_caps("share"), url=share_deeplink, style="primary")])
     try:
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     except Exception:
