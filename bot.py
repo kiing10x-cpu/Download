@@ -48,6 +48,7 @@ from telegram.ext import (
     MessageHandler,
     CallbackQueryHandler,
     ChatMemberHandler,
+    ChatJoinRequestHandler,
     PreCheckoutQueryHandler,
     ContextTypes,
     filters,
@@ -847,7 +848,9 @@ DEFAULT_DATA = {
         "daily_limit": 20,
         "admin_group_id": None,   # #6 — ticket cards posted here
         "owner_id": None,         # #12 — /export gate
-        "force_join_channel": None,   # v3 §7 — @channelusername or -100id; None = disabled
+        "force_join_channel": None,   # legacy single force-join target
+        "force_join_channels": [],   # [{"chat_id": @username/-100id or None, "link": https://...}]
+        "force_join_request_verified": {}, # user_id -> [channel keys] accepted via join request
         "send_as_document": False,    # v3 §8 — send reels as document instead of video
         "document_mode_threshold_mb": 45,  # auto-switch to document above this size
         "premium_plans": [],  # v4 — admin-defined plans: {id, name, days, price_inr, price_stars, enabled}
@@ -1080,36 +1083,58 @@ async def cm_track_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_data()
 
 
-async def is_force_join_ok(context: ContextTypes.DEFAULT_TYPE, user_id: int) -> bool:
-    """v3 §7 — if admin set a force-join channel, block non-members.
+def _force_join_targets():
+    """Return normalized multi-force-join targets, while migrating legacy data."""
+    settings = BOT_DATA["settings"]
+    targets = settings.get("force_join_channels") or []
+    if not targets and settings.get("force_join_channel"):
+        legacy = settings["force_join_channel"]
+        targets = [{"chat_id": legacy if not str(legacy).startswith("http") else None,
+                    "link": legacy if str(legacy).startswith("http") else None}]
+        settings["force_join_channels"] = targets
+    normalized = []
+    for item in targets:
+        if isinstance(item, str):
+            item = {"chat_id": item if not item.startswith("http") else None,
+                    "link": item if item.startswith("http") else None}
+        if isinstance(item, dict) and (item.get("chat_id") or item.get("link")):
+            normalized.append(item)
+    return normalized
 
-    BUGFIX — this used to swallow EVERY exception and silently fail OPEN
-    (treat the user as verified) with zero logging anywhere. In practice
-    that meant a bare username typed without '@', or the bot simply not
-    being an admin in that channel, made force-join look "set" in the
-    panel while never actually blocking a single person — with no way to
-    tell why. We still fail open on error (a broken force-join shouldn't
-    brick the whole bot for every user), but now the real reason is logged
-    to the Activity Log so it's actually diagnosable."""
-    channel = BOT_DATA["settings"].get("force_join_channel")
-    if not channel or is_admin(user_id):
+
+async def is_force_join_ok(context: ContextTypes.DEFAULT_TYPE, user_id: int) -> bool:
+    """Require membership in every configured force-join channel.
+
+    Join requests are also accepted: when Telegram sends the bot a
+    ChatJoinRequest update, that user is temporarily/explicitly marked as
+    verified for that target, so they can start using the bot without waiting
+    for a manual re-check.
+    """
+    targets = _force_join_targets()
+    if not targets or is_admin(user_id):
         return True
-    try:
-        member = await context.bot.get_chat_member(chat_id=channel, user_id=user_id)
-        return member.status not in ("left", "kicked")
-    except Exception as e:
-        log.warning("Force-join check failed (channel=%s, user=%s): %s", channel, user_id, e)
-        log_error("force_join", f"channel={channel}, user={user_id}: {e}")
-        return True  # fail-open so a misconfigured channel doesn't brick the bot
+    verified = BOT_DATA["settings"].get("force_join_request_verified", {}).get(str(user_id), [])
+    for target in targets:
+        chat_id = target.get("chat_id")
+        key = str(chat_id or target.get("link"))
+        if key in verified:
+            continue
+        if not chat_id:
+            # Link-only targets cannot be queried by getChatMember. They can
+            # still be verified through a join-request update.
+            return False
+        try:
+            member = await context.bot.get_chat_member(chat_id=chat_id, user_id=user_id)
+            if member.status in ("left", "kicked", "restricted"):
+                return False
+        except Exception as e:
+            log.warning("Force-join check failed (target=%s, user=%s): %s", target, user_id, e)
+            log_error("force_join", f"target={target}, user={user_id}: {e}")
+            return False
+    return True
 
 
 async def resolve_force_join_link(context: ContextTypes.DEFAULT_TYPE, channel) -> str | None:
-    """BUGFIX — build a link that actually opens. Private channels are set
-    by numeric ID (-100...), which has NO public https://t.me/<id> page —
-    the old code built exactly that broken link, so the '📢 Join Channel'
-    button led nowhere for any admin who configured force-join with a
-    numeric ID (the documented, suggested way to do it for private
-    channels). Now we resolve a real invite link via the Bot API."""
     if not channel:
         return None
     ch = str(channel)
@@ -1127,6 +1152,36 @@ async def resolve_force_join_link(context: ContextTypes.DEFAULT_TYPE, channel) -
             log.warning("Force-join: could not resolve invite link for %s: %s", ch, e)
             return None
     return f"https://t.me/{ch.lstrip('@')}"
+
+
+async def get_force_join_links(context):
+    links = []
+    for target in _force_join_targets():
+        link = target.get("link") or await resolve_force_join_link(context, target.get("chat_id"))
+        if link:
+            links.append(link)
+    return links
+
+
+async def handle_force_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Accept a received join request as verification for force-join."""
+    req = update.chat_join_request
+    if not req:
+        return
+    uid = str(req.from_user.id)
+    verified_map = BOT_DATA["settings"].setdefault("force_join_request_verified", {})
+    keys = set(verified_map.get(uid, []))
+    for target in _force_join_targets():
+        chat_id = target.get("chat_id")
+        if str(chat_id) == str(req.chat.id):
+            keys.add(str(chat_id))
+        # Match the actual invite link if Telegram exposes it.
+        inv = getattr(req, "invite_link", None)
+        if inv and target.get("link") and getattr(inv, "invite_link", None) == target.get("link"):
+            keys.add(str(target.get("link")))
+    if keys:
+        verified_map[uid] = list(keys)
+        save_data()
 
 
 def is_link_blocked(url: str) -> bool:
@@ -1546,21 +1601,17 @@ async def send_style_preview(context, chat_id, source_text):
 
 async def _replace_rkb_screen(context: ContextTypes.DEFAULT_TYPE, chat_id: int, key: str, text: str, reply_markup=None):
     """Delete the previous message shown for this reply-keyboard screen (if
-    any) before sending the new one. Without this, tapping the same
-    persistent button (📊 My Usage, 👨‍💻 Developer, 📘 How To Use) over and
-    over just stacked a fresh copy under the last one every time — this
-    makes a repeat tap replace the old reply instead, for any number of
-    taps in a row."""
-    store = context.user_data.setdefault("rkb_screen_msg", {})
-    prev = store.get(key)
-    if prev and prev[0] == chat_id:
-        try:
-            await context.bot.delete_message(chat_id=chat_id, message_id=prev[1])
-        except Exception:
-            pass
+    any) before sending the new one — for EVERY persistent bottom button
+    (📊 My Usage, 🎁 Send A Gift, 👨‍💻 Developer, 📘 How To Use, 🎧 Support,
+    ⬇️ Download Reel, 🌐 Language), not just one of them. Without this,
+    tapping the same button over and over just stacked a fresh bot reply
+    under the last one every time, click after click. Uses the same
+    persisted panel_msg store as /start and /admin, so it survives a bot
+    restart, not just context.user_data."""
     msg = await context.bot.send_message(chat_id, text, reply_markup=reply_markup)
-    store[key] = (chat_id, msg.message_id)
+    await track_and_refresh_panel(context, chat_id, f"rkb_{key}", msg)
     return msg
+
 
 
 async def cb_styleset(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1649,17 +1700,16 @@ async def require_disclaimer(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def show_force_join_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Shared force-join prompt, used both by require_gate() and by the
-    '✅ I've Joined' recheck button when the check still fails."""
-    channel = BOT_DATA["settings"].get("force_join_channel")
-    ch_link = await resolve_force_join_link(context, channel)
+    """Show one full-width-looking join button per required channel."""
+    links = await get_force_join_links(context)
     kb_rows = []
-    if ch_link:
-        kb_rows.append([InlineKeyboardButton(to_small_caps("📢 join channel"), url=ch_link)])
-    kb_rows.append([styled_button(to_small_caps("✅ i've joined"), callback_data="check_force_join", style="success")])
-    text = "🔒 " + to_small_caps("please join our channel first to use this bot.")
-    if not ch_link:
-        text += "\n⚠️ " + to_small_caps("couldn't get a join link — please contact an admin.")
+    for i, link in enumerate(links, 1):
+        label = "📢 JOIN CHANNEL" if len(links) == 1 else f"📢 JOIN CHANNEL {i}"
+        kb_rows.append([InlineKeyboardButton(label, url=link)])
+    kb_rows.append([styled_button("✅ I'VE JOINED / SENT REQUEST", callback_data="check_force_join", style="success")])
+    text = "🔒 " + to_small_caps("please join all required channels to use this bot.")
+    if not links:
+        text += "\n⚠️ " + to_small_caps("no usable join link found — contact an admin.")
     chat_id = update.effective_chat.id
     if update.callback_query:
         try:
@@ -1807,13 +1857,18 @@ async def cmd_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await require_gate(update, context):
         await delete_incoming(update)
         return
+    await delete_incoming(update)
     langs = BOT_DATA["settings"].get("languages", [])
     if not langs:
-        await update.message.reply_text(to_small_caps("no extra languages are configured yet."))
-        await delete_incoming(update)
+        await _replace_rkb_screen(
+            context, update.effective_chat.id, "language",
+            to_small_caps("no extra languages are configured yet."),
+        )
         return
-    await update.message.reply_text(to_small_caps("🌐 choose your language:"), reply_markup=build_language_keyboard())
-    await delete_incoming(update)
+    await _replace_rkb_screen(
+        context, update.effective_chat.id, "language",
+        to_small_caps("🌐 choose your language:"), reply_markup=build_language_keyboard(),
+    )
 
 
 async def cb_setlang(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1898,26 +1953,39 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await require_gate(update, context):
         return
 
-    # v2 §1 — persistent reply-keyboard routing
+    # v2 §1 — persistent reply-keyboard routing. Every branch here deletes
+    # the user's own tapped-button message (it was piling up in the chat
+    # right alongside the bot's replies) and routes its reply through the
+    # same replace-in-place screen, so repeat taps on ANY of these buttons
+    # — not just My Usage — leave only the most recent copy behind.
     if text == RKB_DOWNLOAD:
-        await update.message.reply_text("🔗 " + to_small_caps("paste your instagram reel link here"))
+        await delete_incoming(update)
+        await _replace_rkb_screen(
+            context, update.effective_chat.id, "download",
+            "🔗 " + to_small_caps("paste your instagram reel link here"),
+        )
         return
     if text == RKB_USAGE:
+        await delete_incoming(update)
         await show_usage_screen(update, context)
         return
     if text == RKB_GIFT:
+        await delete_incoming(update)
         await show_gift_menu(update, context)
         return
     if text == RKB_LANGUAGE:
         await cmd_language(update, context)
         return
     if text == RKB_DEVELOPER:
+        await delete_incoming(update)
         await show_developer_button(update, context)
         return
     if text == RKB_HOWTO:
+        await delete_incoming(update)
         await _replace_rkb_screen(context, update.effective_chat.id, "howto", STR["how_to_use"])
         return
     if text == RKB_SUPPORT:
+        await delete_incoming(update)
         await support_button_entry(update, context)
         return
     if text == RKB_ADMINPANEL and is_admin(user_id):
@@ -2380,12 +2448,12 @@ async def support_button_entry(update: Update, context: ContextTypes.DEFAULT_TYP
     uid = str(user.id)
     user_rec = BOT_DATA["users"].setdefault(uid, {})
     open_tid = user_rec.get("open_ticket_id")
-    target_msg = update.callback_query.message if update.callback_query else update.message
+    chat_id = update.effective_chat.id
     if open_tid and str(open_tid) in BOT_DATA["tickets"] and BOT_DATA["tickets"][str(open_tid)]["status"] == "open":
-        await target_msg.reply_text(f"🎫 Ticket #{open_tid} already open — just send your message here.")
+        await context.bot.send_message(chat_id, f"🎫 Ticket #{open_tid} already open — just send your message here.")
         return
     context.user_data["awaiting"] = "ticket_new"
-    await target_msg.reply_text(STR["support_prompt"])
+    await context.bot.send_message(chat_id, STR["support_prompt"])
 
 
 async def cb_ticket_close(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2562,7 +2630,7 @@ async def resolve_developer_url(context: ContextTypes.DEFAULT_TYPE) -> str | Non
 async def show_developer_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = await resolve_developer_url(context)
     if not url:
-        await update.message.reply_text(to_small_caps("developer contact not set up yet."))
+        await context.bot.send_message(update.effective_chat.id, to_small_caps("developer contact not set up yet."))
         return
     kb = InlineKeyboardMarkup([[styled_button("👨‍💻 " + to_small_caps("message developer"), url=url)]])
     await _replace_rkb_screen(
@@ -2590,8 +2658,9 @@ async def show_gift_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if BOT_DATA["settings"].get("leaderboard_enabled"):
         text += "\n\n" + build_leaderboard_text(limit=3)
         kb_rows.append([styled_button("🏆 Full Leaderboard", callback_data="view_leaderboard")])
-    target = update.callback_query.message if update.callback_query else update.message
-    await target.reply_text(text, reply_markup=InlineKeyboardMarkup(kb_rows))
+    await _replace_rkb_screen(
+        context, update.effective_chat.id, "gift", text, reply_markup=InlineKeyboardMarkup(kb_rows),
+    )
 
 
 async def cb_gift_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4255,24 +4324,24 @@ async def cb_adm_logger_channel_set(update: Update, context: ContextTypes.DEFAUL
 # ---- v3 §7 — Force-join channel ------------------------------------------------
 
 def _build_adm_force_join_view():
-    s = BOT_DATA["settings"]
-    channel = s.get("force_join_channel")
+    targets = _force_join_targets()
+    lines = []
+    for i, t in enumerate(targets, 1):
+        lines.append(f"{i}. {t.get('chat_id') or '(link-only)'}\n   🔗 {t.get('link') or 'auto-resolve'}")
     text = (
-        "📢 Force-Join Channel\n\n"
-        f"Channel: {channel or '(not set — force-join disabled)'}\n\n"
-        "When set, users must be a member of this channel before they can "
-        "download reels. Bot must be an admin of the channel to check membership.\n\n"
-        "⚠️ Note: you and other bot admins ALWAYS bypass this check, by design — "
-        "so testing with your own admin account will never show the block screen. "
-        "Test with a normal (non-admin) account, or use 🧪 Test Now below."
+        "📢 Multiple Force-Join\n\n"
+        + ("\n\n".join(lines) if lines else "No channels set — force-join disabled.")
+        + "\n\nUsers must satisfy ALL listed channels. Public @usernames, numeric "
+          "channel IDs and t.me/invite links are supported. Join requests are also "
+          "accepted when Telegram delivers the request update to this bot."
     )
     kb_rows = [
-        [styled_button("✏️ Set Channel", callback_data="adm_force_join_set")],
+        [styled_button("➕ Add Channel / Link", callback_data="adm_force_join_set")],
+        [styled_button("🗑 Remove Last", callback_data="adm_force_join_remove")] if targets else [],
+        [styled_button("❌ Disable All", callback_data="adm_force_join_clear")],
+        back_row(),
     ]
-    if channel:
-        kb_rows.append([styled_button("🧪 Test Now", callback_data="adm_force_join_test")])
-    kb_rows.append([styled_button("❌ Disable", callback_data="adm_force_join_clear")])
-    kb_rows.append(back_row())
+    kb_rows = [r for r in kb_rows if r]
     return text, InlineKeyboardMarkup(kb_rows)
 
 
@@ -4293,8 +4362,9 @@ async def cb_adm_force_join_set(update: Update, context: ContextTypes.DEFAULT_TY
     remember_panel_message(context, query, "force_join")
     context.user_data["awaiting"] = "force_join_channel"
     await query.message.reply_text(
-        "Type the channel username (like @mychannel) or numeric ID (-100xxxxxxxxxx). "
-        "Bot must already be an admin in that channel."
+        "Send a public @channelusername, numeric channel ID (-100xxxxxxxxxx), "
+        "or a full https://t.me/... invite/join link. You can add multiple channels one by one. "
+        "For reliable membership checking, the bot should be an admin in each channel."
     )
 
 
@@ -4304,7 +4374,20 @@ async def cb_adm_force_join_clear(update: Update, context: ContextTypes.DEFAULT_
     if not is_admin(update.effective_user.id):
         return
     BOT_DATA["settings"]["force_join_channel"] = None
+    BOT_DATA["settings"]["force_join_channels"] = []
     save_data()
+    await _render_adm_force_join(update, context)
+
+
+async def cb_adm_force_join_remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    targets = _force_join_targets()
+    if targets:
+        targets.pop()
+        BOT_DATA["settings"]["force_join_channels"] = targets
+        BOT_DATA["settings"]["force_join_channel"] = targets[0].get("chat_id") if targets else None
+        save_data()
     await _render_adm_force_join(update, context)
 
 
@@ -5153,36 +5236,39 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
 
     elif awaiting == "force_join_channel":
         context.user_data.pop("awaiting", None)
-        channel = text.strip()
-        # BUGFIX — a bare username typed without '@' (e.g. "mychannel"
-        # instead of "@mychannel") makes get_chat_member reject the call
-        # outright; that exception used to be swallowed silently, so
-        # force-join looked "configured" but never blocked anyone.
-        if channel and not channel.startswith("http") and not channel.lstrip("-").isdigit() and not channel.startswith("@"):
-            channel = "@" + channel
-        BOT_DATA["settings"]["force_join_channel"] = channel
+        raw = text.strip()
+        if not raw:
+            await update.message.reply_text("❌ Please send a valid channel username, ID, or t.me link.")
+            return
+        target = {"chat_id": None, "link": None}
+        if raw.startswith("http://") or raw.startswith("https://"):
+            target["link"] = raw
+            # Public t.me usernames can also be checked directly.
+            m = re.match(r"https?://(?:t\.me|telegram\.me)/([^/?#]+)", raw)
+            if m and not m.group(1).startswith("+") and m.group(1) not in ("joinchat",):
+                target["chat_id"] = "@" + m.group(1).lstrip("@")
+        else:
+            channel = raw
+            if not channel.lstrip("-").isdigit() and not channel.startswith("@"):
+                channel = "@" + channel
+            target["chat_id"] = channel
+        targets = _force_join_targets()
+        key = str(target.get("chat_id") or target.get("link"))
+        if any(str(x.get("chat_id") or x.get("link")) == key for x in targets):
+            await update.message.reply_text("⚠️ That force-join target is already added.")
+            return
+        targets.append(target)
+        BOT_DATA["settings"]["force_join_channels"] = targets
+        BOT_DATA["settings"]["force_join_channel"] = targets[0].get("chat_id") if targets else None
         save_data()
-        # BUGFIX — verify RIGHT NOW instead of letting the admin find out
-        # days later that nobody was ever actually being blocked.
-        warning = ""
-        try:
-            me = await context.bot.get_me()
-            member = await context.bot.get_chat_member(chat_id=channel, user_id=me.id)
-            if member.status not in ("administrator", "creator"):
-                warning = (
-                    "\n\n⚠️ " + to_small_caps("bot is in this channel but is NOT an admin there — "
-                    "membership checks may fail. make the bot an admin in this channel.")
-                )
-        except Exception as e:
-            warning = (
-                f"\n\n⚠️ " + to_small_caps("could not verify this channel")
-                + f" ({e}). " + to_small_caps(
-                    "force-join will fail open (let everyone through) until this is fixed — "
-                    "double-check the username/id and make sure the bot is an admin there."
-                )
-            )
         refreshed = await refresh_panel_after_save(context, "force_join", lambda: _build_adm_force_join_view())
-        await update.message.reply_text(f"✅ Force-join channel set: {channel}{warning}" + ("" if refreshed else "\n(reopen the force-join panel to confirm)"))
+        await update.message.reply_text(
+            f"✅ Added force-join target: {raw}\n\n"
+            "Add another from the panel if needed. For private link-only channels, "
+            "membership can be confirmed through join-request updates; for normal "
+            "membership checks, configure the channel ID/@username and make the bot admin."
+            + ("" if refreshed else "\n(Reopen the panel to confirm.)")
+        )
 
     elif awaiting == "share_url":
         context.user_data.pop("awaiting", None)
@@ -5600,24 +5686,78 @@ async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await msg.edit_text(f"🏓 Pong! {ms}ms")
 
 
+EXPORT_MAX_BYTES = 49 * 1024 * 1024  # stay under Telegram's ~50MB bot upload cap
+EXPORT_EXCLUDE_DIRS = {DOWNLOAD_DIR, BACKUP_DIR, "__pycache__", ".git", ".venv", "venv"}
+EXPORT_EXCLUDE_FILES = {DATA_FILE}
+
+
+def _build_export_zip(src_dir: str) -> str:
+    """Zip the bot's source code only — never the downloads/backups/data
+    folders, which is what actually made /export unusable before: those
+    directories fill up with downloaded videos and JSON backups over time,
+    so the old 'zip literally everything' approach routinely built an
+    archive well past Telegram's ~50MB bot upload limit and the send would
+    just silently fail with no feedback to the admin."""
+    import zipfile
+
+    zip_path = os.path.join(tempfile.gettempdir(), f"bot_export_{int(time.time())}.zip")
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for root, dirs, files in os.walk(src_dir):
+            dirs[:] = [d for d in dirs if d not in EXPORT_EXCLUDE_DIRS and not d.startswith(".")]
+            for fname in files:
+                if fname in EXPORT_EXCLUDE_FILES or fname.endswith((".zip", ".pyc")):
+                    continue
+                full = os.path.join(root, fname)
+                arcname = os.path.relpath(full, src_dir)
+                try:
+                    zf.write(full, arcname)
+                except Exception:
+                    continue  # skip any file that vanished/locked mid-walk
+    return zip_path
+
+
 async def cmd_export(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """v2 §12 — owner-only, zips the bot source dir and DMs it to the owner."""
+    """Owner-only — zips the bot's source code (never user downloads,
+    backups, or the live data file) and DMs it to the owner. Wrapped
+    end-to-end in error handling so a failure always tells the admin what
+    went wrong instead of silently doing nothing."""
     if not is_owner(update.effective_user.id):
-        await update.message.reply_text("🚫 " + to_small_caps("access denied"))
+        await update.message.reply_text("🚫 " + to_small_caps("owner only."))
         return
+    status = await update.message.reply_text("📦 " + to_small_caps("building export..."))
     src_dir = os.path.dirname(os.path.abspath(__file__))
-    zip_base = os.path.join(tempfile.gettempdir(), f"bot_export_{int(time.time())}")
+    zip_path = None
     try:
-        zip_path = shutil.make_archive(zip_base, "zip", src_dir)
-    except Exception:
-        log.exception("Export zip failed")
-        await update.message.reply_text("⚠️ Export failed, check logs.")
-        return
-    with open(zip_path, "rb") as f:
-        await context.bot.send_document(chat_id=update.effective_user.id, document=f, filename="bot_source.zip")
-    os.remove(zip_path)
-    if update.effective_chat.id != update.effective_user.id:
-        await update.message.reply_text("✅ Sent to your DM.")
+        zip_path = _build_export_zip(src_dir)
+        size = os.path.getsize(zip_path)
+        if size > EXPORT_MAX_BYTES:
+            await status.edit_text(
+                "⚠️ " + to_small_caps(f"export is {size / 1024 / 1024:.1f}mb — too large for telegram's ~50mb bot upload limit.")
+                + "\n" + to_small_caps("try removing unused files from the project folder and run /export again.")
+            )
+            return
+        with open(zip_path, "rb") as f:
+            await context.bot.send_document(chat_id=update.effective_user.id, document=f, filename="bot_source.zip")
+        try:
+            await status.delete()
+        except Exception:
+            pass
+        if update.effective_chat.id != update.effective_user.id:
+            await update.message.reply_text("✅ " + to_small_caps("sent to your dm."))
+    except Forbidden:
+        await status.edit_text(
+            "⚠️ " + to_small_caps("couldn't dm you the export — start a private chat with the bot first, then try again.")
+        )
+    except Exception as e:
+        log.exception("Export failed")
+        log_error("unhandled", f"/export failed: {e}")
+        await status.edit_text("❌ " + to_small_caps("export failed — see the activity log for details."))
+    finally:
+        if zip_path and os.path.exists(zip_path):
+            try:
+                os.remove(zip_path)
+            except Exception:
+                pass
 
 
 # ----------------------------------------------------------------------------
@@ -5879,6 +6019,7 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(cb_adm_share_url_clear, pattern="^adm_share_url_clear$"))
     app.add_handler(CallbackQueryHandler(cb_adm_force_join_set, pattern="^adm_force_join_set$"))
     app.add_handler(CallbackQueryHandler(cb_adm_force_join_clear, pattern="^adm_force_join_clear$"))
+    app.add_handler(CallbackQueryHandler(cb_adm_force_join_remove, pattern="^adm_force_join_remove$"))
     app.add_handler(CallbackQueryHandler(cb_adm_force_join_test, pattern="^adm_force_join_test$"))
 
     app.add_handler(CallbackQueryHandler(cb_get_caption, pattern="^get_caption$"))
@@ -5886,6 +6027,7 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(cb_download_another, pattern="^download_another$"))
     app.add_handler(CallbackQueryHandler(cb_check_force_join, pattern="^check_force_join$"))
     app.add_handler(ChatMemberHandler(cm_track_groups, ChatMemberHandler.MY_CHAT_MEMBER))
+    app.add_handler(ChatJoinRequestHandler(handle_force_join_request))
 
     app.add_handler(CallbackQueryHandler(cb_ticket_close, pattern="^tk_close:"))
     app.add_handler(CallbackQueryHandler(cb_ticket_reopen, pattern="^tk_reopen:"))
