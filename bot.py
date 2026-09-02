@@ -154,16 +154,18 @@ RKB_SUPPORT = "🎧 Support"
 
 def main_reply_keyboard() -> ReplyKeyboardMarkup:
     """v2 Section 1 — persistent bottom keyboard, alongside the existing
-    inline /start menu (doesn't replace it)."""
+    inline /start menu (doesn't replace it). Colors via Bot API 9.4 `style`
+    (needs PTB 22.7+, already pinned in requirements.txt)."""
     return ReplyKeyboardMarkup(
         [
-            [KeyboardButton(RKB_DOWNLOAD)],
-            [KeyboardButton(RKB_USAGE), KeyboardButton(RKB_GIFT)],
-            [KeyboardButton(RKB_LANGUAGE), KeyboardButton(RKB_DEVELOPER)],
-            [KeyboardButton(RKB_HOWTO), KeyboardButton(RKB_SUPPORT)],
+            [styled_kb_button(RKB_DOWNLOAD, style="success")],
+            [styled_kb_button(RKB_USAGE, style="primary"), styled_kb_button(RKB_GIFT, style="primary")],
+            [styled_kb_button(RKB_LANGUAGE, style="primary"), styled_kb_button(RKB_DEVELOPER, style="primary")],
+            [styled_kb_button(RKB_HOWTO, style="danger"), styled_kb_button(RKB_SUPPORT, style="danger")],
         ],
         resize_keyboard=True,
     )
+
 
 
 def _map_alpha_digit(text: str, upper_base: int, lower_base: int, digit_base=None) -> str:
@@ -232,6 +234,12 @@ except TypeError:
         "Run: pip install -U python-telegram-bot"
     )
 
+try:
+    KeyboardButton(text="probe", style="primary")
+    SUPPORTS_KB_BUTTON_STYLE = True
+except TypeError:
+    SUPPORTS_KB_BUTTON_STYLE = False
+
 
 def styled_button(text, callback_data=None, url=None, style=None):
     kwargs = {}
@@ -242,6 +250,12 @@ def styled_button(text, callback_data=None, url=None, style=None):
     if style and SUPPORTS_BUTTON_STYLE:
         kwargs["style"] = style
     return InlineKeyboardButton(text, **kwargs)
+
+
+def styled_kb_button(text, style=None):
+    if style and SUPPORTS_KB_BUTTON_STYLE:
+        return KeyboardButton(text, style=style)
+    return KeyboardButton(text)
 
 
 # ----------------------------------------------------------------------------
@@ -733,7 +747,18 @@ async def render_menu(context: ContextTypes.DEFAULT_TYPE, chat_id: int, menu_id:
         if owner_id:
             label = BOT_DATA["settings"].get("owner_display_label") or "👑 Developer"
             owner_id_str = str(owner_id)
-            url = f"tg://user?id={owner_id_str}" if owner_id_str.isdigit() else f"https://t.me/{owner_id_str.lstrip('@')}"
+            if owner_id_str.isdigit():
+                # Same tg://user?id= reliability issue as the developer
+                # button — resolve the real @username via getChat when we can.
+                url = f"tg://user?id={owner_id_str}"
+                try:
+                    chat = await context.bot.get_chat(int(owner_id_str))
+                    if chat.username:
+                        url = f"https://t.me/{chat.username}"
+                except Exception:
+                    pass
+            else:
+                url = f"https://t.me/{owner_id_str.lstrip('@')}"
             owner_row = [styled_button(label, url=url)]
             kb = InlineKeyboardMarkup((kb.inline_keyboard if kb else []) + [owner_row])
 
@@ -1433,18 +1458,35 @@ async def show_usage_screen(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # v2 §5 — Developer button
 # ----------------------------------------------------------------------------
 
-def resolve_developer_url() -> str | None:
+def _normalize_username_link(value: str) -> str:
+    value = value.strip()
+    if value.startswith("http://") or value.startswith("https://") or value.startswith("tg://"):
+        return value
+    return f"https://t.me/{value.lstrip('@')}"
+
+
+async def resolve_developer_url(context: ContextTypes.DEFAULT_TYPE) -> str | None:
     link = BOT_DATA["settings"].get("developer_link")
     if link:
-        return link
+        return _normalize_username_link(link)
     dev_id = BOT_DATA["settings"].get("developer_id")
-    if dev_id:
-        return f"tg://user?id={dev_id}"
-    return None
+    if not dev_id:
+        return None
+    # tg://user?id=... only opens if the tapping user's Telegram client already
+    # has that account cached (shared group, contact, etc.) — it silently does
+    # nothing otherwise, which is the "click nahi khulta" bug. Resolving the
+    # real @username via getChat and linking to t.me/username always works.
+    try:
+        chat = await context.bot.get_chat(dev_id)
+        if chat.username:
+            return f"https://t.me/{chat.username}"
+    except Exception:
+        pass
+    return f"tg://user?id={dev_id}"
 
 
 async def show_developer_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    url = resolve_developer_url()
+    url = await resolve_developer_url(context)
     if not url:
         await update.message.reply_text(to_small_caps("developer contact not set up yet."))
         return
@@ -2905,7 +2947,14 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
             return
         BOT_DATA["settings"]["developer_id"] = int(text)
         save_data()
-        await update.message.reply_text(f"✅ Developer ID set: {text}")
+        note = ""
+        try:
+            chat = await context.bot.get_chat(int(text))
+            if not chat.username:
+                note = "\n⚠️ Ye account ka koi @username nahi hai — button kabhi-kabhi khulega nahi. 'Set Link Override' se @username bhejna better hai."
+        except Exception:
+            note = "\n⚠️ Bot is ID tak abhi pahuch nahi paaya (developer ne bot ko kabhi message nahi kiya) — button reliably khulega nahi jab tak 'Set Link Override' se @username na do."
+        await update.message.reply_text(f"✅ Developer ID set: {text}{note}")
 
     elif awaiting == "developer_link":
         context.user_data.pop("awaiting", None)
