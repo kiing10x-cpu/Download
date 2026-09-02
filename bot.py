@@ -190,12 +190,51 @@ def _diagonal_gradient(size, c1, c2):
     return grad
 
 
-def _paste_center_logo(qr_img: "Image.Image", logo_bytes: bytes):
-    """Paste a circular avatar in the middle of the QR with a white buffer
+def _default_center_logo(size: int) -> "Image.Image":
+    """Vector-drawn circular fallback logo (gradient ring + simple bolt
+    icon), used whenever no user avatar is available — e.g. the user has
+    no Telegram profile photo, get_user_profile_photos fails, or
+    logo_bytes is None. This is drawn with plain PIL shapes, not text, so
+    it never depends on a font being present and the QR center is never
+    left blank/plain."""
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    grad = _diagonal_gradient((size, size), QR_GRADIENT_A, QR_GRADIENT_B).convert("RGBA")
+    ring_mask = Image.new("L", (size, size), 0)
+    ImageDraw.Draw(ring_mask).ellipse((0, 0, size - 1, size - 1), fill=255)
+    img.paste(grad, (0, 0), ring_mask)
+
+    inner_pad = max(2, int(size * 0.09))
+    d = ImageDraw.Draw(img)
+    d.ellipse(
+        (inner_pad, inner_pad, size - 1 - inner_pad, size - 1 - inner_pad),
+        fill=QR_CARD_BG + (255,),
+    )
+
+    # simple bolt icon, pure vector — no font/glyph dependency at all
+    cx, cy = size / 2, size / 2
+    s = size * 0.20
+    points = [
+        (cx + s * 0.15, cy - s), (cx - s * 0.55, cy + s * 0.15), (cx - s * 0.05, cy + s * 0.15),
+        (cx - s * 0.15, cy + s), (cx + s * 0.55, cy - s * 0.15), (cx + s * 0.05, cy - s * 0.15),
+    ]
+    d.polygon(points, fill=QR_TEXT_LIGHT + (255,))
+    return img
+
+
+def _paste_center_logo(qr_img: "Image.Image", logo_bytes: bytes = None):
+    """Paste a circular avatar (or the vector fallback logo, if no avatar
+    bytes were given/loadable) in the middle of the QR with a white buffer
     ring underneath it, sized so the code is still reliably scannable."""
-    logo = Image.open(io.BytesIO(logo_bytes)).convert("RGBA")
     logo_size = int(qr_img.width * QR_LOGO_RATIO)
-    logo = ImageOps.fit(logo, (logo_size, logo_size), Image.LANCZOS)
+    if logo_bytes:
+        try:
+            logo = Image.open(io.BytesIO(logo_bytes)).convert("RGBA")
+            logo = ImageOps.fit(logo, (logo_size, logo_size), Image.LANCZOS)
+        except Exception:
+            log.exception("Could not decode avatar bytes for QR center logo — using fallback logo")
+            logo = _default_center_logo(logo_size)
+    else:
+        logo = _default_center_logo(logo_size)
 
     mask = Image.new("L", (logo_size, logo_size), 0)
     ImageDraw.Draw(mask).ellipse((0, 0, logo_size, logo_size), fill=255)
@@ -216,6 +255,96 @@ def _paste_center_logo(qr_img: "Image.Image", logo_bytes: bytes):
     ly = (qr_rgba.height - logo_size) // 2
     qr_rgba.paste(logo, (lx, ly), mask)
     return qr_rgba.convert("RGB")
+
+
+_QR_FONT_CACHE = {}
+
+
+def _find_unicode_font(bold: bool):
+    """Search common install locations for a DejaVu Sans TTF that can
+    render the glyphs the QR card needs (₹, and the small-caps Unicode
+    phonetic-extension letters used throughout the bot's UI).
+
+    ImageFont.truetype("DejaVuSans-Bold.ttf") — a bare filename — only
+    resolves when that file happens to sit in the current working
+    directory or a couple of PIL-internal dirs. It does NOT search the
+    system's actual font directories (Pillow has no fontconfig
+    integration), so on most servers/containers this silently raises and
+    the caller falls back to PIL's tiny built-in bitmap font, which can't
+    render ₹ or small-caps at all — hence the ▯▯▯▯ boxes. Returns a real
+    path to a working font, or None if nothing usable was found."""
+    name = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
+    candidates = [
+        name,
+        f"/usr/share/fonts/truetype/dejavu/{name}",
+        f"/usr/share/fonts/dejavu/{name}",
+        f"/usr/share/fonts/truetype/ttf-dejavu/{name}",
+        f"/usr/share/fonts/TTF/{name}",
+        f"/usr/local/share/fonts/{name}",
+        f"/Library/Fonts/{name}",
+        os.path.expanduser(f"~/.fonts/{name}"),
+        f"C:\\Windows\\Fonts\\{name}",
+    ]
+    # matplotlib bundles DejaVu Sans and is present in a lot of environments
+    # even when the OS-level font packages aren't installed — cheap extra
+    # chance at a real unicode-capable font before giving up.
+    try:
+        import matplotlib
+        candidates.insert(1, os.path.join(matplotlib.get_data_path(), "fonts", "ttf", name))
+    except Exception:
+        pass
+
+    for path in candidates:
+        try:
+            ImageFont.truetype(path, 10)
+            return path
+        except Exception:
+            continue
+    return None
+
+
+def _load_qr_fonts():
+    """Load (and cache) the fonts used on the QR card. Returns
+    (font_big, font_small, unicode_ok). unicode_ok is False only when no
+    real TTF could be found anywhere and we had to fall back to PIL's
+    default bitmap font — callers must then ASCII-ify any ₹/small-caps
+    text before drawing it, or it renders as ▯▯▯▯ boxes."""
+    if _QR_FONT_CACHE:
+        c = _QR_FONT_CACHE
+        return c["big"], c["small"], c["unicode_ok"]
+
+    bold_path = _find_unicode_font(bold=True)
+    reg_path = _find_unicode_font(bold=False)
+    try:
+        if not (bold_path and reg_path):
+            raise OSError("no unicode-capable TTF found on this system")
+        font_big = ImageFont.truetype(bold_path, 30)
+        font_small = ImageFont.truetype(reg_path, 16)
+        unicode_ok = True
+    except Exception:
+        font_big = ImageFont.load_default()
+        font_small = ImageFont.load_default()
+        unicode_ok = False
+        log.warning(
+            "No DejaVu/unicode-capable TTF found on this system — QR card "
+            "text (₹ amount, small-caps caption) will render as plain "
+            "ASCII via PIL's default bitmap font instead of showing "
+            "▯▯▯▯ boxes. Install the 'fonts-dejavu-core' package (or any "
+            "TTF with those glyphs) for the real symbols."
+        )
+
+    _QR_FONT_CACHE.update(big=font_big, small=font_small, unicode_ok=unicode_ok)
+    return font_big, font_small, unicode_ok
+
+
+def _ascii_safe(text: str) -> str:
+    """Best-effort plain-ASCII rendering of QR card text, used only when
+    _load_qr_fonts() couldn't find a real unicode-capable font. Undoes the
+    bot's small-caps styling (ᴀʙᴄ.. -> abc..) and swaps ₹ for 'Rs.' so the
+    card shows readable text instead of ▯▯▯▯ tofu boxes."""
+    reverse = {v: k for k, v in SMALL_CAPS_MAP.items()}
+    out = "".join(reverse.get(ch, ch) for ch in text)
+    return out.replace("₹", "Rs.")
 
 
 def generate_branded_qr(data: str, amount=None, caption: str = "Scan with any UPI app", logo_bytes: bytes = None):
@@ -240,11 +369,13 @@ def generate_branded_qr(data: str, amount=None, caption: str = "Scan with any UP
         qr.make(fit=True)
         qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
 
-        if logo_bytes:
-            try:
-                qr_img = _paste_center_logo(qr_img, logo_bytes)
-            except Exception:
-                log.exception("Failed to paste center logo onto QR — continuing without it")
+        # Always paste a center logo — the real avatar when we have it,
+        # otherwise the vector fallback baked into _paste_center_logo, so
+        # the card never renders with a plain blank center.
+        try:
+            qr_img = _paste_center_logo(qr_img, logo_bytes)
+        except Exception:
+            log.exception("Failed to paste center logo onto QR — continuing without it")
 
         pad = 36
         panel_pad = 20  # white rounded panel margin around the raw QR
@@ -270,16 +401,12 @@ def generate_branded_qr(data: str, amount=None, caption: str = "Scan with any UP
         gradient = _diagonal_gradient((canvas_w, canvas_h), QR_GRADIENT_A, QR_GRADIENT_B)
         canvas.paste(gradient, (0, 0), border_mask)
 
-        try:
-            font_big = ImageFont.truetype("DejaVuSans-Bold.ttf", 30)
-            font_small = ImageFont.truetype("DejaVuSans.ttf", 16)
-        except Exception:
-            font_big = ImageFont.load_default()
-            font_small = ImageFont.load_default()
+        font_big, font_small, unicode_ok = _load_qr_fonts()
+        safe_caption = caption if unicode_ok else _ascii_safe(caption)
 
         y = pad // 2 + 6
         if amount is not None:
-            amt_text = f"₹{amount}"
+            amt_text = f"₹{amount}" if unicode_ok else f"Rs.{amount}"
             w = draw.textlength(amt_text, font=font_big)
             draw.text(((canvas_w - w) / 2, y), amt_text, fill=QR_TEXT_LIGHT, font=font_big)
             y += header_h
@@ -294,8 +421,8 @@ def generate_branded_qr(data: str, amount=None, caption: str = "Scan with any UP
         canvas.paste(qr_img, (panel_x + panel_pad, panel_y + panel_pad))
         y = panel_y + panel_h + 14
 
-        w = draw.textlength(caption, font=font_small)
-        draw.text(((canvas_w - w) / 2, y), caption, fill=QR_TEXT_MUTED, font=font_small)
+        w = draw.textlength(safe_caption, font=font_small)
+        draw.text(((canvas_w - w) / 2, y), safe_caption, fill=QR_TEXT_MUTED, font=font_small)
 
         buf = io.BytesIO()
         canvas.save(buf, format="PNG")
