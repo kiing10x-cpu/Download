@@ -22,6 +22,7 @@ import json
 import csv
 import time
 import shutil
+import asyncio
 import logging
 import tempfile
 from datetime import datetime, timedelta
@@ -42,6 +43,7 @@ from telegram.ext import (
     CommandHandler,
     MessageHandler,
     CallbackQueryHandler,
+    ChatMemberHandler,
     PreCheckoutQueryHandler,
     ContextTypes,
     filters,
@@ -411,6 +413,9 @@ DEFAULT_DATA = {
         "daily_limit": 20,
         "admin_group_id": None,   # #6 — ticket cards posted here
         "owner_id": None,         # #12 — /export gate
+        "force_join_channel": None,   # v3 §7 — @channelusername or -100id; None = disabled
+        "send_as_document": False,    # v3 §8 — send reels as document instead of video
+        "document_mode_threshold_mb": 45,  # auto-switch to document above this size
     },
     "broadcast_log": [],
     "restore_log": [],
@@ -577,6 +582,71 @@ def touch_user(update: Update) -> bool:
 
 def is_blocked(user_id: int) -> bool:
     return user_id in BOT_DATA.get("blocked", [])
+
+
+def is_premium_active(uid: str) -> bool:
+    """BUGFIX #1/#3 — a user counts as premium only while plan != Free AND
+    (no expiry set, or expiry is in the future)."""
+    u = BOT_DATA["users"].get(uid, {})
+    if u.get("plan", "Free") == "Free":
+        return False
+    exp = u.get("plan_expires_at")
+    if not exp:
+        return True
+    try:
+        return datetime.fromisoformat(exp) > datetime.utcnow()
+    except Exception:
+        return True
+
+
+def grant_premium(uid: str, days: int = 30):
+    """BUGFIX #3 — used by both Stars payments and admin-confirmed UPI orders
+    so a successful gift actually upgrades the user's plan."""
+    u = BOT_DATA["users"].setdefault(uid, {})
+    u["plan"] = "Premium"
+    u["plan_expires_at"] = (datetime.utcnow() + timedelta(days=days)).isoformat()
+    save_data()
+
+
+def check_daily_limit(uid: str) -> bool:
+    """BUGFIX #1 — was defined implicitly (limit shown in /usage) but never
+    actually enforced before a download. Premium users are unlimited."""
+    if is_premium_active(uid):
+        return True
+    u = BOT_DATA["users"].get(uid, {})
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    today_count = u.get("downloads_today", 0) if u.get("downloads_today_date") == today else 0
+    limit = BOT_DATA["settings"].get("daily_limit", 20)
+    return today_count < limit
+
+
+async def cm_track_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """v3 §6 — populate BOT_DATA['groups'] (was always empty, so the
+    'Groups' stat in admin panel never reflected reality)."""
+    cmu = update.my_chat_member
+    if not cmu or cmu.chat.type not in ("group", "supergroup"):
+        return
+    gid = str(cmu.chat.id)
+    new_status = cmu.new_chat_member.status
+    if new_status in ("member", "administrator"):
+        BOT_DATA["groups"][gid] = {
+            "title": cmu.chat.title, "added_at": datetime.utcnow().isoformat(),
+        }
+    elif new_status in ("left", "kicked"):
+        BOT_DATA["groups"].pop(gid, None)
+    save_data()
+
+
+async def is_force_join_ok(context: ContextTypes.DEFAULT_TYPE, user_id: int) -> bool:
+    """v3 §7 — if admin set a force-join channel, block non-members."""
+    channel = BOT_DATA["settings"].get("force_join_channel")
+    if not channel or is_admin(user_id):
+        return True
+    try:
+        member = await context.bot.get_chat_member(chat_id=channel, user_id=user_id)
+        return member.status not in ("left", "kicked")
+    except Exception:
+        return True  # fail-open so a misconfigured channel doesn't brick the bot
 
 
 def is_link_blocked(url: str) -> bool:
@@ -1092,6 +1162,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = update.message.text or ""
 
+    # BUGFIX #2 (part 2) — non-text media that isn't part of an active ticket
+    # or awaited-input flow has nothing to do here; don't fall through to the
+    # "not a valid reel link" text reply for a bare photo/video.
+    if not text and not context.user_data.get("awaiting"):
+        return
+
     # v2 §1 — persistent reply-keyboard routing
     if text == RKB_DOWNLOAD:
         await update.message.reply_text("🔗 " + to_small_caps("paste your instagram reel link here"))
@@ -1139,6 +1215,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     match = INSTAGRAM_URL_RE.search(text)
+    if match and not is_admin(user_id) and not check_daily_limit(uid):
+        limit = BOT_DATA["settings"].get("daily_limit", 20)
+        kb = InlineKeyboardMarkup([[styled_button(to_small_caps("🚀 upgrade for more"), callback_data="gift_menu", style="success")]])
+        await update.message.reply_text(
+            "🚫 " + to_small_caps(f"daily limit reached ({limit}/{limit}). try again tomorrow or upgrade."),
+            reply_markup=kb,
+        )
+        return
 
     if not match:
         # #15 — simple keyword auto-reply
@@ -1157,6 +1241,18 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await render_menu(context, update.effective_chat.id, "maintenance")
         return
 
+    if not await is_force_join_ok(context, user_id):
+        channel = BOT_DATA["settings"].get("force_join_channel")
+        ch_link = channel if str(channel).startswith("http") else f"https://t.me/{str(channel).lstrip('@')}"
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton(to_small_caps("📢 join channel"), url=ch_link)],
+            [styled_button(to_small_caps("✅ i've joined"), callback_data="check_force_join", style="success")],
+        ])
+        await update.message.reply_text(
+            "🔒 " + to_small_caps("please join our channel first to use this bot."), reply_markup=kb
+        )
+        return
+
     url = match.group(1)
 
     if is_link_blocked(url) and not is_admin(user_id):
@@ -1164,6 +1260,39 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     status_msg = await update.message.reply_text(STR["processing"])
+
+    # v3 §8 — real download progress (fed by yt-dlp's progress_hooks from the
+    # worker thread) instead of just a canned 3-stage loop.
+    _progress = {"pct": 0, "stage": "fetching"}
+
+    def _progress_hook(d):
+        if d.get("status") == "downloading":
+            total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
+            done = d.get("downloaded_bytes") or 0
+            _progress["pct"] = int(done / total * 100) if total else 0
+            _progress["stage"] = "fetching"
+        elif d.get("status") == "finished":
+            _progress["pct"] = 100
+            _progress["stage"] = "optimizing"
+
+    async def _animate_status():
+        try:
+            while True:
+                await asyncio.sleep(2)
+                pct = _progress["pct"]
+                filled = pct // 10
+                bar = "▓" * filled + "░" * (10 - filled)
+                stage_label = to_small_caps(_progress["stage"])
+                try:
+                    await status_msg.edit_text(
+                        to_small_caps("⏳ processing your reel...") + f"\n📥 {stage_label}\n{bar} {pct}%"
+                    )
+                except Exception:
+                    pass
+        except asyncio.CancelledError:
+            pass
+
+    anim_task = asyncio.create_task(_animate_status())
     try:
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_video")
     except Exception:
@@ -1177,6 +1306,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "outtmpl": out_template,
             "quiet": True,
             "no_warnings": True,
+            "progress_hooks": [_progress_hook],
         }
         if use_merge:
             opts["merge_output_format"] = "mp4"
@@ -1198,15 +1328,34 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file_path = None
     try:
         try:
-            file_path, ig_caption, ig_uploader = run_download(use_merge=FFMPEG_AVAILABLE)
+            # BUGFIX #4 — run_download() is a blocking (sync) yt-dlp call; it
+            # was being awaited directly, which froze the whole bot's event
+            # loop (all users) during every single download. Runs in a
+            # thread now so the loop — and the animation above — keep going.
+            file_path, ig_caption, ig_uploader = await asyncio.to_thread(run_download, FFMPEG_AVAILABLE)
         except Exception as e:
             # Self-heal: if a merge was attempted and ffmpeg turned out to be
             # the problem, retry once with a no-merge (progressive) format.
             if "ffmpeg" in str(e).lower():
                 log.warning("Merge failed (ffmpeg issue), retrying with progressive format.")
-                file_path, ig_caption, ig_uploader = run_download(use_merge=False)
+                file_path, ig_caption, ig_uploader = await asyncio.to_thread(run_download, False)
             else:
                 raise
+
+        # BUGFIX #5 — Telegram bots can't upload files over 50MB; previously
+        # a big reel would silently hang/fail with a raw exception. Check
+        # size upfront and give a clear message instead of attempting upload.
+        MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+        file_size = os.path.getsize(file_path) if file_path and os.path.exists(file_path) else 0
+        if file_size > MAX_UPLOAD_BYTES:
+            anim_task.cancel()
+            mb = file_size / (1024 * 1024)
+            await status_msg.edit_text(
+                "❌ " + to_small_caps(f"this reel is too large to send ({mb:.1f}mb, limit 50mb). try a shorter reel.")
+            )
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            return
 
         uid = str(update.effective_user.id)
         lang = BOT_DATA["users"].get(uid, {}).get("lang")
@@ -1231,11 +1380,21 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             result_caption = base_caption
 
+        anim_task.cancel()
         protect = bool(BOT_DATA["settings"].get("lock_all_content", False))
+        # v3 §8 — send as document when admin forces it, or file is close to
+        # the 50MB cap (documents preserve quality better near the limit).
+        threshold = BOT_DATA["settings"].get("document_mode_threshold_mb", 45) * 1024 * 1024
+        as_document = BOT_DATA["settings"].get("send_as_document", False) or file_size > threshold
         with open(file_path, "rb") as vid:
-            sent = await update.message.reply_video(
-                video=vid, caption=result_caption, parse_mode=parse_mode, reply_markup=kb, protect_content=protect
-            )
+            if as_document:
+                sent = await update.message.reply_document(
+                    document=vid, caption=result_caption, parse_mode=parse_mode, reply_markup=kb, protect_content=protect
+                )
+            else:
+                sent = await update.message.reply_video(
+                    video=vid, caption=result_caption, parse_mode=parse_mode, reply_markup=kb, protect_content=protect
+                )
 
         # Cache the real Instagram caption so the "Get Caption" button under
         # THIS specific video can show it, keyed to this exact message.
@@ -1258,8 +1417,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await schedule_delete(context, sent.chat_id, sent.message_id, seconds)
         await status_msg.delete()
     except Exception as e:  # noqa: BLE001
+        anim_task.cancel()
         log.exception("Download failed")
-        await status_msg.edit_text(f"❌ Download fail ho gaya: {e}")
+        await status_msg.edit_text(
+            "❌ " + to_small_caps("download failed. the link may be private, deleted, or instagram rate-limited us.")
+            + f"\n\n<code>{e}</code>",
+            parse_mode="HTML",
+        )
     finally:
         if file_path and os.path.exists(file_path):
             try:
@@ -1279,6 +1443,19 @@ async def cb_get_caption(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Telegram message limit is 4096 chars — split if needed.
     for i in range(0, len(caption), 4000):
         await query.message.reply_text(caption[i:i + 4000])
+
+
+async def cb_check_force_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    ok = await is_force_join_ok(context, update.effective_user.id)
+    if ok:
+        await query.answer(to_small_caps("✅ verified! send your reel link again."), show_alert=True)
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
+    else:
+        await query.answer(to_small_caps("❌ still not joined."), show_alert=True)
 
 
 async def cb_download_another(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1555,8 +1732,13 @@ async def cmd_precheckout(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_successful_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sp = update.message.successful_payment
-    await update.message.reply_text(f"✅ " + to_small_caps(f"thanks for the {sp.total_amount}⭐ gift!"))
-    await log_event(context, f"⭐ Gift received — {sp.total_amount} stars from {update.effective_user.id}")
+    uid = str(update.effective_user.id)
+    days = BOT_DATA["settings"].get("premium_days_per_star_gift", 30)
+    grant_premium(uid, days)
+    await update.message.reply_text(
+        f"✅ " + to_small_caps(f"thanks for the {sp.total_amount}⭐ gift! premium unlocked for {days} days.")
+    )
+    await log_event(context, f"⭐ Gift received — {sp.total_amount} stars from {update.effective_user.id}, premium granted")
 
 
 async def cb_gift_upi(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1638,11 +1820,50 @@ async def cb_gift_upi_paid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_data()
     await query.message.reply_text("✅ Marked as paid — an admin will verify shortly.")
     targets = BOT_DATA.get("admins", [])
+    admin_kb = InlineKeyboardMarkup([[
+        styled_button("✅ Confirm & Upgrade", callback_data=f"gift_upi_confirm:{oid}", style="success"),
+    ]])
     for target in targets:
         try:
-            await context.bot.send_message(target, f"💳 UPI order #{oid} — ₹{order['amount']} — user {order['user_id']} claims paid.")
+            await context.bot.send_message(
+                target,
+                f"💳 UPI order #{oid} — ₹{order['amount']} — user {order['user_id']} claims paid.",
+                reply_markup=admin_kb,
+            )
         except Exception:
             pass
+
+
+async def cb_gift_upi_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """BUGFIX #3 — admin taps this to actually verify + upgrade the user;
+    previously a UPI 'gift' never upgraded anyone even after being marked paid."""
+    query = update.callback_query
+    await query.answer()
+    if not is_admin(update.effective_user.id):
+        return
+    oid = query.data.split(":", 1)[1]
+    order = BOT_DATA["gift_orders"].get(oid)
+    if not order or order["status"] == "paid":
+        await query.answer("Already handled or not found.", show_alert=True)
+        return
+    order["status"] = "paid"
+    save_data()
+    uid = str(order["user_id"])
+    days = BOT_DATA["settings"].get("premium_days_per_upi_gift", 30)
+    grant_premium(uid, days)
+    try:
+        await context.bot.send_message(
+            order["user_id"],
+            "✅ " + to_small_caps(f"payment confirmed! premium unlocked for {days} days."),
+        )
+    except Exception:
+        pass
+    try:
+        await query.edit_message_reply_markup(None)
+        await query.message.reply_text(f"✅ Order #{oid} confirmed, user upgraded.")
+    except Exception:
+        pass
+    await log_event(context, f"💳 UPI order #{oid} confirmed by admin {update.effective_user.id}, premium granted")
 
 
 # ----------------------------------------------------------------------------
@@ -1828,6 +2049,8 @@ def admin_panel_keyboard():
              styled_button("🎨 Menu & UI", callback_data="adm_menu_ui", style="primary")],
             [styled_button("⚙️ Settings & Admins", callback_data="adm_settings", style="primary"),
              styled_button("🛑 Danger Zone", callback_data="adm_danger", style="danger")],
+            [styled_button("📋 Activity Log", callback_data="adm_activity", style="success"),
+             styled_button("🧪 Self-Test", callback_data="adm_selftest", style="success")],
         ]
     )
 
@@ -1860,6 +2083,46 @@ async def cb_adm_home(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     context.user_data["adm_nav_stack"] = ["adm_home"]
     await _render_adm_home(update, context)
+
+
+# ---- v3 §10 — activity log + self-test ---------------------------------------
+
+async def cb_adm_activity(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if not is_admin(update.effective_user.id):
+        return
+    entries = BOT_DATA.get("error_log", [])[-15:]
+    if not entries:
+        body = "✅ " + to_small_caps("no recent errors logged.")
+    else:
+        lines = [f"• {e.get('time', '?')} — {str(e.get('error', e))[:100]}" for e in entries]
+        body = "📋 " + to_small_caps("last 15 log entries") + "\n\n" + "\n".join(lines)
+    await query.edit_message_text(body, reply_markup=InlineKeyboardMarkup([back_row("adm_home")]))
+
+
+async def cb_adm_selftest(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if not is_admin(update.effective_user.id):
+        return
+    await query.edit_message_text("🧪 " + to_small_caps("running self-test..."))
+    results = []
+    results.append(("Bot token", "✅ OK" if BOT_TOKEN else "❌ missing"))
+    try:
+        me = await context.bot.get_me()
+        results.append(("Telegram API", f"✅ OK (@{me.username})"))
+    except Exception as e:
+        results.append(("Telegram API", f"❌ {e}"))
+    results.append(("ffmpeg", "✅ found" if FFMPEG_AVAILABLE else "⚠️ not found (merge downloads may fail)"))
+    try:
+        import yt_dlp as _yd
+        results.append(("yt-dlp", f"✅ v{_yd.version.__version__}"))
+    except Exception as e:
+        results.append(("yt-dlp", f"❌ {e}"))
+    results.append(("Download dir", "✅ writable" if os.access(DOWNLOAD_DIR, os.W_OK) else "❌ not writable"))
+    body = "🧪 " + to_small_caps("self-test results") + "\n\n" + "\n".join(f"{k}: {v}" for k, v in results)
+    await query.edit_message_text(body, reply_markup=InlineKeyboardMarkup([back_row("adm_home")]))
 
 
 # ---- #3 — generic back-stack navigation --------------------------------------
@@ -3427,6 +3690,8 @@ def build_app() -> Application:
 
     app.add_handler(CallbackQueryHandler(cb_get_caption, pattern="^get_caption$"))
     app.add_handler(CallbackQueryHandler(cb_download_another, pattern="^download_another$"))
+    app.add_handler(CallbackQueryHandler(cb_check_force_join, pattern="^check_force_join$"))
+    app.add_handler(ChatMemberHandler(cm_track_groups, ChatMemberHandler.MY_CHAT_MEMBER))
 
     app.add_handler(CallbackQueryHandler(cb_ticket_close, pattern="^tk_close:"))
     app.add_handler(CallbackQueryHandler(cb_ticket_reopen, pattern="^tk_reopen:"))
@@ -3437,6 +3702,7 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(cb_gift_stars_amount, pattern="^gift_stars_amt:"))
     app.add_handler(CallbackQueryHandler(cb_gift_upi, pattern="^gift_upi$"))
     app.add_handler(CallbackQueryHandler(cb_gift_upi_paid, pattern="^gift_upi_paid:"))
+    app.add_handler(CallbackQueryHandler(cb_gift_upi_confirm, pattern="^gift_upi_confirm:"))
     app.add_handler(PreCheckoutQueryHandler(cmd_precheckout))
     app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, cmd_successful_payment))
     app.add_handler(CallbackQueryHandler(cb_nav, pattern="^nav:"))
@@ -3446,6 +3712,8 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(cb_noop, pattern="^noop$"))
 
     app.add_handler(CallbackQueryHandler(cb_adm_home, pattern="^adm_home$"))
+    app.add_handler(CallbackQueryHandler(cb_adm_activity, pattern="^adm_activity$"))
+    app.add_handler(CallbackQueryHandler(cb_adm_selftest, pattern="^adm_selftest$"))
     app.add_handler(CallbackQueryHandler(cb_adm_back, pattern="^adm_back$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_stats")(cb_adm_stats), pattern="^adm_stats$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_users")(cb_adm_users), pattern="^adm_users$"))
@@ -3513,7 +3781,17 @@ def build_app() -> Application:
 
     app.add_handler(MessageHandler(filters.Document.ALL & filters.ChatType.PRIVATE, handle_restore_upload))
     app.add_handler(MessageHandler((filters.PHOTO | filters.VIDEO) & filters.ChatType.PRIVATE, handle_admin_media))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    # BUGFIX #2 — was filters.TEXT only, so photo/video messages (ticket
+    # replies from users, or admins replying with media) never reached
+    # handle_text and therefore never got forwarded into the ticket thread.
+    app.add_handler(
+        MessageHandler(
+            (filters.TEXT | filters.PHOTO | filters.VIDEO | filters.Document.ALL
+             | filters.VOICE | filters.AUDIO | filters.ANIMATION | filters.Sticker.ALL)
+            & ~filters.COMMAND,
+            handle_text,
+        )
+    )
 
     app.add_error_handler(global_error_handler)
 
