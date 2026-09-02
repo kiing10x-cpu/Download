@@ -623,6 +623,68 @@ def styled_button(text, callback_data=None, url=None, style=None):
     return InlineKeyboardButton(to_small_caps(str(text)), **kwargs)
 
 
+# ---- Activity Log: categorization + plain-English fix hints -----------------
+# Every entry logged to BOT_DATA["error_log"] carries a "kind" so the panel
+# can show *what* went wrong, *why* it likely happened, and *how* to fix it —
+# instead of a raw, undated exception string nobody but a developer could
+# read.
+ERROR_KIND_INFO = {
+    "force_join": (
+        "🔒 Force-Join Check",
+        "Couldn't verify a user's membership in the force-join channel.",
+        "Make sure the bot is an admin in that channel, and that the "
+        "channel is set correctly (use @username, or the -100... id for "
+        "private channels) in Settings & Admins → Force-Join.",
+    ),
+    "broadcast": (
+        "📢 Broadcast Delivery",
+        "A message failed to send during a broadcast.",
+        "Usually harmless — the recipient blocked the bot or never started "
+        "a DM. Check the Broadcast Log for the full breakdown.",
+    ),
+    "mongo": (
+        "🗄 Database",
+        "Couldn't reach or sync with MongoDB.",
+        "Check MONGO_URI is correct and the database allows connections "
+        "from this server's IP. The bot keeps working on local storage "
+        "meanwhile, so nothing is lost.",
+    ),
+    "download": (
+        "⬇️ Download",
+        "A reel/audio download failed.",
+        "Usually the link was private, deleted, or Instagram briefly "
+        "rate-limited the server. Ask the user to retry in a minute.",
+    ),
+    "unhandled": (
+        "🐞 Unexpected Error",
+        "Something failed outside the usual error handling.",
+        "Check the message below for the exact exception — if it keeps "
+        "repeating for the same action, that action likely has a bug.",
+    ),
+}
+
+
+def log_error(kind: str, detail: str) -> None:
+    """Central place every part of the bot reports a problem to. Keeps the
+    Activity Log screen consistent (same field names, always categorized)
+    instead of every call site hand-rolling its own dict shape."""
+    entries = BOT_DATA.setdefault("error_log", [])
+    entries.append({
+        "time": datetime.utcnow().isoformat(),
+        "kind": kind if kind in ERROR_KIND_INFO else "unhandled",
+        "detail": str(detail)[:400],
+    })
+    if len(entries) > 200:
+        del entries[: len(entries) - 200]
+
+
+def toggle_label(base: str, is_on: bool) -> str:
+    """Consistent ON/OFF rendering for every toggle button in the admin
+    panel — a green tick when ON, a red cross when OFF, instead of the bare
+    'ON'/'OFF' text every toggle used to hand-roll separately."""
+    return f"{base}: {'✅ ON' if is_on else '❌ OFF'}"
+
+
 def styled_kb_button(text, style=None):
     """Same small-caps treatment as styled_button(), for the persistent
     bottom reply-keyboard buttons."""
@@ -1037,13 +1099,7 @@ async def is_force_join_ok(context: ContextTypes.DEFAULT_TYPE, user_id: int) -> 
         return member.status not in ("left", "kicked")
     except Exception as e:
         log.warning("Force-join check failed (channel=%s, user=%s): %s", channel, user_id, e)
-        entries = BOT_DATA.setdefault("error_log", [])
-        entries.append({
-            "time": datetime.utcnow().isoformat(),
-            "error": f"force_join check failed (channel={channel}): {e}",
-        })
-        if len(entries) > 200:
-            del entries[: len(entries) - 200]
+        log_error("force_join", f"channel={channel}, user={user_id}: {e}")
         return True  # fail-open so a misconfigured channel doesn't brick the bot
 
 
@@ -1289,7 +1345,7 @@ def build_keyboard_from_buttons(buttons, menu_id):
                 current = bool(BOT_DATA["settings"].get(b["value"], False))
                 st = "success" if current else "danger"
                 row_widgets.append(
-                    styled_button(b["label"], callback_data=f"tgl:{b['value']}:{menu_id}", style=st)
+                    styled_button(toggle_label(b["label"], current), callback_data=f"tgl:{b['value']}:{menu_id}", style=st)
                 )
             elif btype == "callback":
                 row_widgets.append(styled_button(b["label"], callback_data=b["value"], style=style))
@@ -1486,6 +1542,25 @@ async def send_style_preview(context, chat_id, source_text):
         display = preview if len(preview) <= 30 else preview[:27] + "..."
         rows.append([styled_button(display, callback_data=f"styleset:{i}")])
     await context.bot.send_message(chat_id, to_small_caps("🅰️ choose a style:"), reply_markup=InlineKeyboardMarkup(rows))
+
+
+async def _replace_rkb_screen(context: ContextTypes.DEFAULT_TYPE, chat_id: int, key: str, text: str, reply_markup=None):
+    """Delete the previous message shown for this reply-keyboard screen (if
+    any) before sending the new one. Without this, tapping the same
+    persistent button (📊 My Usage, 👨‍💻 Developer, 📘 How To Use) over and
+    over just stacked a fresh copy under the last one every time — this
+    makes a repeat tap replace the old reply instead, for any number of
+    taps in a row."""
+    store = context.user_data.setdefault("rkb_screen_msg", {})
+    prev = store.get(key)
+    if prev and prev[0] == chat_id:
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=prev[1])
+        except Exception:
+            pass
+    msg = await context.bot.send_message(chat_id, text, reply_markup=reply_markup)
+    store[key] = (chat_id, msg.message_id)
+    return msg
 
 
 async def cb_styleset(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1840,7 +1915,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_developer_button(update, context)
         return
     if text == RKB_HOWTO:
-        await update.message.reply_text(STR["how_to_use"])
+        await _replace_rkb_screen(context, update.effective_chat.id, "howto", STR["how_to_use"])
         return
     if text == RKB_SUPPORT:
         await support_button_entry(update, context)
@@ -2433,7 +2508,10 @@ async def show_usage_screen(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     except Exception:
         pass
-    await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(kb_rows) if kb_rows else None)
+    await _replace_rkb_screen(
+        context, update.effective_chat.id, "usage", text,
+        reply_markup=InlineKeyboardMarkup(kb_rows) if kb_rows else None,
+    )
 
 
 # ----------------------------------------------------------------------------
@@ -2487,7 +2565,10 @@ async def show_developer_button(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text(to_small_caps("developer contact not set up yet."))
         return
     kb = InlineKeyboardMarkup([[styled_button("👨‍💻 " + to_small_caps("message developer"), url=url)]])
-    await update.message.reply_text(to_small_caps("tap below to message the developer:"), reply_markup=kb)
+    await _replace_rkb_screen(
+        context, update.effective_chat.id, "developer",
+        to_small_caps("tap below to message the developer:"), reply_markup=kb,
+    )
 
 
 # ----------------------------------------------------------------------------
@@ -2582,14 +2663,19 @@ def record_donation(uid: str, name: str, amount: float, kind: str):
 
 
 def build_leaderboard_text(limit: int = 10) -> str:
-    """'Best form' ranked list of top supporters, medal-styled for the top 3."""
+    """Ranked list of top supporters, medal-styled for the top 3, with a
+    warm note at the bottom so donating actually feels good to see — not
+    just a bare list of numbers."""
     donors = [d for d in BOT_DATA.get("donations", {}).values() if d.get("score", 0) > 0]
     donors.sort(key=lambda d: d.get("score", 0), reverse=True)
     donors = donors[:limit]
     if not donors:
-        return "🏆 " + to_small_caps("top supporters") + "\n\n" + to_small_caps("no donations yet — be the first!")
+        return (
+            "🏆 " + to_small_caps("top supporters") + "\n\n"
+            + to_small_caps("no donations yet — be the first to make the list!")
+        )
     medals = ["🥇", "🥈", "🥉"]
-    lines = ["🏆 " + to_small_caps("top supporters"), ""]
+    lines = ["🏆 " + to_small_caps("top supporters"), to_small_caps("our amazing community, ranked"), ""]
     for i, d in enumerate(donors):
         rank = medals[i] if i < 3 else f"{i + 1}."
         bits = []
@@ -2598,6 +2684,8 @@ def build_leaderboard_text(limit: int = 10) -> str:
         if d.get("inr"):
             bits.append(f"₹{int(d['inr'])}")
         lines.append(f"{rank} {d.get('name', 'Anonymous')} — {' + '.join(bits)}")
+    lines.append("")
+    lines.append(to_small_caps("every gift helps keep this bot alive — thank you for the love! 💛"))
     return "\n".join(lines)
 
 
@@ -3150,11 +3238,10 @@ def admin_panel_keyboard():
              styled_button("🎧 Support Settings", callback_data="adm_support_settings")],
             [styled_button("🎫 Tickets", callback_data="adm_tickets"),
              styled_button("📊 Bot Stats", callback_data="adm_stats")],
-            [styled_button("🌐 Language Settings", callback_data="adm_lang_manage"),
-             styled_button("📢 Broadcast", callback_data="adm_broadcast")],
-            [styled_button("👥 Users & Groups", callback_data="adm_users"),
-             styled_button("🎨 Menu & UI", callback_data="adm_menu_ui")],
-            [styled_button("⚙️ Settings & Admins", callback_data="adm_settings"),
+            [styled_button("📢 Broadcast", callback_data="adm_broadcast"),
+             styled_button("👥 Users & Groups", callback_data="adm_users")],
+            [styled_button("🎨 Menu & UI", callback_data="adm_menu_ui")],
+            [styled_button("⚙️ Settings", callback_data="adm_settings"),
              styled_button("🛑 Danger Zone", callback_data="adm_danger")],
             [styled_button("📋 Activity Log", callback_data="adm_activity"),
              styled_button("🧪 Self-Test", callback_data="adm_selftest")],
@@ -3201,13 +3288,45 @@ async def cb_adm_activity(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     if not is_admin(update.effective_user.id):
         return
-    entries = BOT_DATA.get("error_log", [])[-15:]
+    entries = BOT_DATA.get("error_log", [])[-10:][::-1]
     if not entries:
-        body = "✅ " + to_small_caps("no recent errors logged.")
+        body = "✅ " + to_small_caps("activity log") + "\n\n" + to_small_caps("all clear — nothing to report.")
     else:
-        lines = [f"• {e.get('time', '?')} — {str(e.get('error', e))[:100]}" for e in entries]
-        body = "📋 " + to_small_caps("last 15 log entries") + "\n\n" + "\n".join(lines)
-    await query.edit_message_text(body, reply_markup=InlineKeyboardMarkup([back_row("adm_home")]))
+        # Group consecutive display by kind so repeats of the same issue
+        # (e.g. force-join misconfigured) don't push everything else off
+        # screen, and each entry explains what happened, why, and how to
+        # fix it — not just a raw exception string.
+        blocks = []
+        for e in entries:
+            kind = e.get("kind", "unhandled")
+            label, why, fix = ERROR_KIND_INFO.get(kind, ERROR_KIND_INFO["unhandled"])
+            when = (e.get("time") or "?")[:16].replace("T", " ")
+            detail = e.get("detail") or e.get("error") or ""
+            blocks.append(
+                f"{label}  •  {when} UTC\n"
+                f"What: {why}\n"
+                f"Fix: {fix}\n"
+                f"Detail: {detail[:180]}"
+            )
+        body = (
+            "📋 " + to_small_caps("activity log") + f" — {to_small_caps('last')} {len(entries)}\n\n"
+            + "\n\n".join(blocks)
+        )
+    kb = InlineKeyboardMarkup([
+        [styled_button("🗑 Clear Log", callback_data="adm_clear_activity")],
+        back_row("adm_home"),
+    ])
+    await query.edit_message_text(body, reply_markup=kb)
+
+
+async def cb_adm_clear_activity(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if not is_admin(update.effective_user.id):
+        return
+    BOT_DATA["error_log"] = []
+    save_data()
+    await cb_adm_activity(update, context)
 
 
 async def cb_adm_selftest(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3254,11 +3373,11 @@ async def _render_adm_live(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [
             [styled_button("🚫 Ban / Unban User (by ID)", callback_data="adm_quickban", style="danger")],
             [styled_button(
-                f"📡 Feed To Admin DM: {'ON' if s.get('user_activity_dm', True) else 'OFF'}",
+                toggle_label("📡 Feed To Admin DM", s.get('user_activity_dm', True)),
                 callback_data="stgl:user_activity_dm:adm_live",
             )],
             [styled_button(
-                f"🆕 Detailed Join Alerts: {'ON' if s.get('detailed_join_alerts', True) else 'OFF'}",
+                toggle_label("🆕 Detailed Join Alerts", s.get('detailed_join_alerts', True)),
                 callback_data="stgl:detailed_join_alerts:adm_live",
             )],
             back_row("adm_home"),
@@ -3462,11 +3581,11 @@ async def _render_adm_broadcast(update: Update, context: ContextTypes.DEFAULT_TY
             [styled_button("📢 New Broadcast", callback_data="adm_bc_new"),
              styled_button("📜 Broadcast Log", callback_data="adm_bc_log")],
             [styled_button(
-                f"🔐 Forward-Lock: {'ON' if protect else 'OFF'}",
+                toggle_label("🔐 Forward-Lock", protect),
                 callback_data="stgl:protect_broadcasts:adm_broadcast",
             ),
              styled_button(
-                f"🚀 Start Button: {'ON' if attach_start else 'OFF'}",
+                toggle_label("🚀 Start Button", attach_start),
                 callback_data="stgl:broadcast_attach_start_button:adm_broadcast",
             )],
             [styled_button("🗑 Delete Broadcast", callback_data="adm_bc_delmenu")],
@@ -3582,7 +3701,12 @@ async def do_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if copied:
             track_sent_message(int(uid), copied.message_id)
-            await schedule_delete(context, int(uid), copied.message_id, s.get("global_auto_delete_seconds", 0))
+            # BUGFIX — broadcasts must NEVER auto-delete. They used to be
+            # swept up by the same global_auto_delete_seconds timer used for
+            # ordinary bot replies, so an admin announcement could vanish
+            # from a user's chat on its own a few minutes after being sent.
+            # A broadcast is only ever removed by an explicit admin action
+            # (🗑 Delete Broadcast), never by a timer.
             delivered_ids[uid] = copied.message_id
             sent += 1
 
@@ -3623,7 +3747,7 @@ async def do_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
         + f"⚠️ " + to_small_caps("chat unavailable / never started the bot") + f": {invalid_chat}\n"
         + f"❓ " + to_small_caps("other delivery error") + f": {other_failed}\n"
         + (f"🔁 " + to_small_caps("recovered after a brief rate-limit pause") + f": {recovered}\n" if recovered else "")
-        + "\n🔐 " + to_small_caps("forward-lock") + f": {'ON' if protect else 'OFF'}\n"
+        + "\n🔐 " + to_small_caps("forward-lock") + f": {'✅ ON' if protect else '❌ OFF'}\n"
         + "🚀 " + to_small_caps("start button attached") + f": {'YES' if start_kb else 'NO'}"
     )
     try:
@@ -3998,27 +4122,22 @@ async def _render_adm_settings(update: Update, context: ContextTypes.DEFAULT_TYP
         [
             [styled_button("🖼 Set Welcome Image", callback_data="adm_menu_img:start"),
              styled_button(
-                 f"🔒 Maintenance: {'ON' if s.get('maintenance') else 'OFF'}",
+                 toggle_label("🔒 Maintenance", s.get('maintenance')),
                  callback_data="stgl:maintenance:adm_settings",
              )],
             [styled_button(f"⏱ Global Auto-Delete: {s.get('global_auto_delete_seconds', 0)}s", callback_data="adm_set_autodelete"),
-             styled_button(
-                 f"🅰️ Small-Caps Buttons: {'ON' if s.get('small_caps_buttons_default') else 'OFF'}",
-                 callback_data="stgl:small_caps_buttons_default:adm_settings",
-             )],
-            [styled_button("💬 Auto-Replies", callback_data="adm_autoreply_list"),
-             styled_button("🌐 Manage Languages", callback_data="adm_lang_manage")],
+             styled_button("💬 Auto-Replies", callback_data="adm_autoreply_list")],
             [styled_button("👤 Manage Admins", callback_data="adm_manage_admins"),
              styled_button("📥 Restore Backup", callback_data="adm_restore_info")],
             [styled_button(
-                 f"🔐 Lock All Forwarding: {'ON' if s.get('lock_all_content') else 'OFF'}",
+                 toggle_label("🔐 Lock All Forwarding", s.get('lock_all_content')),
                  callback_data="stgl:lock_all_content:adm_settings",
              ),
              styled_button("👑 Owner/Developer Contact", callback_data="adm_owner_contact")],
             [styled_button("📋 Logger Channel", callback_data="adm_logger_channel"),
              styled_button(f"📢 Force-Join: {s.get('force_join_channel') or 'OFF'}", callback_data="adm_force_join")],
             [styled_button(
-                f"📄 Send As Document: {'ON' if s.get('send_as_document') else 'OFF (auto near limit)'}",
+                toggle_label("📄 Send As Document", s.get('send_as_document')),
                 callback_data="stgl:send_as_document:adm_settings",
             )],
             back_row(),
@@ -4026,7 +4145,7 @@ async def _render_adm_settings(update: Update, context: ContextTypes.DEFAULT_TYP
         ]
     )
     await query.edit_message_text(
-        to_small_caps("⚙️ settings & admins") + "\n" + to_small_caps("configure core bot behaviour below"),
+        "⚙️ Settings\n" + to_small_caps("configure core bot behaviour below"),
         reply_markup=kb,
     )
 
@@ -4094,7 +4213,7 @@ def _build_adm_logger_channel_view():
     text = (
         "📋 Logger Channel\n\n"
         f"Channel ID: {s.get('logger_channel_id') or '(not set)'}\n"
-        f"Enabled: {'ON' if s.get('logger_enabled') else 'OFF'}\n\n"
+        f"Enabled: {'✅ ON' if s.get('logger_enabled') else '❌ OFF'}\n\n"
         "Logs new users, downloads, broadcasts, admin changes, copyright "
         "reports, and errors here."
     )
@@ -4102,7 +4221,7 @@ def _build_adm_logger_channel_view():
         [
             [styled_button("✏️ Set Channel", callback_data="adm_logger_channel_set")],
             [styled_button(
-                f"🔀 Enabled: {'ON' if s.get('logger_enabled') else 'OFF'}",
+                toggle_label("🔀 Enabled", s.get('logger_enabled')),
                 callback_data="stgl:logger_enabled:adm_logger_channel",
             )],
             back_row(),
@@ -4536,13 +4655,13 @@ def _build_adm_premium_view():
     plans = s.get("premium_plans", [])
     premium_count = sum(1 for uid in BOT_DATA["users"] if is_premium_active(uid))
     lines = [
-        f"💎 Premium\n\nMaster switch: {'ON' if s.get('premium_enabled') else 'OFF'}",
+        f"💎 Premium\n\nMaster switch: {'✅ ON' if s.get('premium_enabled') else '❌ OFF'}",
         f"Daily free limit: {s.get('daily_limit', 20)}",
         f"👥 Active premium users: {premium_count}",
         "",
     ]
     kb_rows = [
-        [styled_button(f"🔀 Master Switch: {'ON' if s.get('premium_enabled') else 'OFF'}",
+        [styled_button(toggle_label("🔀 Master Switch", s.get('premium_enabled')),
                         callback_data="stgl:premium_enabled:adm_premium")],
         [styled_button("✏️ Set Daily Limit", callback_data="adm_set_dailylimit")],
         [styled_button("👥 See Premium Users", callback_data="adm_premium_users")],
@@ -4661,7 +4780,7 @@ async def cb_adm_plan_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if p["id"] == pid:
             p["enabled"] = not p.get("enabled")
             save_data()
-            await log_event(context, f"💎 Plan '{p['name']}' toggled {'ON' if p['enabled'] else 'OFF'} by {update.effective_user.id}")
+            await log_event(context, f"💎 Plan '{p['name']}' toggled {'✅ ON' if p['enabled'] else '❌ OFF'} by {update.effective_user.id}")
             break
     await _render_adm_premium(update, context)
 
@@ -4723,13 +4842,17 @@ async def cb_adm_upi_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def _build_adm_devsettings_view():
     s = BOT_DATA["settings"]
+    dev_id = s.get("developer_id")
+    dev_link = s.get("developer_link")
+    current = f"@{dev_link.rstrip('/').rsplit('/', 1)[-1]}" if dev_link else (str(dev_id) if dev_id else "(not set)")
     text = (
-        f"👨‍💻 Developer Settings\n\nNumeric ID: {s.get('developer_id') or '(not set)'}\n"
-        f"Link override: {s.get('developer_link') or '(not set)'}"
+        "👨‍💻 Developer Settings\n\n"
+        f"Current: {current}\n\n"
+        "Set by numeric user ID or by @username — either works."
     )
     kb = InlineKeyboardMarkup([
-        [styled_button("✏️ Set Numeric ID", callback_data="adm_dev_id")],
-        [styled_button("✏️ Set Link Override", callback_data="adm_dev_link")],
+        [styled_button("✏️ Set Developer (ID or @username)", callback_data="adm_dev_id")],
+        [styled_button("🔗 Set Custom Link (advanced)", callback_data="adm_dev_link")],
         back_row(), home_row(),
     ])
     return text, kb
@@ -4751,7 +4874,9 @@ async def cb_adm_dev_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     remember_panel_message(context, query, "devsettings")
     context.user_data["awaiting"] = "developer_id"
-    await query.message.reply_text(to_small_caps("send the developer's numeric user id."))
+    await query.message.reply_text(
+        to_small_caps("send the developer's numeric user id, OR their @username — either works.")
+    )
 
 
 async def cb_adm_dev_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4877,14 +5002,27 @@ async def cb_adm_reset_confirm(update: Update, context: ContextTypes.DEFAULT_TYP
     )
 
 
+RESET_ALL_PASSCODE = "03"
+
+
 async def cb_adm_reset_do(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global BOT_DATA
+    """A destructive, irreversible action gets one extra layer beyond the
+    button confirm — a short passcode the admin has to type, so a stray or
+    mis-tapped click can never wipe the bot on its own."""
     query = update.callback_query
     await query.answer()
+    context.user_data["awaiting"] = "reset_all_passcode"
+    await query.message.reply_text(
+        "🔐 " + to_small_caps("last step — send the reset passcode to confirm.")
+    )
+
+
+async def _do_reset_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global BOT_DATA
     make_backup_snapshot(reason="pre_reset")
     BOT_DATA = json.loads(json.dumps(DEFAULT_DATA))
     save_data()
-    await query.edit_message_text(to_small_caps("✅ reset complete. the previous data is safely stored in a backup."))
+    await update.message.reply_text(to_small_caps("✅ reset complete. the previous data is safely stored in a backup."))
 
 
 # ----------------------------------------------------------------------------
@@ -5105,20 +5243,31 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
 
     elif awaiting == "developer_id":
         context.user_data.pop("awaiting", None)
-        if not text.isdigit():
-            await update.message.reply_text(to_small_caps("please send a valid numeric id."))
-            return
-        BOT_DATA["settings"]["developer_id"] = int(text)
-        save_data()
-        note = ""
-        try:
-            chat = await context.bot.get_chat(int(text))
-            if not chat.username:
-                note = "\n⚠️ " + to_small_caps("this account has no @username — the button may not always open. sending an @username via 'set link override' is more reliable.")
-        except Exception:
-            note = "\n⚠️ " + to_small_caps("the bot has not reached this id yet (the developer has never messaged the bot) — the button won't open reliably until you set an @username via 'set link override'.")
+        raw = text.strip()
+        # Accept either a numeric user id OR an @username in the same
+        # prompt, instead of forcing the admin into a separate "link
+        # override" flow just to use a username.
+        if raw.lstrip("@").isdigit() and not raw.startswith("@"):
+            BOT_DATA["settings"]["developer_id"] = int(raw)
+            BOT_DATA["settings"]["developer_link"] = None
+            save_data()
+            note = ""
+            try:
+                chat = await context.bot.get_chat(int(raw))
+                if not chat.username:
+                    note = "\n⚠️ " + to_small_caps("this account has no @username — the button may not always open reliably.")
+            except Exception:
+                note = "\n⚠️ " + to_small_caps("the bot hasn't seen this id yet (the developer has never messaged the bot) — the button won't open reliably until they do, or until you set an @username instead.")
+            shown = raw
+        else:
+            uname = raw.lstrip("@")
+            BOT_DATA["settings"]["developer_link"] = f"https://t.me/{uname}"
+            BOT_DATA["settings"]["developer_id"] = None
+            save_data()
+            note = ""
+            shown = f"@{uname}"
         refreshed = await refresh_panel_after_save(context, "devsettings", _build_adm_devsettings_view)
-        await update.message.reply_text(f"✅ Developer ID set: {text}{note}" + ("" if refreshed else "\n(reopen the developer panel to confirm)"))
+        await update.message.reply_text(f"✅ Developer contact set: {shown}{note}" + ("" if refreshed else "\n(reopen the developer panel to confirm)"))
 
     elif awaiting == "developer_link":
         context.user_data.pop("awaiting", None)
@@ -5247,6 +5396,15 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
                 "It's now visible to users in 📊 My Usage (above the Share button)."
                 + ("" if refreshed else "\n(reopen the premium panel to confirm)")
             )
+
+    elif awaiting == "reset_all_passcode":
+        context.user_data.pop("awaiting", None)
+        if text.strip() != RESET_ALL_PASSCODE:
+            await update.message.reply_text(
+                "❌ " + to_small_caps("wrong passcode — reset cancelled. nothing was touched.")
+            )
+            return
+        await _do_reset_all(update, context)
 
     elif awaiting == "adm_ban_unban_userid":
         context.user_data.pop("awaiting", None)
@@ -5401,7 +5559,7 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🗄 Storage: {backend}\n"
         f"👥 Users: {len(BOT_DATA['users'])}\n"
         f"📢 Broadcasts: {len(BOT_DATA['broadcast_log'])}\n"
-        f"🔒 Maintenance: {'ON' if BOT_DATA['settings'].get('maintenance') else 'OFF'}\n"
+        f"🔒 Maintenance: {'✅ ON' if BOT_DATA['settings'].get('maintenance') else '❌ OFF'}\n"
         f"🎛 Rate limit: {BOT_DATA['settings'].get('rate_limit_max')}/{BOT_DATA['settings'].get('rate_limit_window_seconds')}s\n"
         f"🔘 Button style support: {'yes' if SUPPORTS_BUTTON_STYLE else 'no (upgrade python-telegram-bot to 22.7+)'}\n"
     )
@@ -5649,17 +5807,11 @@ async def global_error_handler(update: object, context: ContextTypes.DEFAULT_TYP
     """#13 — catch-all so one bad update can't silently kill processing, and
     every failure is visible from the admin 'Recent Errors' screen / logger channel."""
     log.exception("Unhandled error", exc_info=context.error)
-    entry = {
-        "at": datetime.utcnow().isoformat(),
-        "update_type": type(update).__name__ if update else "unknown",
-        "error": str(context.error),
-    }
-    BOT_DATA.setdefault("error_log", []).append(entry)
-    if len(BOT_DATA["error_log"]) > 200:
-        del BOT_DATA["error_log"][: len(BOT_DATA["error_log"]) - 200]
+    update_type = type(update).__name__ if update else "unknown"
+    log_error("unhandled", f"[{update_type}] {context.error}")
     save_data()
     try:
-        await log_event(context, f"🐞 Error: {entry['error'][:300]}")
+        await log_event(context, f"🐞 Error: {str(context.error)[:300]}")
     except Exception:
         pass
 
@@ -5761,6 +5913,7 @@ def build_app() -> Application:
 
     app.add_handler(CallbackQueryHandler(cb_adm_home, pattern="^adm_home$"))
     app.add_handler(CallbackQueryHandler(cb_adm_activity, pattern="^adm_activity$"))
+    app.add_handler(CallbackQueryHandler(cb_adm_clear_activity, pattern="^adm_clear_activity$"))
     app.add_handler(CallbackQueryHandler(cb_adm_selftest, pattern="^adm_selftest$"))
     app.add_handler(CallbackQueryHandler(cb_adm_back, pattern="^adm_back$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_stats")(cb_adm_stats), pattern="^adm_stats$"))
