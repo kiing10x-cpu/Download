@@ -25,12 +25,16 @@ import shutil
 import logging
 import tempfile
 from datetime import datetime, timedelta
+from urllib.parse import quote
 
 from telegram import (
     Update,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     InputMediaPhoto,
+    ReplyKeyboardMarkup,
+    KeyboardButton,
+    LabeledPrice,
 )
 from telegram.ext import (
     Application,
@@ -38,6 +42,7 @@ from telegram.ext import (
     CommandHandler,
     MessageHandler,
     CallbackQueryHandler,
+    PreCheckoutQueryHandler,
     ContextTypes,
     filters,
 )
@@ -112,6 +117,53 @@ SMALL_CAPS_MAP = {
 
 def to_small_caps(text: str) -> str:
     return "".join(SMALL_CAPS_MAP.get(ch.lower(), ch) for ch in text)
+
+
+# ----------------------------------------------------------------------------
+# v2 build prompt — centralized small-caps strings (Section 10)
+# ----------------------------------------------------------------------------
+STR = {
+    "processing": to_small_caps("processing your reel...") + "\n📥 " + to_small_caps("fetching") + " • 🔄 "
+                  + to_small_caps("optimizing") + " • ✅ " + to_small_caps("almost done"),
+    "done": "✅ " + to_small_caps("your reel is ready!") + "\n🎬 " + to_small_caps("saved and sent below"),
+    "usage_title": to_small_caps("usage overview"),
+    "how_to_use": (
+        to_small_caps("how to use") + "\n\n"
+        + "1️⃣ " + to_small_caps("copy any instagram reel link") + "\n"
+        + "2️⃣ " + to_small_caps("paste it here in chat") + "\n"
+        + "3️⃣ " + to_small_caps("wait a few seconds") + "\n"
+        + "4️⃣ " + to_small_caps("download your reel instantly") + "\n\n"
+        + to_small_caps("tips") + "\n"
+        + "✅ " + to_small_caps("no watermark") + "\n"
+        + "✅ " + to_small_caps("works with private links too") + "\n"
+        + "✅ " + to_small_caps("unlimited with premium")
+    ),
+    "support_prompt": to_small_caps("describe your issue (text/photo/video)"),
+    "ticket_created": lambda tid: "✅ " + to_small_caps(f"ticket #{tid} created. we'll reply soon"),
+    "ticket_closed": lambda tid: "🔒 " + to_small_caps(f"ticket #{tid} closed. need help again? tap") + " 🎧 " + to_small_caps("support"),
+}
+
+RKB_DOWNLOAD = "⬇️ Download reel"
+RKB_USAGE = "📊 My usage"
+RKB_GIFT = "🎁 Send a gift"
+RKB_LANGUAGE = "🌐 Language"
+RKB_DEVELOPER = "👨‍💻 Developer"
+RKB_HOWTO = "📘 How to use"
+RKB_SUPPORT = "🎧 Support"
+
+
+def main_reply_keyboard() -> ReplyKeyboardMarkup:
+    """v2 Section 1 — persistent bottom keyboard, alongside the existing
+    inline /start menu (doesn't replace it)."""
+    return ReplyKeyboardMarkup(
+        [
+            [KeyboardButton(RKB_DOWNLOAD)],
+            [KeyboardButton(RKB_USAGE), KeyboardButton(RKB_GIFT)],
+            [KeyboardButton(RKB_LANGUAGE), KeyboardButton(RKB_DEVELOPER)],
+            [KeyboardButton(RKB_HOWTO), KeyboardButton(RKB_SUPPORT)],
+        ],
+        resize_keyboard=True,
+    )
 
 
 def _map_alpha_digit(text: str, upper_base: int, lower_base: int, digit_base=None) -> str:
@@ -234,12 +286,13 @@ DEFAULT_MENUS = {
         "translations": {},
     },
     "reel_result": {
-        "text": to_deco(to_small_caps("here's your reel")),
-        "parse_mode": None,
+        "text": STR["done"],
+        "parse_mode": "HTML",
         "image_file_id": None,
         "buttons": [
-            {"label": to_small_caps("📝 get caption"), "type": "callback", "value": "get_caption", "row": 1, "style": "primary"},
-            {"label": to_small_caps("🏠 main menu"), "type": "menu", "value": "start", "row": 1, "style": "primary"},
+            {"label": to_small_caps("📝 caption"), "type": "callback", "value": "get_caption", "row": 1, "style": "primary"},
+            {"label": to_small_caps("🔁 download another"), "type": "callback", "value": "download_another", "row": 1, "style": "primary"},
+            {"label": to_small_caps("🏠 main menu"), "type": "menu", "value": "start", "row": 2, "style": "primary"},
         ],
         "auto_delete_seconds": None,
         "updated_by": None,
@@ -337,6 +390,13 @@ DEFAULT_DATA = {
         "owner_display_user_id": None,  # #10 — credit/contact button
         "owner_display_label": None,
         "support_chat_id": None,  # #11 — where support messages land; None = all admins
+        "premium_enabled": False,
+        "upi_id": None,
+        "developer_id": None,
+        "developer_link": None,
+        "daily_limit": 20,
+        "admin_group_id": None,   # #6 — ticket cards posted here
+        "owner_id": None,         # #12 — /export gate
     },
     "broadcast_log": [],
     "restore_log": [],
@@ -346,6 +406,12 @@ DEFAULT_DATA = {
     "blocked_domains": [],      # PDF #3 — whole domains blocked by admin
     "error_log": [],            # #13 — capped ring buffer of recent errors
     "metrics": {"reels_downloaded": 0, "start_count": 0, "broadcasts_sent": 0},
+    "tickets": {},               # v2 §6 — ticket_id(str) -> {...}
+    "ticket_msg_map": {},        # v2 §6 — admin_group_message_id(str) -> ticket_id
+    "next_ticket_id": 1,
+    "panel_msg": {},              # v2 §11 — chat_id(str) -> last panel message_id
+    "gift_orders": {},            # v2 §4 — order_id(str) -> {...} (UPI pending payments)
+    "next_gift_id": 1,
 }
 
 # ----------------------------------------------------------------------------
@@ -484,6 +550,9 @@ def touch_user(update: Update) -> bool:
             "joined": now, "last_active": now, "last_reengaged": None,
             "lang": None, "lang_prompted": False,
             "accepted_terms": False, "accepted_terms_at": None,
+            "downloads_today": 0, "downloads_today_date": None,
+            "downloads_month": 0, "downloads_month_key": None,
+            "plan": "Free", "open_ticket_id": None,
         }
     else:
         users[uid]["last_active"] = now
@@ -540,6 +609,23 @@ def track_sent_message(chat_id: int, message_id: int):
     buf.append(message_id)
     if len(buf) > 200:
         del buf[: len(buf) - 200]
+
+
+def bump_usage(uid: str):
+    """v2 §3 — daily/monthly download counters, resetting on date/month change."""
+    u = BOT_DATA["users"].get(uid)
+    if not u:
+        return
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    month = datetime.utcnow().strftime("%Y-%m")
+    if u.get("downloads_today_date") != today:
+        u["downloads_today"] = 0
+        u["downloads_today_date"] = today
+    if u.get("downloads_month_key") != month:
+        u["downloads_month"] = 0
+        u["downloads_month_key"] = month
+    u["downloads_today"] += 1
+    u["downloads_month"] += 1
 
 
 def human_uptime() -> str:
@@ -711,6 +797,23 @@ async def render_menu(context: ContextTypes.DEFAULT_TYPE, chat_id: int, menu_id:
     if sent_message:
         track_sent_message(chat_id, sent_message.message_id)
         await schedule_delete(context, chat_id, sent_message.message_id, seconds)
+    return sent_message
+
+
+async def track_and_refresh_panel(context: ContextTypes.DEFAULT_TYPE, chat_id: int, key: str, sent_message):
+    """v2 §11 — first-ever panel message stays forever; every later /start or
+    /admin deletes the previous panel message and leaves only the fresh one."""
+    if not sent_message:
+        return
+    key = f"{key}:{chat_id}"
+    prev = BOT_DATA["panel_msg"].get(key)
+    if prev and prev != sent_message.message_id:
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=prev)
+        except Exception:
+            pass
+    BOT_DATA["panel_msg"][key] = sent_message.message_id
+    save_data()
 
 
 async def cb_nav(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -828,11 +931,19 @@ async def show_post_onboarding(context: ContextTypes.DEFAULT_TYPE, chat_id: int,
     if not user.get("lang_prompted") and langs:
         user["lang_prompted"] = True
         save_data()
-        await context.bot.send_message(
+        sent = await context.bot.send_message(
             chat_id, "🌐 Welcome! Pick your language to get started:", reply_markup=build_language_keyboard()
         )
-        return
-    await render_menu(context, chat_id, "start")
+        return sent
+    sent = await render_menu(context, chat_id, "start")
+    if not BOT_DATA["users"].get(uid, {}).get("reply_kb_sent"):
+        try:
+            await context.bot.send_message(chat_id, "⌨️", reply_markup=main_reply_keyboard())
+        except Exception:
+            pass
+        BOT_DATA["users"].setdefault(uid, {})["reply_kb_sent"] = True
+        save_data()
+    return sent
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -861,7 +972,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     save_data()
 
-    await show_post_onboarding(context, update.effective_chat.id, str(user_obj.id))
+    sent = await show_post_onboarding(context, update.effective_chat.id, str(user_obj.id))
+    await track_and_refresh_panel(context, update.effective_chat.id, "start", sent)
     await delete_incoming(update)
 
 
@@ -934,14 +1046,59 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if is_blocked(user_obj.id) and not is_admin(user_obj.id):
         return  # silently ignored, per spec
 
+    # v2 §6 — an admin replying (in the admin group / their DM) to a forwarded
+    # ticket message routes straight back to that user, bypassing everything else.
+    if update.message.reply_to_message and is_admin(user_obj.id):
+        tid = BOT_DATA["ticket_msg_map"].get(str(update.message.reply_to_message.message_id))
+        if tid:
+            await handle_admin_ticket_reply(update, context, tid)
+            return
+
     touch_user(update)
     user_id = user_obj.id
+    uid = str(user_id)
+
+    # v2 §6 — while a user has an open ticket, every message they send auto-
+    # forwards into it (no command/button needed).
+    open_tid = BOT_DATA["users"].get(uid, {}).get("open_ticket_id")
+    if open_tid and str(open_tid) in BOT_DATA["tickets"] and BOT_DATA["tickets"][str(open_tid)]["status"] == "open":
+        await forward_to_ticket(update, context, open_tid)
+        return
+
+    text = update.message.text or ""
+
+    # v2 §1 — persistent reply-keyboard routing
+    if text == RKB_DOWNLOAD:
+        await update.message.reply_text("🔗 " + to_small_caps("paste your instagram reel link here"))
+        return
+    if text == RKB_USAGE:
+        await show_usage_screen(update, context)
+        return
+    if text == RKB_GIFT:
+        await show_gift_menu(update, context)
+        return
+    if text == RKB_LANGUAGE:
+        await cmd_language(update, context)
+        return
+    if text == RKB_DEVELOPER:
+        await show_developer_button(update, context)
+        return
+    if text == RKB_HOWTO:
+        await update.message.reply_text(STR["how_to_use"])
+        return
+    if text == RKB_SUPPORT:
+        await support_button_entry(update, context)
+        return
+
     awaiting = context.user_data.get("awaiting")
 
     # PDF #3 / #11 — user-facing text-collection flows (copyright report,
     # support message) run regardless of admin status, before the
     # admin-only dispatcher below.
-    if awaiting in ("support_message", "copyright_report_link", "copyright_report_details"):
+    if awaiting in (
+        "support_message", "copyright_report_link", "copyright_report_details",
+        "ticket_new", "gift_stars_custom_amount", "gift_upi_amount",
+    ):
         await handle_user_awaiting_input(update, context, awaiting)
         return
 
@@ -956,7 +1113,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⏳ Thoda slow karo, bahut jaldi jaldi requests aa rahi hain.")
         return
 
-    text = update.message.text or ""
     match = INSTAGRAM_URL_RE.search(text)
 
     if not match:
@@ -982,7 +1138,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🚫 Ye link ya domain admin ne block kar diya hai.")
         return
 
-    status_msg = await update.message.reply_text("⏳ Download ho raha hai, best quality mein...")
+    status_msg = await update.message.reply_text(STR["processing"])
+    try:
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="upload_video")
+    except Exception:
+        pass
 
     out_template = os.path.join(DOWNLOAD_DIR, f"%(id)s_{int(time.time())}.%(ext)s")
 
@@ -1007,18 +1167,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not fp.endswith(".mp4") and os.path.exists(fp.rsplit(".", 1)[0] + ".mp4"):
                 fp = fp.rsplit(".", 1)[0] + ".mp4"
             ig_caption = (info.get("description") or "").strip()
-            return fp, ig_caption
+            uploader = (info.get("uploader") or info.get("uploader_id") or "").strip()
+            return fp, ig_caption, uploader
 
     file_path = None
     try:
         try:
-            file_path, ig_caption = run_download(use_merge=FFMPEG_AVAILABLE)
+            file_path, ig_caption, ig_uploader = run_download(use_merge=FFMPEG_AVAILABLE)
         except Exception as e:
             # Self-heal: if a merge was attempted and ffmpeg turned out to be
             # the problem, retry once with a no-merge (progressive) format.
             if "ffmpeg" in str(e).lower():
                 log.warning("Merge failed (ffmpeg issue), retrying with progressive format.")
-                file_path, ig_caption = run_download(use_merge=False)
+                file_path, ig_caption, ig_uploader = run_download(use_merge=False)
             else:
                 raise
 
@@ -1026,14 +1187,29 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lang = BOT_DATA["users"].get(uid, {}).get("lang")
         menu = BOT_DATA["menus"]["reel_result"]
         translation = menu.get("translations", {}).get(lang) if lang else None
-        result_caption = (translation or {}).get("text") or menu.get("text", "")
+        base_caption = (translation or {}).get("text") or menu.get("text", "")
         buttons = (translation or {}).get("buttons") or menu.get("buttons", [])
         kb = build_keyboard_from_buttons(buttons, "reel_result")
+        parse_mode = menu.get("parse_mode") or None
+
+        # v2 §9 — native Telegram blockquote with extra reel info, HTML only.
+        if parse_mode == "HTML":
+            import html as _html
+            preview = ig_caption[:300] + ("…" if len(ig_caption) > 300 else "")
+            bq = (
+                "<blockquote expandable>"
+                f"📋 Caption: {_html.escape(preview) or '(none)'}\n"
+                f"👤 Uploader: {_html.escape(ig_uploader) or 'n/a'}"
+                "</blockquote>"
+            )
+            result_caption = f"{base_caption}\n\n{bq}"
+        else:
+            result_caption = base_caption
 
         protect = bool(BOT_DATA["settings"].get("lock_all_content", False))
         with open(file_path, "rb") as vid:
             sent = await update.message.reply_video(
-                video=vid, caption=result_caption, reply_markup=kb, protect_content=protect
+                video=vid, caption=result_caption, parse_mode=parse_mode, reply_markup=kb, protect_content=protect
             )
 
         # Cache the real Instagram caption so the "Get Caption" button under
@@ -1043,6 +1219,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             _caption_cache.pop(next(iter(_caption_cache)))
 
         track_sent_message(sent.chat_id, sent.message_id)
+        bump_usage(uid)
         BOT_DATA["metrics"]["reels_downloaded"] = BOT_DATA["metrics"].get("reels_downloaded", 0) + 1
         save_data()
         await log_event(
@@ -1077,6 +1254,353 @@ async def cb_get_caption(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Telegram message limit is 4096 chars — split if needed.
     for i in range(0, len(caption), 4000):
         await query.message.reply_text(caption[i:i + 4000])
+
+
+async def cb_download_another(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await query.message.reply_text("🔗 Paste your next Instagram reel link.")
+
+
+# ----------------------------------------------------------------------------
+# v2 §6 — Livegram-style support ticket system
+# ----------------------------------------------------------------------------
+
+async def create_ticket(update: Update, context: ContextTypes.DEFAULT_TYPE) -> dict:
+    uid = str(update.effective_user.id)
+    tid = BOT_DATA["next_ticket_id"]
+    BOT_DATA["next_ticket_id"] += 1
+    ticket = {
+        "id": tid, "user_id": update.effective_user.id, "status": "open",
+        "created_at": datetime.utcnow().isoformat(), "closed_at": None,
+    }
+    BOT_DATA["tickets"][str(tid)] = ticket
+    BOT_DATA["users"].setdefault(uid, {})["open_ticket_id"] = tid
+    save_data()
+    return ticket
+
+
+async def post_ticket_card(context: ContextTypes.DEFAULT_TYPE, ticket: dict, user_obj):
+    group_id = BOT_DATA["settings"].get("admin_group_id")
+    targets = [group_id] if group_id else BOT_DATA.get("admins", [])
+    card_text = f"👤 {user_obj.full_name} | 🆔 {user_obj.id} | 🎫 #{ticket['id']} | Status: 🟢 Open"
+    kb = InlineKeyboardMarkup([[
+        styled_button("✅ Close Ticket", callback_data=f"tk_close:{ticket['id']}", style="danger"),
+        styled_button("🔁 Reopen", callback_data=f"tk_reopen:{ticket['id']}", style="success"),
+    ]])
+    for target in targets:
+        if not target:
+            continue
+        try:
+            sent = await context.bot.send_message(chat_id=target, text=card_text, reply_markup=kb)
+            BOT_DATA["ticket_msg_map"][str(sent.message_id)] = str(ticket["id"])
+        except Exception:
+            pass
+    save_data()
+
+
+async def forward_to_ticket(update: Update, context: ContextTypes.DEFAULT_TYPE, ticket_id: int):
+    group_id = BOT_DATA["settings"].get("admin_group_id")
+    targets = [group_id] if group_id else BOT_DATA.get("admins", [])
+    for target in targets:
+        if not target:
+            continue
+        try:
+            copied = await context.bot.copy_message(
+                chat_id=target, from_chat_id=update.effective_chat.id, message_id=update.message.message_id
+            )
+            BOT_DATA["ticket_msg_map"][str(copied.message_id)] = str(ticket_id)
+        except Exception:
+            pass
+    save_data()
+
+
+async def handle_admin_ticket_reply(update: Update, context: ContextTypes.DEFAULT_TYPE, tid: str):
+    ticket = BOT_DATA["tickets"].get(tid)
+    if not ticket or ticket["status"] != "open":
+        return
+    try:
+        await context.bot.copy_message(
+            chat_id=ticket["user_id"], from_chat_id=update.effective_chat.id, message_id=update.message.message_id
+        )
+    except Exception:
+        pass
+
+
+async def support_button_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    uid = str(user.id)
+    user_rec = BOT_DATA["users"].setdefault(uid, {})
+    open_tid = user_rec.get("open_ticket_id")
+    target_msg = update.callback_query.message if update.callback_query else update.message
+    if open_tid and str(open_tid) in BOT_DATA["tickets"] and BOT_DATA["tickets"][str(open_tid)]["status"] == "open":
+        await target_msg.reply_text(f"🎫 Ticket #{open_tid} already open — just send your message here.")
+        return
+    context.user_data["awaiting"] = "ticket_new"
+    await target_msg.reply_text(STR["support_prompt"])
+
+
+async def cb_ticket_close(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if not is_admin(update.effective_user.id):
+        return
+    tid = query.data.split(":", 1)[1]
+    ticket = BOT_DATA["tickets"].get(tid)
+    if not ticket:
+        return
+    ticket["status"] = "closed"
+    ticket["closed_at"] = datetime.utcnow().isoformat()
+    uid = str(ticket["user_id"])
+    if BOT_DATA["users"].get(uid, {}).get("open_ticket_id") == int(tid):
+        BOT_DATA["users"][uid]["open_ticket_id"] = None
+    save_data()
+    try:
+        await context.bot.send_message(chat_id=ticket["user_id"], text=STR["ticket_closed"](tid))
+    except Exception:
+        pass
+    try:
+        await query.edit_message_reply_markup(
+            InlineKeyboardMarkup([[styled_button("🔁 Reopen", callback_data=f"tk_reopen:{tid}", style="success")]])
+        )
+    except Exception:
+        pass
+    await log_event(context, f"🎫 Ticket #{tid} closed by {update.effective_user.id}")
+
+
+async def cb_ticket_reopen(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if not is_admin(update.effective_user.id):
+        return
+    tid = query.data.split(":", 1)[1]
+    ticket = BOT_DATA["tickets"].get(tid)
+    if not ticket:
+        return
+    ticket["status"] = "open"
+    ticket["closed_at"] = None
+    uid = str(ticket["user_id"])
+    BOT_DATA["users"].setdefault(uid, {})["open_ticket_id"] = int(tid)
+    save_data()
+    try:
+        await query.edit_message_reply_markup(
+            InlineKeyboardMarkup([[styled_button("✅ Close Ticket", callback_data=f"tk_close:{tid}", style="danger")]])
+        )
+    except Exception:
+        pass
+    await log_event(context, f"🎫 Ticket #{tid} reopened by {update.effective_user.id}")
+
+
+# ----------------------------------------------------------------------------
+# v2 §3 — My usage
+# ----------------------------------------------------------------------------
+
+async def show_usage_screen(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = str(update.effective_user.id)
+    u = BOT_DATA["users"].setdefault(uid, {})
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    month = datetime.utcnow().strftime("%Y-%m")
+    today_count = u.get("downloads_today", 0) if u.get("downloads_today_date") == today else 0
+    month_count = u.get("downloads_month", 0) if u.get("downloads_month_key") == month else 0
+    limit = BOT_DATA["settings"].get("daily_limit", 20)
+    plan = u.get("plan", "Free")
+    pct = min(100, int((today_count / limit) * 100)) if limit else 0
+    filled = pct // 10
+    bar = "▓" * filled + "░" * (10 - filled)
+    now = datetime.utcnow()
+    tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    remaining = tomorrow - now
+    hh, mm = remaining.seconds // 3600, (remaining.seconds % 3600) // 60
+    text = (
+        f"{STR['usage_title']}\n\n"
+        f"📥 {to_small_caps('today')}: {today_count}/{limit} {to_small_caps('downloads')}\n"
+        f"📅 {to_small_caps('this month')}: {month_count} {to_small_caps('downloads')}\n"
+        f"⚡ {to_small_caps('plan')}: {plan}\n"
+        f"⏳ {to_small_caps('resets in')}: {hh}ʜ {mm}ᴍ\n\n"
+        f"{bar} {pct}%"
+    )
+    kb_rows = []
+    if BOT_DATA["settings"].get("premium_enabled"):
+        kb_rows.append([styled_button(to_small_caps("🚀 upgrade for more"), callback_data="gift_menu", style="success")])
+    try:
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    except Exception:
+        pass
+    await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(kb_rows) if kb_rows else None)
+
+
+# ----------------------------------------------------------------------------
+# v2 §5 — Developer button
+# ----------------------------------------------------------------------------
+
+def resolve_developer_url() -> str | None:
+    link = BOT_DATA["settings"].get("developer_link")
+    if link:
+        return link
+    dev_id = BOT_DATA["settings"].get("developer_id")
+    if dev_id:
+        return f"tg://user?id={dev_id}"
+    return None
+
+
+async def show_developer_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    url = resolve_developer_url()
+    if not url:
+        await update.message.reply_text(to_small_caps("developer contact not set up yet."))
+        return
+    kb = InlineKeyboardMarkup([[styled_button("👨‍💻 " + to_small_caps("message developer"), url=url)]])
+    await update.message.reply_text(to_small_caps("tap below to message the developer:"), reply_markup=kb)
+
+
+# ----------------------------------------------------------------------------
+# v2 §4 — Gift flow (Telegram Stars + UPI)
+# ----------------------------------------------------------------------------
+
+async def show_gift_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    kb_rows = [[styled_button("⭐ Send Stars", callback_data="gift_stars", style="success")]]
+    if BOT_DATA["settings"].get("upi_id"):
+        kb_rows.append([styled_button("💳 Pay via UPI", callback_data="gift_upi", style="primary")])
+    target = update.callback_query.message if update.callback_query else update.message
+    await target.reply_text("🎁 " + to_small_caps("send a gift — pick a method:"), reply_markup=InlineKeyboardMarkup(kb_rows))
+
+
+async def cb_gift_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await show_gift_menu(update, context)
+
+
+async def cb_gift_stars(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    kb = InlineKeyboardMarkup([
+        [styled_button("50⭐", callback_data="gift_stars_amt:50"), styled_button("100⭐", callback_data="gift_stars_amt:100")],
+        [styled_button("250⭐", callback_data="gift_stars_amt:250"), styled_button("500⭐", callback_data="gift_stars_amt:500")],
+        [styled_button("✏️ Enter custom amount", callback_data="gift_stars_custom")],
+    ])
+    await query.message.reply_text("⭐ " + to_small_caps("choose an amount:"), reply_markup=kb)
+
+
+async def cb_gift_stars_custom(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    context.user_data["awaiting"] = "gift_stars_custom_amount"
+    await query.message.reply_text("Numeric ⭐ amount type karo (e.g. 150).")
+
+
+async def send_stars_invoice(context: ContextTypes.DEFAULT_TYPE, chat_id: int, amount: int):
+    await context.bot.send_invoice(
+        chat_id=chat_id,
+        title="Gift the developer ⭐",
+        description=f"Send {amount} Telegram Stars as a gift.",
+        payload=f"stars_gift:{amount}:{chat_id}:{int(time.time())}",
+        provider_token="",  # not used for XTR
+        currency="XTR",
+        prices=[LabeledPrice(label=f"{amount} Stars", amount=amount)],
+    )
+
+
+async def cb_gift_stars_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    amount = int(query.data.split(":", 1)[1])
+    await send_stars_invoice(context, query.message.chat_id, amount)
+
+
+async def cmd_precheckout(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.pre_checkout_query.answer(ok=True)
+
+
+async def cmd_successful_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    sp = update.message.successful_payment
+    await update.message.reply_text(f"✅ " + to_small_caps(f"thanks for the {sp.total_amount}⭐ gift!"))
+    await log_event(context, f"⭐ Gift received — {sp.total_amount} stars from {update.effective_user.id}")
+
+
+async def cb_gift_upi(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if not BOT_DATA["settings"].get("upi_id"):
+        await query.message.reply_text("UPI abhi configure nahi hai.")
+        return
+    context.user_data["awaiting"] = "gift_upi_amount"
+    await query.message.reply_text("💳 Amount (₹) type karo:")
+
+
+async def start_upi_order(update: Update, context: ContextTypes.DEFAULT_TYPE, amount: int):
+    upi_id = BOT_DATA["settings"].get("upi_id")
+    oid = str(BOT_DATA["next_gift_id"])
+    BOT_DATA["next_gift_id"] += 1
+    expires_at = time.time() + 600  # 10 minutes
+    order = {
+        "id": oid, "user_id": update.effective_user.id, "amount": amount,
+        "expires_at": expires_at, "status": "pending",
+    }
+    BOT_DATA["gift_orders"][oid] = order
+    save_data()
+    upi_uri = f"upi://pay?pa={upi_id}&am={amount}&cu=INR&tn=Gift%20Order%20{oid}"
+    qr_url = f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={quote(upi_uri)}"
+    kb = InlineKeyboardMarkup([[styled_button("✅ I've Paid", callback_data=f"gift_upi_paid:{oid}", style="success")]])
+    msg = await context.bot.send_photo(
+        chat_id=update.effective_chat.id, photo=qr_url,
+        caption=f"💳 ₹{amount} — {to_small_caps('scan to pay via upi')}\n⏳ expires in 10:00",
+        reply_markup=kb,
+    )
+    context.job_queue.run_repeating(
+        upi_countdown_job, interval=20, first=20,
+        data={"oid": oid, "chat_id": msg.chat_id, "message_id": msg.message_id},
+        name=f"upi_countdown_{oid}",
+    )
+
+
+async def upi_countdown_job(context: ContextTypes.DEFAULT_TYPE):
+    job = context.job
+    oid, chat_id, message_id = job.data["oid"], job.data["chat_id"], job.data["message_id"]
+    order = BOT_DATA["gift_orders"].get(oid)
+    if not order or order["status"] != "pending":
+        job.schedule_removal()
+        return
+    remaining = int(order["expires_at"] - time.time())
+    if remaining <= 0:
+        order["status"] = "expired"
+        save_data()
+        try:
+            kb = InlineKeyboardMarkup([[styled_button("🔁 Generate New QR", callback_data="gift_upi", style="primary")]])
+            await context.bot.edit_message_caption(chat_id=chat_id, message_id=message_id, caption="❌ QR expired, generate new one", reply_markup=kb)
+        except Exception:
+            pass
+        job.schedule_removal()
+        return
+    mm, ss = remaining // 60, remaining % 60
+    try:
+        await context.bot.edit_message_caption(
+            chat_id=chat_id, message_id=message_id,
+            caption=f"💳 ₹{order['amount']} — {to_small_caps('scan to pay via upi')}\n⏳ expires in {mm:02d}:{ss:02d}",
+            reply_markup=InlineKeyboardMarkup([[styled_button("✅ I've Paid", callback_data=f"gift_upi_paid:{oid}", style="success")]]),
+        )
+    except Exception:
+        pass
+
+
+async def cb_gift_upi_paid(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    oid = query.data.split(":", 1)[1]
+    order = BOT_DATA["gift_orders"].get(oid)
+    if not order:
+        return
+    if order["expires_at"] < time.time():
+        await query.message.reply_text("❌ QR expired, generate new one via 🎁 Send a gift.")
+        return
+    order["status"] = "claimed_pending_verify"
+    save_data()
+    await query.message.reply_text("✅ Marked as paid — an admin will verify shortly.")
+    targets = BOT_DATA.get("admins", [])
+    for target in targets:
+        try:
+            await context.bot.send_message(target, f"💳 UPI order #{oid} — ₹{order['amount']} — user {order['user_id']} claims paid.")
+        except Exception:
+            pass
 
 
 # ----------------------------------------------------------------------------
@@ -1117,6 +1641,28 @@ async def handle_user_awaiting_input(update: Update, context: ContextTypes.DEFAU
                 pass
         await log_event(context, f"🆘 Support message from {user_obj.id}")
         await update.message.reply_text("✅ Your message has been sent to support, we'll get back to you soon.")
+
+    elif awaiting == "ticket_new":
+        context.user_data.pop("awaiting", None)
+        ticket = await create_ticket(update, context)
+        await update.message.reply_text(STR["ticket_created"](ticket["id"]))
+        await post_ticket_card(context, ticket, user_obj)
+        await forward_to_ticket(update, context, ticket["id"])
+        await log_event(context, f"🎫 Ticket #{ticket['id']} opened by {user_obj.id}")
+
+    elif awaiting == "gift_stars_custom_amount":
+        context.user_data.pop("awaiting", None)
+        if not text.isdigit() or int(text) <= 0:
+            await update.message.reply_text("Valid ⭐ number bhejo.")
+            return
+        await send_stars_invoice(context, update.effective_chat.id, int(text))
+
+    elif awaiting == "gift_upi_amount":
+        context.user_data.pop("awaiting", None)
+        if not text.isdigit() or int(text) <= 0:
+            await update.message.reply_text("Valid ₹ amount bhejo.")
+            return
+        await start_upi_order(update, context, int(text))
 
     elif awaiting == "copyright_report_link":
         context.user_data["report_link_draft"] = text
@@ -1228,9 +1774,15 @@ async def cb_adm_block_domain(update: Update, context: ContextTypes.DEFAULT_TYPE
 def admin_panel_keyboard():
     return InlineKeyboardMarkup(
         [
-            [styled_button("📊 Stats & Activity", callback_data="adm_stats", style="primary"),
-             styled_button("👥 Users & Groups", callback_data="adm_users", style="primary")],
-            [styled_button("📢 Broadcast", callback_data="adm_broadcast", style="primary"),
+            [styled_button("💎 Premium Plans", callback_data="adm_premium", style="primary"),
+             styled_button("💳 UPI Settings", callback_data="adm_upi", style="primary")],
+            [styled_button("👨‍💻 Developer Settings", callback_data="adm_devsettings", style="primary"),
+             styled_button("🎧 Support Settings", callback_data="adm_support_settings", style="primary")],
+            [styled_button("🎫 Tickets", callback_data="adm_tickets", style="success"),
+             styled_button("📊 Bot Stats", callback_data="adm_stats", style="success")],
+            [styled_button("🌐 Language Settings", callback_data="adm_lang_manage", style="primary"),
+             styled_button("📢 Broadcast", callback_data="adm_broadcast", style="primary")],
+            [styled_button("👥 Users & Groups", callback_data="adm_users", style="primary"),
              styled_button("🎨 Menu & UI", callback_data="adm_menu_ui", style="primary")],
             [styled_button("⚙️ Settings & Admins", callback_data="adm_settings", style="primary"),
              styled_button("🛑 Danger Zone", callback_data="adm_danger", style="danger")],
@@ -1252,7 +1804,9 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         return
     context.user_data["adm_nav_stack"] = ["adm_home"]
-    await update.message.reply_text("🛠️ Admin Panel", reply_markup=admin_panel_keyboard())
+    sent = await update.message.reply_text("🛠️ Admin Panel", reply_markup=admin_panel_keyboard())
+    await track_and_refresh_panel(context, update.effective_chat.id, "admin", sent)
+    await delete_incoming(update)
 
 
 async def _render_adm_home(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1967,6 +2521,146 @@ async def _render_adm_danger(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.edit_message_text("🛑 Danger Zone\n(Ye actions destructive hain.)", reply_markup=kb)
 
 
+# ---- v2 §8 new admin screens: Premium / UPI / Developer / Support / Tickets --
+
+async def _render_adm_premium(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    s = BOT_DATA["settings"]
+    text = (
+        f"💎 Premium Plans\n\nEnabled: {'ON' if s.get('premium_enabled') else 'OFF'}\n"
+        f"Daily free limit: {s.get('daily_limit', 20)}"
+    )
+    kb = InlineKeyboardMarkup([
+        [styled_button(f"🔀 Premium: {'ON' if s.get('premium_enabled') else 'OFF'}",
+                        callback_data="stgl:premium_enabled:adm_premium",
+                        style="success" if s.get("premium_enabled") else "danger")],
+        [styled_button("✏️ Set Daily Limit", callback_data="adm_set_dailylimit")],
+        back_row(), home_row(),
+    ])
+    await query.edit_message_text(text, reply_markup=kb)
+
+
+async def cb_adm_premium(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    await _render_adm_premium(update, context)
+
+
+async def cb_adm_set_dailylimit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    context.user_data["awaiting"] = "daily_limit"
+    await query.message.reply_text("Naya daily free-download limit (number) bhejo.")
+
+
+async def _render_adm_upi(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    upi = BOT_DATA["settings"].get("upi_id")
+    kb = InlineKeyboardMarkup([
+        [styled_button("✏️ Set UPI ID", callback_data="adm_upi_set")],
+        [styled_button("❌ Clear", callback_data="adm_upi_clear", style="danger")],
+        back_row(), home_row(),
+    ])
+    await query.edit_message_text(f"💳 UPI Settings\n\nCurrent: {upi or '(not set)'}", reply_markup=kb)
+
+
+async def cb_adm_upi(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    await _render_adm_upi(update, context)
+
+
+async def cb_adm_upi_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    context.user_data["awaiting"] = "upi_id"
+    await query.message.reply_text("UPI ID bhejo (e.g. name@bank).")
+
+
+async def cb_adm_upi_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    BOT_DATA["settings"]["upi_id"] = None
+    save_data()
+    await query.edit_message_text("✅ UPI ID cleared.", reply_markup=InlineKeyboardMarkup([back_row()]))
+
+
+async def _render_adm_devsettings(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    s = BOT_DATA["settings"]
+    text = (
+        f"👨‍💻 Developer Settings\n\nNumeric ID: {s.get('developer_id') or '(not set)'}\n"
+        f"Link override: {s.get('developer_link') or '(not set)'}"
+    )
+    kb = InlineKeyboardMarkup([
+        [styled_button("✏️ Set Numeric ID", callback_data="adm_dev_id")],
+        [styled_button("✏️ Set Link Override", callback_data="adm_dev_link")],
+        back_row(), home_row(),
+    ])
+    await query.edit_message_text(text, reply_markup=kb)
+
+
+async def cb_adm_devsettings(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    await _render_adm_devsettings(update, context)
+
+
+async def cb_adm_dev_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    context.user_data["awaiting"] = "developer_id"
+    await query.message.reply_text("Developer ki numeric user ID bhejo.")
+
+
+async def cb_adm_dev_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    context.user_data["awaiting"] = "developer_link"
+    await query.message.reply_text("t.me/username link bhejo (ya 'clear' likh do hatane ke liye).")
+
+
+async def _render_adm_support_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    gid = BOT_DATA["settings"].get("admin_group_id")
+    kb = InlineKeyboardMarkup([
+        [styled_button("✏️ Set Ticket Group", callback_data="adm_group_set")],
+        back_row(), home_row(),
+    ])
+    await query.edit_message_text(
+        f"🎧 Support Settings\n\nTicket group: {gid or '(not set — falls back to admin DMs)'}", reply_markup=kb
+    )
+
+
+async def cb_adm_support_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    await _render_adm_support_settings(update, context)
+
+
+async def cb_adm_group_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    context.user_data["awaiting"] = "admin_group_id"
+    await query.message.reply_text(
+        "Forward any message from the ticket group here (bot must be admin there), "
+        "or type its numeric ID (-100...)."
+    )
+
+
+async def _render_adm_tickets(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    tickets = list(BOT_DATA["tickets"].values())
+    open_n = sum(1 for t in tickets if t["status"] == "open")
+    lines = [f"🎫 Tickets — {open_n} open / {len(tickets)} total\n"]
+    for t in tickets[-15:]:
+        icon = "🟢" if t["status"] == "open" else "🔴"
+        lines.append(f"#{t['id']} — user {t['user_id']} — {icon} {t['status']}")
+    kb = InlineKeyboardMarkup([back_row(), home_row()])
+    await query.edit_message_text("\n".join(lines), reply_markup=kb)
+
+
+async def cb_adm_tickets(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    await _render_adm_tickets(update, context)
+
+
 async def cb_adm_danger(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     await _render_adm_danger(update, context)
@@ -2189,6 +2883,58 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
         save_data()
         await update.message.reply_text(f"✅ Logger channel set to {chat_id} and enabled.")
 
+    elif awaiting == "daily_limit":
+        context.user_data.pop("awaiting", None)
+        if not text.isdigit():
+            await update.message.reply_text("Valid number bhejo.")
+            return
+        BOT_DATA["settings"]["daily_limit"] = int(text)
+        save_data()
+        await update.message.reply_text(f"✅ Daily limit set to {text}.")
+
+    elif awaiting == "upi_id":
+        context.user_data.pop("awaiting", None)
+        BOT_DATA["settings"]["upi_id"] = text
+        save_data()
+        await update.message.reply_text(f"✅ UPI ID set: {text}")
+
+    elif awaiting == "developer_id":
+        context.user_data.pop("awaiting", None)
+        if not text.isdigit():
+            await update.message.reply_text("Valid numeric ID bhejo.")
+            return
+        BOT_DATA["settings"]["developer_id"] = int(text)
+        save_data()
+        await update.message.reply_text(f"✅ Developer ID set: {text}")
+
+    elif awaiting == "developer_link":
+        context.user_data.pop("awaiting", None)
+        BOT_DATA["settings"]["developer_link"] = None if text.lower() == "clear" else text
+        save_data()
+        await update.message.reply_text("✅ Developer link updated.")
+
+    elif awaiting == "admin_group_id":
+        context.user_data.pop("awaiting", None)
+        chat_id = None
+        forward_origin = getattr(update.message, "forward_origin", None)
+        if forward_origin is not None:
+            chat_obj = getattr(forward_origin, "chat", None)
+            if chat_obj is not None:
+                chat_id = chat_obj.id
+        if chat_id is None:
+            legacy_fwd = getattr(update.message, "forward_from_chat", None)
+            if legacy_fwd is not None:
+                chat_id = legacy_fwd.id
+        if chat_id is None and text.lstrip("-").isdigit():
+            chat_id = int(text)
+        if chat_id is None:
+            await update.message.reply_text("Group detect nahi hua. Forward a message ya numeric ID type karo.")
+            context.user_data["awaiting"] = "admin_group_id"
+            return
+        BOT_DATA["settings"]["admin_group_id"] = chat_id
+        save_data()
+        await update.message.reply_text(f"✅ Ticket group set to {chat_id}.")
+
     elif awaiting == "message_user_id":
         if not text.isdigit():
             await update.message.reply_text("Valid numeric user ID bhejo.")
@@ -2340,8 +3086,8 @@ async def cmd_database(update: Update, context: ContextTypes.DEFAULT_TYPE):
     os.remove(path)
 
 
-async def cmd_export(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """CSV export of users. (PDF/chart report skipped for scope — ask if needed.)"""
+async def cmd_exportusers(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """CSV export of users."""
     if not is_owner(update.effective_user.id):
         return
     path = os.path.join(tempfile.gettempdir(), f"users_export_{int(time.time())}.csv")
@@ -2353,6 +3099,34 @@ async def cmd_export(update: Update, context: ContextTypes.DEFAULT_TYPE):
     with open(path, "rb") as f:
         await update.message.reply_document(document=f, filename="users_export.csv")
     os.remove(path)
+
+
+async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """v2 §12 — latency check, available to everyone."""
+    t0 = time.monotonic()
+    msg = await update.message.reply_text("🏓 Pong!")
+    ms = int((time.monotonic() - t0) * 1000)
+    await msg.edit_text(f"🏓 Pong! {ms}ms")
+
+
+async def cmd_export(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """v2 §12 — owner-only, zips the bot source dir and DMs it to the owner."""
+    if not is_owner(update.effective_user.id):
+        await update.message.reply_text("🚫 " + to_small_caps("access denied"))
+        return
+    src_dir = os.path.dirname(os.path.abspath(__file__))
+    zip_base = os.path.join(tempfile.gettempdir(), f"bot_export_{int(time.time())}")
+    try:
+        zip_path = shutil.make_archive(zip_base, "zip", src_dir)
+    except Exception:
+        log.exception("Export zip failed")
+        await update.message.reply_text("⚠️ Export failed, check logs.")
+        return
+    with open(zip_path, "rb") as f:
+        await context.bot.send_document(chat_id=update.effective_user.id, document=f, filename="bot_source.zip")
+    os.remove(zip_path)
+    if update.effective_chat.id != update.effective_user.id:
+        await update.message.reply_text("✅ Sent to your DM.")
 
 
 # ----------------------------------------------------------------------------
@@ -2567,6 +3341,11 @@ SCREEN_RENDERERS.update(
         "adm_danger": _render_adm_danger,
         "adm_owner_contact": _render_adm_owner_contact,
         "adm_logger_channel": _render_adm_logger_channel,
+        "adm_premium": _render_adm_premium,
+        "adm_upi": _render_adm_upi,
+        "adm_devsettings": _render_adm_devsettings,
+        "adm_support_settings": _render_adm_support_settings,
+        "adm_tickets": _render_adm_tickets,
     }
 )
 
@@ -2582,6 +3361,8 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("health", cmd_health))
     app.add_handler(CommandHandler("database", cmd_database))
     app.add_handler(CommandHandler("export", cmd_export))
+    app.add_handler(CommandHandler("exportusers", cmd_exportusers))
+    app.add_handler(CommandHandler("ping", cmd_ping))
     app.add_handler(CommandHandler("block", cmd_block))
     app.add_handler(CommandHandler("unblock", cmd_unblock))
     app.add_handler(CommandHandler("cancel", cmd_cancel))
@@ -2596,6 +3377,19 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(cb_adm_logger_channel_set, pattern="^adm_logger_channel_set$"))
 
     app.add_handler(CallbackQueryHandler(cb_get_caption, pattern="^get_caption$"))
+    app.add_handler(CallbackQueryHandler(cb_download_another, pattern="^download_another$"))
+
+    app.add_handler(CallbackQueryHandler(cb_ticket_close, pattern="^tk_close:"))
+    app.add_handler(CallbackQueryHandler(cb_ticket_reopen, pattern="^tk_reopen:"))
+
+    app.add_handler(CallbackQueryHandler(cb_gift_menu, pattern="^gift_menu$"))
+    app.add_handler(CallbackQueryHandler(cb_gift_stars, pattern="^gift_stars$"))
+    app.add_handler(CallbackQueryHandler(cb_gift_stars_custom, pattern="^gift_stars_custom$"))
+    app.add_handler(CallbackQueryHandler(cb_gift_stars_amount, pattern="^gift_stars_amt:"))
+    app.add_handler(CallbackQueryHandler(cb_gift_upi, pattern="^gift_upi$"))
+    app.add_handler(CallbackQueryHandler(cb_gift_upi_paid, pattern="^gift_upi_paid:"))
+    app.add_handler(PreCheckoutQueryHandler(cmd_precheckout))
+    app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, cmd_successful_payment))
     app.add_handler(CallbackQueryHandler(cb_nav, pattern="^nav:"))
     app.add_handler(CallbackQueryHandler(cb_toggle_menu_button, pattern="^tgl:"))
     app.add_handler(CallbackQueryHandler(cb_settings_toggle, pattern="^stgl:"))
@@ -2644,10 +3438,19 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(cb_adm_remove_admin, pattern="^adm_remove_admin$"))
     app.add_handler(CallbackQueryHandler(cb_adm_restore_info, pattern="^adm_restore_info$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_owner_contact")(cb_adm_owner_contact), pattern="^adm_owner_contact$"))
-    app.add_handler(CallbackQueryHandler(cb_adm_owner_contact_set, pattern="^adm_owner_contact_set$"))
-    app.add_handler(CallbackQueryHandler(cb_adm_owner_contact_clear, pattern="^adm_owner_contact_clear$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_logger_channel")(cb_adm_logger_channel), pattern="^adm_logger_channel$"))
-    app.add_handler(CallbackQueryHandler(cb_adm_logger_channel_set, pattern="^adm_logger_channel_set$"))
+
+    app.add_handler(CallbackQueryHandler(nav_tracked("adm_premium")(cb_adm_premium), pattern="^adm_premium$"))
+    app.add_handler(CallbackQueryHandler(cb_adm_set_dailylimit, pattern="^adm_set_dailylimit$"))
+    app.add_handler(CallbackQueryHandler(nav_tracked("adm_upi")(cb_adm_upi), pattern="^adm_upi$"))
+    app.add_handler(CallbackQueryHandler(cb_adm_upi_set, pattern="^adm_upi_set$"))
+    app.add_handler(CallbackQueryHandler(cb_adm_upi_clear, pattern="^adm_upi_clear$"))
+    app.add_handler(CallbackQueryHandler(nav_tracked("adm_devsettings")(cb_adm_devsettings), pattern="^adm_devsettings$"))
+    app.add_handler(CallbackQueryHandler(cb_adm_dev_id, pattern="^adm_dev_id$"))
+    app.add_handler(CallbackQueryHandler(cb_adm_dev_link, pattern="^adm_dev_link$"))
+    app.add_handler(CallbackQueryHandler(nav_tracked("adm_support_settings")(cb_adm_support_settings), pattern="^adm_support_settings$"))
+    app.add_handler(CallbackQueryHandler(cb_adm_group_set, pattern="^adm_group_set$"))
+    app.add_handler(CallbackQueryHandler(nav_tracked("adm_tickets")(cb_adm_tickets), pattern="^adm_tickets$"))
 
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_danger")(cb_adm_danger), pattern="^adm_danger$"))
     app.add_handler(CallbackQueryHandler(cb_adm_clear_bclog, pattern="^adm_clear_bclog$"))
