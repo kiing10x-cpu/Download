@@ -52,6 +52,7 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
+from telegram.error import Forbidden, BadRequest, RetryAfter, TelegramError
 
 import yt_dlp
 
@@ -734,13 +735,13 @@ DEFAULT_MENUS = {
     },
     "help_admin": {
         "text": (
-            "❓ Admin Help\n\n"
-            "📊 Stats & Activity — bot ke numbers dekho\n"
-            "👥 Users & Groups — users list/message karo\n"
-            "📢 Broadcast — sabko bhejo (forward-lock ke saath)\n"
-            "🎨 Menu & UI — har menu ka text/image/buttons edit karo\n"
-            "⚙️ Settings & Admins — welcome/admins/maintenance/languages\n"
-            "🛑 Danger Zone — destructive actions"
+            to_small_caps("❓ admin help") + "\n\n"
+            + to_small_caps("📊 stats & activity — view the bot's live numbers") + "\n"
+            + to_small_caps("👥 users & groups — list or message any user") + "\n"
+            + to_small_caps("📢 broadcast — message everyone, with forward-lock") + "\n"
+            + to_small_caps("🎨 menu & ui — edit any menu's text, image or buttons") + "\n"
+            + to_small_caps("⚙️ settings & admins — welcome, admins, maintenance, languages") + "\n"
+            + to_small_caps("🛑 danger zone — destructive, irreversible actions")
         ),
         "parse_mode": None,
         "image_file_id": None,
@@ -763,6 +764,7 @@ DEFAULT_DATA = {
     "settings": {
         "maintenance": False,
         "protect_broadcasts": True,
+        "broadcast_attach_start_button": True,
         "global_auto_delete_seconds": 0,
         "small_caps_buttons_default": True,
         "auto_replies": {},
@@ -1302,7 +1304,7 @@ async def render_menu(context: ContextTypes.DEFAULT_TYPE, chat_id: int, menu_id:
     await _clear_ephemeral(context, chat_id)
     menu = BOT_DATA["menus"].get(menu_id)
     if not menu:
-        await context.bot.send_message(chat_id, f"⚠️ Menu '{menu_id}' nahi mila.")
+        await context.bot.send_message(chat_id, to_small_caps(f"⚠️ menu '{menu_id}' not found."))
         return
 
     # Resolve language: explicit arg > saved user preference > base (default) text.
@@ -1483,7 +1485,7 @@ async def send_style_preview(context, chat_id, source_text):
         preview = func(source_text)
         display = preview if len(preview) <= 30 else preview[:27] + "..."
         rows.append([styled_button(display, callback_data=f"styleset:{i}")])
-    await context.bot.send_message(chat_id, "🅰️ Ek style choose karo:", reply_markup=InlineKeyboardMarkup(rows))
+    await context.bot.send_message(chat_id, to_small_caps("🅰️ choose a style:"), reply_markup=InlineKeyboardMarkup(rows))
 
 
 async def cb_styleset(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1495,7 +1497,7 @@ async def cb_styleset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     src = context.user_data.pop("style_source_text", None)
     target = context.user_data.pop("style_target", None)
     if src is None or target is None:
-        await query.edit_message_text("Session expire ho gayi, dobara try karo.")
+        await query.edit_message_text(to_small_caps("session expired — please try again."))
         return
     label, func = STYLE_OPTIONS[idx]
     styled_text = func(src)
@@ -1732,10 +1734,10 @@ async def cmd_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     langs = BOT_DATA["settings"].get("languages", [])
     if not langs:
-        await update.message.reply_text("Abhi koi extra language configure nahi hui hai.")
+        await update.message.reply_text(to_small_caps("no extra languages are configured yet."))
         await delete_incoming(update)
         return
-    await update.message.reply_text("🌐 Apni language choose karo:", reply_markup=build_language_keyboard())
+    await update.message.reply_text(to_small_caps("🌐 choose your language:"), reply_markup=build_language_keyboard())
     await delete_incoming(update)
 
 
@@ -1885,7 +1887,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text(reply)
                 return
         await update.message.reply_text(
-            "Ye Instagram reel link jaisa nahi lag raha. Ek valid reel link bhejo, jaise:\n"
+            to_small_caps("that doesn't look like a valid instagram reel link. please send a valid link, e.g.:") + "\n"
             "https://www.instagram.com/reel/XXXXXXXX/"
         )
         return
@@ -3132,32 +3134,30 @@ async def cb_adm_block_domain(update: Update, context: ContextTypes.DEFAULT_TYPE
 # ----------------------------------------------------------------------------
 
 def admin_panel_keyboard():
-    # FIX — "sare buttons same size ke hi rakho": mixed 1-per-row and
-    # 2-per-row rows made buttons look inconsistently sized (a lone button
-    # fills the whole row width, a paired button only fills half). Every
-    # top-level Admin Panel entry is now one-per-row, so they're all the
-    # same width. Also splits the old combined "Leaderboard & Sharing"
-    # entry into two separate buttons/sections, and renames "Premium
-    # Plans" to "Premium" (plans + premium-user tools now live together
-    # under it).
+    # v6 — 2-per-row grid layout: every top-level Admin Panel entry is now
+    # arranged two buttons per row instead of one, so the whole panel fits
+    # on screen with far less scrolling, and related tools sit side by
+    # side for a cleaner, more predictable control flow. Grouped by
+    # purpose: money & plans, growth & sharing, people-facing ops,
+    # communication tools, content/config, then diagnostics.
     return InlineKeyboardMarkup(
         [
-            [styled_button("💎 Premium", callback_data="adm_premium")],
-            [styled_button("💳 UPI Settings", callback_data="adm_upi")],
-            [styled_button("🏆 Leaderboard", callback_data="adm_leaderboard")],
-            [styled_button("📤 Share Settings", callback_data="adm_share")],
-            [styled_button("👨‍💻 Developer Settings", callback_data="adm_devsettings")],
-            [styled_button("🎧 Support Settings", callback_data="adm_support_settings")],
-            [styled_button("🎫 Tickets", callback_data="adm_tickets")],
-            [styled_button("📊 Bot Stats", callback_data="adm_stats")],
-            [styled_button("🌐 Language Settings", callback_data="adm_lang_manage")],
-            [styled_button("📢 Broadcast", callback_data="adm_broadcast")],
-            [styled_button("👥 Users & Groups", callback_data="adm_users")],
-            [styled_button("🎨 Menu & UI", callback_data="adm_menu_ui")],
-            [styled_button("⚙️ Settings & Admins", callback_data="adm_settings")],
-            [styled_button("🛑 Danger Zone", callback_data="adm_danger")],
-            [styled_button("📋 Activity Log", callback_data="adm_activity")],
-            [styled_button("🧪 Self-Test", callback_data="adm_selftest")],
+            [styled_button("💎 Premium", callback_data="adm_premium"),
+             styled_button("💳 UPI Settings", callback_data="adm_upi")],
+            [styled_button("🏆 Leaderboard", callback_data="adm_leaderboard"),
+             styled_button("📤 Share Settings", callback_data="adm_share")],
+            [styled_button("👨‍💻 Developer Settings", callback_data="adm_devsettings"),
+             styled_button("🎧 Support Settings", callback_data="adm_support_settings")],
+            [styled_button("🎫 Tickets", callback_data="adm_tickets"),
+             styled_button("📊 Bot Stats", callback_data="adm_stats")],
+            [styled_button("🌐 Language Settings", callback_data="adm_lang_manage"),
+             styled_button("📢 Broadcast", callback_data="adm_broadcast")],
+            [styled_button("👥 Users & Groups", callback_data="adm_users"),
+             styled_button("🎨 Menu & UI", callback_data="adm_menu_ui")],
+            [styled_button("⚙️ Settings & Admins", callback_data="adm_settings"),
+             styled_button("🛑 Danger Zone", callback_data="adm_danger")],
+            [styled_button("📋 Activity Log", callback_data="adm_activity"),
+             styled_button("🧪 Self-Test", callback_data="adm_selftest")],
             [styled_button("🕵️ Live User Feed", callback_data="adm_live")],
         ]
     )
@@ -3243,7 +3243,7 @@ async def _render_adm_live(update: Update, context: ContextTypes.DEFAULT_TYPE):
     entries = BOT_DATA.get("activity_log", [])[-15:][::-1]
     lines = [f"🕵️ Live User Feed\n🗄 Backend: {backend}\n👥 Total tracked users: {len(BOT_DATA['users'])}\n"]
     if not entries:
-        lines.append("Abhi tak koi activity record nahi hui.")
+        lines.append(to_small_caps("no activity has been recorded yet."))
     else:
         for e in entries:
             uname = f"@{e['username']}" if e.get("username") else "(no username)"
@@ -3284,8 +3284,7 @@ async def cb_adm_quickban(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     context.user_data["awaiting"] = "adm_ban_unban_userid"
     await query.message.reply_text(
-        "🚫 User ki numeric ID bhejo — agar already banned hai to unban ho jayega, "
-        "warna ban ho jayega."
+        to_small_caps("🚫 send the user's numeric id — if already banned they will be unbanned, otherwise they will be banned.")
     )
 
 
@@ -3378,7 +3377,7 @@ async def cb_adm_groups_list(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.answer()
     groups = list(BOT_DATA["groups"].items())
     if not groups:
-        text = "Bot abhi kisi group mein nahi hai."
+        text = to_small_caps("the bot is not in any group yet.")
     else:
         lines = [f"👨‍👩‍👧 Groups ({len(groups)})\n"]
         for gid, info in groups:
@@ -3398,7 +3397,7 @@ async def cb_adm_users_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     users = list(BOT_DATA["users"].items())[-20:]
     if not users:
-        text = "Koi user record nahi mila abhi."
+        text = to_small_caps("no user records found yet.")
     else:
         lines = ["📋 Last 20 Users\n"]
         for uid, info in users:
@@ -3413,27 +3412,76 @@ async def cb_adm_users_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     context.user_data["awaiting"] = "message_user_id"
-    await query.message.reply_text("User ki ID bhejo jisko message karna hai.")
+    await query.message.reply_text(to_small_caps("send the id of the user you want to message."))
 
 
-# ---- Broadcast ---------------------------------------------------------------
+# ---- Broadcast (v6 — rebuilt: reliable delivery, a /start button, a full
+# delivery report, and month-wise delete) -------------------------------------
+#
+# What changed and why:
+#  1. do_broadcast() used to fire every send back-to-back with zero pacing.
+#     Telegram enforces a hard ~30 messages/second global rate limit; blast
+#     past it and the API replies with 429 "Too Many Requests" (RetryAfter),
+#     which the old code caught with a bare `except Exception` and simply
+#     logged as a permanent failure. That's the "bar bar failed ho jata hai"
+#     — most of those "failures" were really just flood-control hits that a
+#     short pause and one retry would have delivered fine. Fixed by pacing
+#     every send and giving a RetryAfter exactly one honoured retry.
+#  2. Failures are now categorized (blocked the bot, invalid/deleted chat,
+#     rate-limited-then-recovered, other) instead of one flat "failed"
+#     number, so the admin can actually see *why* delivery didn't land.
+#  3. Every successfully delivered message ID is now recorded per user
+#     against the broadcast, so a broadcast can be pulled back out of every
+#     recipient's chat later (see Delete Broadcast below).
+#  4. Optional "🚀 Start Bot" button: a deep-link URL button
+#     (t.me/<bot>?start=broadcast) that a user can tap straight from the
+#     broadcast to open/start the bot — handy when the broadcast reaches
+#     someone via a forward or a channel post.
+
+BROADCAST_SEND_DELAY = 0.05  # ~20 msg/sec — safely under Telegram's cap
+
+
+async def _broadcast_start_button_kb(context: ContextTypes.DEFAULT_TYPE):
+    """Builds the optional single-button keyboard offering a direct
+    deep-link into the bot, used when 'Attach Start Button' is ON."""
+    try:
+        me = await context.bot.get_me()
+        url = f"https://t.me/{me.username}?start=broadcast"
+    except Exception:
+        return None
+    return InlineKeyboardMarkup([[styled_button("🚀 Start Bot", url=url)]])
+
 
 async def _render_adm_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    protect = BOT_DATA["settings"].get("protect_broadcasts", True)
+    s = BOT_DATA["settings"]
+    protect = s.get("protect_broadcasts", True)
+    attach_start = s.get("broadcast_attach_start_button", True)
     kb = InlineKeyboardMarkup(
         [
-            [styled_button("📢 New Broadcast", callback_data="adm_bc_new")],
+            [styled_button("📢 New Broadcast", callback_data="adm_bc_new"),
+             styled_button("📜 Broadcast Log", callback_data="adm_bc_log")],
             [styled_button(
                 f"🔐 Forward-Lock: {'ON' if protect else 'OFF'}",
                 callback_data="stgl:protect_broadcasts:adm_broadcast",
+            ),
+             styled_button(
+                f"🚀 Start Button: {'ON' if attach_start else 'OFF'}",
+                callback_data="stgl:broadcast_attach_start_button:adm_broadcast",
             )],
-            [styled_button("📜 Broadcast Log", callback_data="adm_bc_log")],
+            [styled_button("🗑 Delete Broadcast", callback_data="adm_bc_delmenu")],
             back_row(),
             home_row(),
         ]
     )
-    await query.edit_message_text("📢 Broadcast", reply_markup=kb)
+    total_users = len(BOT_DATA["users"])
+    body = (
+        to_small_caps("📢 broadcast centre") + "\n"
+        + to_small_caps("send an announcement to every registered user") + "\n\n"
+        + to_small_caps("total reachable users") + f": {total_users}\n\n"
+        + to_small_caps("start button attaches a tap-to-start link so users can open the bot directly")
+    )
+    await query.edit_message_text(body, reply_markup=kb)
 
 
 async def cb_adm_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3446,23 +3494,30 @@ async def cb_adm_bc_new(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     context.user_data["awaiting"] = "broadcast_content"
     await query.message.reply_text(
-        "Ab jo bhi bhejna hai (text/photo/video) — ek message mein bhejo. "
-        "Forward-lock current setting ke hisaab se apply hoga."
+        to_small_caps("📢 send your broadcast now") + "\n"
+        + to_small_caps("text, photo or video — one single message") + "\n\n"
+        + to_small_caps("it will be delivered to every user, respecting your forward-lock and start-button settings")
     )
 
 
 async def cb_adm_bc_log(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    entries = BOT_DATA["broadcast_log"][-10:]
+    entries = BOT_DATA["broadcast_log"][-10:][::-1]
     if not entries:
-        text = "Abhi tak koi broadcast nahi bheja gaya."
+        text = to_small_caps("📜 broadcast log") + "\n\n" + to_small_caps("no broadcasts have been sent yet.")
     else:
-        lines = ["📜 Last 10 Broadcasts\n"]
+        lines = [to_small_caps("📜 last 10 broadcasts") + "\n"]
         for e in entries:
-            lines.append(f"• {e['at']} — {e['recipients']} users ko bheja gaya")
+            when = e.get("at", "?")[:16].replace("T", " ")
+            lines.append(
+                f"• {when} — "
+                + to_small_caps("delivered") + f" {e.get('recipients', 0)} • "
+                + to_small_caps("blocked") + f" {e.get('blocked', 0)} • "
+                + to_small_caps("failed") + f" {e.get('other_failed', 0)}"
+            )
         text = "\n".join(lines)
-    kb = InlineKeyboardMarkup([[styled_button("🔙 Back", callback_data="adm_broadcast")]])
+    kb = InlineKeyboardMarkup([back_row("adm_broadcast")])
     await query.edit_message_text(text, reply_markup=kb)
 
 
@@ -3470,39 +3525,261 @@ async def do_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     # #4 — the master "lock everything" switch ORs together with the
     # broadcast-specific forward-lock toggle.
-    protect = BOT_DATA["settings"].get("protect_broadcasts", True) or BOT_DATA["settings"].get("lock_all_content", False)
+    s = BOT_DATA["settings"]
+    protect = s.get("protect_broadcasts", True) or s.get("lock_all_content", False)
+    attach_start = s.get("broadcast_attach_start_button", True)
+    start_kb = await _broadcast_start_button_kb(context) if attach_start else None
+
+    status_msg = await update.message.reply_text(
+        "📢 " + to_small_caps("broadcast in progress...") + " 0%"
+    )
+
+    delivered_ids = {}
     sent = 0
-    failed = 0
-    for uid in list(BOT_DATA["users"].keys()):
+    blocked = 0          # user blocked the bot / kicked it / deactivated account
+    invalid_chat = 0     # chat no longer exists / never started the bot
+    other_failed = 0     # anything else (unexpected)
+    recovered = 0        # succeeded only after a flood-control retry
+
+    user_ids = list(BOT_DATA["users"].keys())
+    total = len(user_ids)
+    for i, uid in enumerate(user_ids):
         try:
             copied = await context.bot.copy_message(
                 chat_id=int(uid), from_chat_id=msg.chat_id, message_id=msg.message_id,
-                protect_content=protect,
+                protect_content=protect, reply_markup=start_kb,
             )
-            track_sent_message(int(uid), copied.message_id)
-            await schedule_delete(context, int(uid), copied.message_id, BOT_DATA["settings"].get("global_auto_delete_seconds", 0))
-            sent += 1
+        except RetryAfter as e:
+            # Flood control — Telegram itself tells us exactly how long to
+            # wait. Honour it once, then retry this one user before giving
+            # up, instead of silently counting a recoverable hit as failed.
+            await asyncio.sleep(e.retry_after + 0.5)
+            try:
+                copied = await context.bot.copy_message(
+                    chat_id=int(uid), from_chat_id=msg.chat_id, message_id=msg.message_id,
+                    protect_content=protect, reply_markup=start_kb,
+                )
+                recovered += 1
+            except Exception:
+                other_failed += 1
+                copied = None
+        except Forbidden:
+            # User blocked the bot, deleted their account, or kicked it
+            # from a group — permanent, not worth retrying.
+            blocked += 1
+            copied = None
+        except BadRequest:
+            # Chat not found / user never actually opened a DM with the
+            # bot — also permanent.
+            invalid_chat += 1
+            copied = None
+        except TelegramError:
+            other_failed += 1
+            copied = None
         except Exception:
-            failed += 1
+            other_failed += 1
+            copied = None
+
+        if copied:
+            track_sent_message(int(uid), copied.message_id)
+            await schedule_delete(context, int(uid), copied.message_id, s.get("global_auto_delete_seconds", 0))
+            delivered_ids[uid] = copied.message_id
+            sent += 1
+
+        await asyncio.sleep(BROADCAST_SEND_DELAY)
+
+        if total and (i + 1) % 25 == 0:
+            pct = int(((i + 1) / total) * 100)
+            try:
+                await status_msg.edit_text("📢 " + to_small_caps("broadcast in progress...") + f" {pct}%")
+            except Exception:
+                pass
+
+    failed_total = blocked + invalid_chat + other_failed
+    at = datetime.utcnow().isoformat()
     BOT_DATA["broadcast_log"].append(
-        {"by": update.effective_user.id, "at": datetime.utcnow().isoformat(), "recipients": sent}
+        {
+            "by": update.effective_user.id,
+            "at": at,
+            "recipients": sent,
+            "blocked": blocked,
+            "invalid_chat": invalid_chat,
+            "other_failed": other_failed,
+            "recovered": recovered,
+            "total_targeted": total,
+            "messages": delivered_ids,  # {user_id: message_id} — used by Delete Broadcast
+        }
     )
     BOT_DATA["metrics"]["broadcasts_sent"] = BOT_DATA["metrics"].get("broadcasts_sent", 0) + 1
     save_data()
-    await update.message.reply_text(
-        f"✅ Broadcast bhej diya.\nSent: {sent} | Failed: {failed}\nForward-lock: {'ON' if protect else 'OFF'}"
+
+    report = (
+        "✅ " + to_small_caps("broadcast complete") + "\n\n"
+        + to_small_caps("total targeted") + f": {total}\n"
+        + to_small_caps("delivered successfully") + f": {sent}\n"
+        + to_small_caps("not delivered") + f": {failed_total}\n\n"
+        + to_small_caps("breakdown — why some were not delivered") + "\n"
+        + f"🚫 " + to_small_caps("blocked the bot / account deactivated") + f": {blocked}\n"
+        + f"⚠️ " + to_small_caps("chat unavailable / never started the bot") + f": {invalid_chat}\n"
+        + f"❓ " + to_small_caps("other delivery error") + f": {other_failed}\n"
+        + (f"🔁 " + to_small_caps("recovered after a brief rate-limit pause") + f": {recovered}\n" if recovered else "")
+        + "\n🔐 " + to_small_caps("forward-lock") + f": {'ON' if protect else 'OFF'}\n"
+        + "🚀 " + to_small_caps("start button attached") + f": {'YES' if start_kb else 'NO'}"
     )
-    await log_event(context, f"📢 Broadcast sent by {update.effective_user.id} — {sent} recipients")
+    try:
+        await status_msg.edit_text(report)
+    except Exception:
+        await update.message.reply_text(report)
+    await log_event(
+        context,
+        f"📢 Broadcast sent by {update.effective_user.id} — {sent}/{total} delivered "
+        f"(blocked {blocked}, invalid {invalid_chat}, other {other_failed})",
+    )
+
+
+# ---- Delete Broadcast (month-wise) -------------------------------------------
+
+def _broadcast_month_key(iso_ts: str) -> str:
+    try:
+        dt = datetime.fromisoformat(iso_ts)
+    except Exception:
+        return "unknown"
+    return dt.strftime("%B %Y")  # e.g. "September 2026"
+
+
+async def _render_adm_bc_delmenu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    entries = BOT_DATA["broadcast_log"]
+    months = {}
+    for idx, e in enumerate(entries):
+        key = _broadcast_month_key(e.get("at", ""))
+        months.setdefault(key, []).append(idx)
+
+    if not months:
+        text = to_small_caps("🗑 delete broadcast") + "\n\n" + to_small_caps("no broadcasts recorded yet.")
+        kb = InlineKeyboardMarkup([back_row("adm_broadcast")])
+        await query.edit_message_text(text, reply_markup=kb)
+        return
+
+    month_keys = list(months.keys())
+    rows = []
+    for i in range(0, len(month_keys), 2):
+        pair = month_keys[i:i + 2]
+        rows.append([
+            styled_button(f"🗓 {mk} ({len(months[mk])})", callback_data=f"adm_bc_delmonth:{mk}")
+            for mk in pair
+        ])
+    rows.append(back_row("adm_broadcast"))
+    rows.append(home_row())
+    text = (
+        to_small_caps("🗑 delete broadcast") + "\n"
+        + to_small_caps("pick a month to see broadcasts sent that month")
+    )
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(rows))
+
+
+async def cb_adm_bc_delmenu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    await _render_adm_bc_delmenu(update, context)
+
+
+async def cb_adm_bc_delmonth(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    month = query.data.split(":", 1)[1]
+    entries = BOT_DATA["broadcast_log"]
+    rows = []
+    lines = [to_small_caps("🗓 broadcasts in") + f" {month}\n"]
+    for idx, e in enumerate(entries):
+        if _broadcast_month_key(e.get("at", "")) != month:
+            continue
+        when = e.get("at", "?")[:16].replace("T", " ")
+        lines.append(f"#{idx} — {when} — " + to_small_caps("delivered") + f" {e.get('recipients', 0)}")
+        rows.append([styled_button(f"🗑 #{idx} — {when}", callback_data=f"adm_bc_delconfirm:{idx}")])
+    rows.append(back_row("adm_bc_delmenu"))
+    rows.append(home_row())
+    await query.edit_message_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(rows))
+
+
+async def cb_adm_bc_delconfirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    idx = int(query.data.split(":", 1)[1])
+    entries = BOT_DATA["broadcast_log"]
+    if idx < 0 or idx >= len(entries):
+        await query.edit_message_text(
+            "❌ " + to_small_caps("that broadcast no longer exists."),
+            reply_markup=InlineKeyboardMarkup([back_row("adm_bc_delmenu")]),
+        )
+        return
+    e = entries[idx]
+    when = e.get("at", "?")[:16].replace("T", " ")
+    recipients = len(e.get("messages", {}))
+    text = (
+        "⚠️ " + to_small_caps("confirm delete") + "\n\n"
+        + to_small_caps("broadcast") + f" #{idx} — {when}\n"
+        + to_small_caps("this will remove it from") + f" {recipients} " + to_small_caps("recipient chats.")
+        + "\n\n" + to_small_caps("this action cannot be undone.")
+    )
+    kb = InlineKeyboardMarkup(
+        [
+            [styled_button("✅ Yes, Delete", callback_data=f"adm_bc_deldo:{idx}", style="danger"),
+             styled_button("❌ Cancel", callback_data="adm_bc_delmenu")],
+        ]
+    )
+    await query.edit_message_text(text, reply_markup=kb)
+
+
+async def cb_adm_bc_deldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    idx = int(query.data.split(":", 1)[1])
+    entries = BOT_DATA["broadcast_log"]
+    if idx < 0 or idx >= len(entries):
+        await query.edit_message_text(
+            "❌ " + to_small_caps("that broadcast no longer exists."),
+            reply_markup=InlineKeyboardMarkup([back_row("adm_bc_delmenu")]),
+        )
+        return
+    e = entries[idx]
+    messages = e.get("messages", {})
+    removed = 0
+    gone = 0
+    for uid, mid in messages.items():
+        try:
+            await context.bot.delete_message(chat_id=int(uid), message_id=int(mid))
+            removed += 1
+        except Exception:
+            gone += 1
+        await asyncio.sleep(BROADCAST_SEND_DELAY)
+    entries.pop(idx)
+    save_data()
+    text = (
+        "✅ " + to_small_caps("broadcast deleted") + "\n\n"
+        + to_small_caps("removed from chats") + f": {removed}\n"
+        + to_small_caps("already gone / could not remove") + f": {gone}"
+    )
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup([back_row("adm_bc_delmenu"), home_row()]))
+    await log_event(context, f"🗑 Broadcast #{idx} deleted by {update.effective_user.id} — {removed} removed")
 
 
 # ---- Menu & UI (#1, #2, #4, #7 controls) -------------------------------------
 
 async def _render_adm_menu_ui(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    rows = [[styled_button(f"📝 {mid}", callback_data=f"adm_menu_edit:{mid}")] for mid in BOT_DATA["menus"]]
+    # v6 — 2-per-row grid for the menu list too, so it stays compact even
+    # as more menus get added.
+    menu_ids = list(BOT_DATA["menus"])
+    rows = []
+    for i in range(0, len(menu_ids), 2):
+        pair = menu_ids[i:i + 2]
+        rows.append([styled_button(f"📝 {mid}", callback_data=f"adm_menu_edit:{mid}") for mid in pair])
     rows.append(back_row())
     rows.append(home_row())
-    await query.edit_message_text("🎨 Menu & UI — kaun sa menu edit karna hai?", reply_markup=InlineKeyboardMarkup(rows))
+    await query.edit_message_text(
+        to_small_caps("🎨 menu & ui") + "\n" + to_small_caps("select a menu below to edit its content"),
+        reply_markup=InlineKeyboardMarkup(rows),
+    )
 
 
 async def cb_adm_menu_ui(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3520,18 +3797,21 @@ async def cb_adm_menu_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     override_label = f"{override}s" if override is not None else "uses global"
     kb = InlineKeyboardMarkup(
         [
-            [styled_button("✏️ Edit Text", callback_data=f"adm_menu_txt:{menu_id}")],
-            [styled_button("🅰️ Style Text", callback_data=f"adm_menu_style:{menu_id}")],
-            [styled_button(f"🔤 Parse Mode: {parse_mode_label}", callback_data=f"adm_menu_parsemode:{menu_id}")],
+            [styled_button("✏️ Edit Text", callback_data=f"adm_menu_txt:{menu_id}"),
+             styled_button("🅰️ Style Text", callback_data=f"adm_menu_style:{menu_id}")],
+            [styled_button(f"🔤 Parse Mode: {parse_mode_label}", callback_data=f"adm_menu_parsemode:{menu_id}"),
+             styled_button("🔘 Manage Buttons", callback_data=f"adm_menu_btns:{menu_id}")],
             [styled_button("🖼️ Set Image", callback_data=f"adm_menu_img:{menu_id}"),
              styled_button("🗑️ Remove Image", callback_data=f"adm_menu_rmimg:{menu_id}")],
-            [styled_button("🔘 Manage Buttons", callback_data=f"adm_menu_btns:{menu_id}")],
-            [styled_button(f"⏱ Auto-Delete: {override_label}", callback_data=f"adm_menu_autodel:{menu_id}")],
-            [styled_button("🌐 Translations", callback_data=f"adm_menu_trans:{menu_id}")],
+            [styled_button(f"⏱ Auto-Delete: {override_label}", callback_data=f"adm_menu_autodel:{menu_id}"),
+             styled_button("🌐 Translations", callback_data=f"adm_menu_trans:{menu_id}")],
             [styled_button("🔙 Back", callback_data="adm_menu_ui")],
         ]
     )
-    await query.edit_message_text(f"📝 Editing: {menu_id}", reply_markup=kb)
+    await query.edit_message_text(
+        to_small_caps("📝 editing menu") + f": {menu_id}\n" + to_small_caps("choose what you'd like to change"),
+        reply_markup=kb,
+    )
 
 
 async def cb_adm_menu_trans(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3541,7 +3821,7 @@ async def cb_adm_menu_trans(update: Update, context: ContextTypes.DEFAULT_TYPE):
     langs = BOT_DATA["settings"].get("languages", [])
     if not langs:
         await query.message.reply_text(
-            "Pehle Settings & Admins → 🌐 Manage Languages se kam se kam ek language add karo."
+            to_small_caps("first add at least one language via settings & admins → 🌐 manage languages.")
         )
         return
     rows = []
@@ -3559,8 +3839,8 @@ async def cb_adm_menu_trans_edit(update: Update, context: ContextTypes.DEFAULT_T
     _, menu_id, code = query.data.split(":", 2)
     context.user_data["awaiting"] = f"menu_trans_text:{menu_id}:{code}"
     await query.message.reply_text(
-        f"'{menu_id}' ka {LANG_NAMES.get(code, code)} translation text bhejo "
-        "(buttons wahi rahenge jo base menu mein hain, translate nahi honge)."
+        to_small_caps(f"send the {LANG_NAMES.get(code, code)} translation text for '{menu_id}'") + "\n"
+        + to_small_caps("(buttons stay the same as the base menu — they are not translated.)")
     )
 
 
@@ -3570,7 +3850,7 @@ async def cb_adm_menu_txt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     menu_id = query.data.split(":", 1)[1]
     context.user_data["awaiting"] = f"menu_text:{menu_id}"
     await query.message.reply_text(
-        "Naya text bhejo — jo bhi bhejoge, exactly wahi save hoga (koi auto-reformat nahi hota)."
+        to_small_caps("send the new text — it will be saved exactly as sent, with no auto-reformatting.")
     )
 
 
@@ -3579,7 +3859,7 @@ async def cb_adm_menu_style(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     menu_id = query.data.split(":", 1)[1]
     context.user_data["awaiting"] = f"menu_style_source:{menu_id}"
-    await query.message.reply_text("Plain text bhejo, main usko alag-alag styles mein preview dikhaunga.")
+    await query.message.reply_text(to_small_caps("send plain text and a preview of every available style will be shown."))
 
 
 async def cb_adm_menu_parsemode(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3599,7 +3879,7 @@ async def cb_adm_menu_img(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     menu_id = query.data.split(":", 1)[1]
     context.user_data["awaiting"] = f"menu_image:{menu_id}"
-    await query.message.reply_text("Photo bhejo (sirf image, video nahi).")
+    await query.message.reply_text(to_small_caps("send a photo (image only, not a video)."))
 
 
 async def cb_adm_menu_rmimg(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3608,7 +3888,7 @@ async def cb_adm_menu_rmimg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     menu_id = query.data.split(":", 1)[1]
     BOT_DATA["menus"][menu_id]["image_file_id"] = None
     save_data()
-    await query.message.reply_text("✅ Image hata di gayi, ab text-only menu hai.")
+    await query.message.reply_text(to_small_caps("✅ image removed — this is now a text-only menu."))
     await cb_adm_menu_edit(update, context)
 
 
@@ -3618,7 +3898,7 @@ async def cb_adm_menu_autodel(update: Update, context: ContextTypes.DEFAULT_TYPE
     menu_id = query.data.split(":", 1)[1]
     context.user_data["awaiting"] = f"menu_autodel:{menu_id}"
     await query.message.reply_text(
-        "Seconds bhejo is menu ke liye (0 = never, ya 'global' likho global default use karne ke liye)."
+        to_small_caps("send the auto-delete time in seconds for this menu (0 = never, or type 'global' to use the global default).")
     )
 
 
@@ -3685,7 +3965,7 @@ async def cb_adm_btn_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     menu_id = query.data.split(":", 1)[1]
     context.user_data["btn_flow"] = {"menu_id": menu_id, "data": {}}
     context.user_data["awaiting"] = "btn_step_label"
-    await query.message.reply_text("Naye button ka label bhejo (emoji use kar sakte ho).")
+    await query.message.reply_text(to_small_caps("send the new button's label (emoji are welcome)."))
 
 
 async def cb_btn_type_pick(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3694,17 +3974,17 @@ async def cb_btn_type_pick(update: Update, context: ContextTypes.DEFAULT_TYPE):
     _, btype = query.data.split(":", 1)
     flow = context.user_data.get("btn_flow")
     if not flow:
-        await query.message.reply_text("Session expire ho gayi, dobara /admin se try karo.")
+        await query.message.reply_text(to_small_caps("session expired — please try again via /admin."))
         return
     flow["data"]["type"] = btype
     context.user_data["awaiting"] = "btn_step_value"
     prompts = {
-        "menu": "Kaunse menu_id pe le jana hai? (jaise: start, help_user)",
-        "url": "URL bhejo (https:// se shuru).",
-        "callback": "Internal action ka callback_data bhejo (jaise: adm_stats).",
-        "toggle": "Settings key bhejo jise toggle karna hai (jaise: maintenance).",
+        "menu": to_small_caps("which menu_id should this open? (e.g. start, help_user)"),
+        "url": to_small_caps("send the url (must start with https://)."),
+        "callback": to_small_caps("send the internal action's callback_data (e.g. adm_stats)."),
+        "toggle": to_small_caps("send the settings key to toggle (e.g. maintenance)."),
     }
-    await query.message.reply_text(prompts.get(btype, "Value bhejo:"))
+    await query.message.reply_text(prompts.get(btype, to_small_caps("send the value:")))
 
 
 # ---- Settings & Admins --------------------------------------------------------
@@ -3712,29 +3992,31 @@ async def cb_btn_type_pick(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def _render_adm_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     s = BOT_DATA["settings"]
+    # v6 — same 2-per-row grid treatment as the top-level Admin Panel, so
+    # deep submenus stay just as easy to scan and control.
     kb = InlineKeyboardMarkup(
         [
-            [styled_button("🖼 Set Welcome Image", callback_data="adm_menu_img:start")],
+            [styled_button("🖼 Set Welcome Image", callback_data="adm_menu_img:start"),
+             styled_button(
+                 f"🔒 Maintenance: {'ON' if s.get('maintenance') else 'OFF'}",
+                 callback_data="stgl:maintenance:adm_settings",
+             )],
+            [styled_button(f"⏱ Global Auto-Delete: {s.get('global_auto_delete_seconds', 0)}s", callback_data="adm_set_autodelete"),
+             styled_button(
+                 f"🅰️ Small-Caps Buttons: {'ON' if s.get('small_caps_buttons_default') else 'OFF'}",
+                 callback_data="stgl:small_caps_buttons_default:adm_settings",
+             )],
+            [styled_button("💬 Auto-Replies", callback_data="adm_autoreply_list"),
+             styled_button("🌐 Manage Languages", callback_data="adm_lang_manage")],
+            [styled_button("👤 Manage Admins", callback_data="adm_manage_admins"),
+             styled_button("📥 Restore Backup", callback_data="adm_restore_info")],
             [styled_button(
-                f"🔒 Maintenance: {'ON' if s.get('maintenance') else 'OFF'}",
-                callback_data="stgl:maintenance:adm_settings",
-            )],
-            [styled_button(f"⏱ Global Auto-Delete: {s.get('global_auto_delete_seconds', 0)}s", callback_data="adm_set_autodelete")],
-            [styled_button(
-                f"🅰️ Small-Caps Buttons: {'ON' if s.get('small_caps_buttons_default') else 'OFF'}",
-                callback_data="stgl:small_caps_buttons_default:adm_settings",
-            )],
-            [styled_button("💬 Auto-Replies", callback_data="adm_autoreply_list")],
-            [styled_button("🌐 Manage Languages", callback_data="adm_lang_manage")],
-            [styled_button("👤 Manage Admins", callback_data="adm_manage_admins")],
-            [styled_button("📥 Restore Backup", callback_data="adm_restore_info")],
-            [styled_button(
-                f"🔐 Lock All Forwarding: {'ON' if s.get('lock_all_content') else 'OFF'}",
-                callback_data="stgl:lock_all_content:adm_settings",
-            )],
-            [styled_button("👑 Owner/Developer Contact", callback_data="adm_owner_contact")],
-            [styled_button("📋 Logger Channel", callback_data="adm_logger_channel")],
-            [styled_button(f"📢 Force-Join: {s.get('force_join_channel') or 'OFF'}", callback_data="adm_force_join")],
+                 f"🔐 Lock All Forwarding: {'ON' if s.get('lock_all_content') else 'OFF'}",
+                 callback_data="stgl:lock_all_content:adm_settings",
+             ),
+             styled_button("👑 Owner/Developer Contact", callback_data="adm_owner_contact")],
+            [styled_button("📋 Logger Channel", callback_data="adm_logger_channel"),
+             styled_button(f"📢 Force-Join: {s.get('force_join_channel') or 'OFF'}", callback_data="adm_force_join")],
             [styled_button(
                 f"📄 Send As Document: {'ON' if s.get('send_as_document') else 'OFF (auto near limit)'}",
                 callback_data="stgl:send_as_document:adm_settings",
@@ -3743,7 +4025,10 @@ async def _render_adm_settings(update: Update, context: ContextTypes.DEFAULT_TYP
             home_row(),
         ]
     )
-    await query.edit_message_text("⚙️ Settings & Admins", reply_markup=kb)
+    await query.edit_message_text(
+        to_small_caps("⚙️ settings & admins") + "\n" + to_small_caps("configure core bot behaviour below"),
+        reply_markup=kb,
+    )
 
 
 async def cb_adm_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3790,7 +4075,7 @@ async def cb_adm_owner_contact_set(update: Update, context: ContextTypes.DEFAULT
     await query.answer()
     remember_panel_message(context, query, "owner_contact")
     context.user_data["awaiting"] = "owner_contact_label"
-    await query.message.reply_text("Button label bhejo (e.g. '👑 Developer' or '💬 Contact Us').")
+    await query.message.reply_text(to_small_caps("send the button label (e.g. '👑 developer' or '💬 contact us')."))
 
 
 async def cb_adm_owner_contact_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4089,7 +4374,7 @@ async def cb_adm_lang_manage(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer()
     langs = BOT_DATA["settings"].get("languages", [])
-    text = "🌐 Enabled Languages\n\n" + ("\n".join(f"• {LANG_NAMES.get(c, c)}" for c in langs) if langs else "Koi nahi — sirf Default (Hinglish).")
+    text = "🌐 Enabled Languages\n\n" + ("\n".join(f"• {LANG_NAMES.get(c, c)}" for c in langs) if langs else to_small_caps("none — default language only."))
     kb = InlineKeyboardMarkup(
         [
             [styled_button("➕ Add Language", callback_data="adm_lang_add")],
@@ -4108,7 +4393,7 @@ async def cb_adm_lang_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text("Saari suggested languages already add ho chuki hain.")
         return
     rows = [[styled_button(LANG_NAMES[c], callback_data=f"adm_lang_add_do:{c}")] for c in available]
-    await query.message.reply_text("Kaunsi language add karni hai?", reply_markup=InlineKeyboardMarkup(rows))
+    await query.message.reply_text(to_small_caps("which language would you like to add?"), reply_markup=InlineKeyboardMarkup(rows))
 
 
 async def cb_adm_lang_add_do(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4118,7 +4403,7 @@ async def cb_adm_lang_add_do(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if code not in BOT_DATA["settings"]["languages"]:
         BOT_DATA["settings"]["languages"].append(code)
         save_data()
-    await query.edit_message_text(f"✅ {LANG_NAMES.get(code, code)} add ho gayi. Ab har menu mein 🌐 Translations se text daal sakte ho.")
+    await query.edit_message_text(to_small_caps(f"✅ {LANG_NAMES.get(code, code)} added. you can now add text for it via 🌐 translations in any menu."))
 
 
 async def cb_adm_lang_remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4126,10 +4411,10 @@ async def cb_adm_lang_remove(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.answer()
     langs = BOT_DATA["settings"].get("languages", [])
     if not langs:
-        await query.message.reply_text("Koi language add nahi hai abhi.")
+        await query.message.reply_text(to_small_caps("no languages have been added yet."))
         return
     rows = [[styled_button(LANG_NAMES.get(c, c), callback_data=f"adm_lang_remove_do:{c}")] for c in langs]
-    await query.message.reply_text("Kaunsi language remove karni hai?", reply_markup=InlineKeyboardMarkup(rows))
+    await query.message.reply_text(to_small_caps("which language would you like to remove?"), reply_markup=InlineKeyboardMarkup(rows))
 
 
 async def cb_adm_lang_remove_do(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4139,7 +4424,7 @@ async def cb_adm_lang_remove_do(update: Update, context: ContextTypes.DEFAULT_TY
     if code in BOT_DATA["settings"]["languages"]:
         BOT_DATA["settings"]["languages"].remove(code)
         save_data()
-    await query.edit_message_text(f"✅ {LANG_NAMES.get(code, code)} remove ho gayi.")
+    await query.edit_message_text(to_small_caps(f"✅ {LANG_NAMES.get(code, code)} removed."))
 
 
 async def cb_adm_set_autodelete(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4156,7 +4441,7 @@ async def cb_adm_autoreply_list(update: Update, context: ContextTypes.DEFAULT_TY
     # BUGFIX — `A + B or C` always evaluated truthy (header alone is
     # non-empty), so the "no auto-replies" fallback text never showed.
     lines = ["💬 Auto-Replies\n"] + (
-        [f"• `{k}` → {v[:30]}" for k, v in replies.items()] or ["Koi auto-reply set nahi hai."]
+        [f"• `{k}` → {v[:30]}" for k, v in replies.items()] or [to_small_caps("no auto-reply has been set.")]
     )
     kb = InlineKeyboardMarkup(
         [
@@ -4172,14 +4457,14 @@ async def cb_adm_autoreply_add(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     await query.answer()
     context.user_data["awaiting"] = "autoreply_key"
-    await query.message.reply_text("Trigger keyword/phrase bhejo (jab message mein ye aayega tab reply jayega).")
+    await query.message.reply_text(to_small_caps("send the trigger keyword or phrase — it will auto-reply whenever a message contains it."))
 
 
 async def cb_adm_autoreply_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     context.user_data["awaiting"] = "autoreply_delkey"
-    await query.message.reply_text("Kaunsa keyword hatana hai, wo bhejo.")
+    await query.message.reply_text(to_small_caps("send the keyword you want to remove."))
 
 
 async def cb_adm_manage_admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4201,28 +4486,29 @@ async def cb_adm_add_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     if not is_owner(update.effective_user.id):
-        await query.message.reply_text("Sirf owner hi admin add kar sakta hai.")
+        await query.message.reply_text(to_small_caps("only the owner can add a new admin."))
         return
     context.user_data["awaiting"] = "add_admin_id"
-    await query.message.reply_text("Naye admin ki user ID bhejo.")
+    await query.message.reply_text(to_small_caps("send the new admin's user id."))
 
 
 async def cb_adm_remove_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     if not is_owner(update.effective_user.id):
-        await query.message.reply_text("Sirf owner hi admin remove kar sakta hai.")
+        await query.message.reply_text(to_small_caps("only the owner can remove an admin."))
         return
     context.user_data["awaiting"] = "remove_admin_id"
-    await query.message.reply_text("Hatane wale admin ki user ID bhejo.")
+    await query.message.reply_text(to_small_caps("send the user id of the admin to remove."))
 
 
 async def cb_adm_restore_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     await query.message.reply_text(
-        "📥 Restore Backup\n\nMujhe DM mein seedha .json backup file bhej do (jo /database se export hui thi). "
-        "Pehle current data ki auto-backup lunga, fir confirmation dikhaunga."
+        to_small_caps("📥 restore backup") + "\n\n"
+        + to_small_caps("send me the .json backup file directly in this dm (the one exported via /database). ")
+        + to_small_caps("an automatic backup of the current data will be taken first, then a confirmation screen will be shown.")
     )
 
 
@@ -4363,7 +4649,7 @@ async def cb_adm_plan_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["new_plan"] = {}
     context.user_data["awaiting"] = "plan_step_name"
     await query.message.reply_text(
-        "➕ New plan — step 1/4\nPlan ka naam bhejo (e.g. 'Monthly', 'Weekly Pro')."
+        to_small_caps("➕ new plan — step 1/4") + "\n" + to_small_caps("send the plan name (e.g. 'monthly', 'weekly pro').")
     )
 
 
@@ -4395,7 +4681,7 @@ async def cb_adm_set_dailylimit(update: Update, context: ContextTypes.DEFAULT_TY
     await query.answer()
     remember_panel_message(context, query, "premium")
     context.user_data["awaiting"] = "daily_limit"
-    await query.message.reply_text("Naya daily free-download limit (number) bhejo.")
+    await query.message.reply_text(to_small_caps("send the new daily free-download limit (a number)."))
 
 
 def _build_adm_upi_view():
@@ -4424,7 +4710,7 @@ async def cb_adm_upi_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     remember_panel_message(context, query, "upi")
     context.user_data["awaiting"] = "upi_id"
-    await query.message.reply_text("UPI ID bhejo (e.g. name@bank).")
+    await query.message.reply_text(to_small_caps("send the upi id (e.g. name@bank)."))
 
 
 async def cb_adm_upi_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4465,7 +4751,7 @@ async def cb_adm_dev_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     remember_panel_message(context, query, "devsettings")
     context.user_data["awaiting"] = "developer_id"
-    await query.message.reply_text("Developer ki numeric user ID bhejo.")
+    await query.message.reply_text(to_small_caps("send the developer's numeric user id."))
 
 
 async def cb_adm_dev_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4473,7 +4759,7 @@ async def cb_adm_dev_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     remember_panel_message(context, query, "devsettings")
     context.user_data["awaiting"] = "developer_link"
-    await query.message.reply_text("t.me/username link bhejo (ya 'clear' likh do hatane ke liye).")
+    await query.message.reply_text(to_small_caps("send the t.me/username link (or type 'clear' to remove it)."))
 
 
 def _build_adm_support_settings_view():
@@ -4556,14 +4842,14 @@ async def cb_adm_clear_bclog(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.answer()
     BOT_DATA["broadcast_log"] = []
     save_data()
-    await query.message.reply_text("✅ Broadcast log clear ho gaya.")
+    await query.message.reply_text(to_small_caps("✅ broadcast log cleared."))
 
 
 async def cb_adm_reset_menus_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     kb = InlineKeyboardMarkup(
-        [[styled_button("⚠️ Haan, reset karo", callback_data="adm_reset_menus_do"),
+        [[styled_button(to_small_caps("⚠️ yes, reset"), callback_data="adm_reset_menus_do"),
           styled_button("Cancel", callback_data="adm_danger")]]
     )
     await query.edit_message_text("⚠️ Sab menus (text/image/buttons) default pe reset ho jayenge. Pakka?", reply_markup=kb)
@@ -4582,11 +4868,11 @@ async def cb_adm_reset_confirm(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     await query.answer()
     kb = InlineKeyboardMarkup(
-        [[styled_button("⚠️ Haan, sab reset karo", callback_data="adm_reset_do"),
+        [[styled_button(to_small_caps("⚠️ yes, reset everything"), callback_data="adm_reset_do"),
           styled_button("Cancel", callback_data="adm_danger")]]
     )
     await query.edit_message_text(
-        "⚠️ Pakka? Ye SAARA bot data (users, settings, menus, sab) delete kar dega.\nEk auto-backup pehle le li jayegi.",
+        to_small_caps("⚠️ are you sure? this will delete ALL bot data — users, settings, menus, everything.") + "\n" + to_small_caps("an auto-backup will be taken first."),
         reply_markup=kb,
     )
 
@@ -4598,7 +4884,7 @@ async def cb_adm_reset_do(update: Update, context: ContextTypes.DEFAULT_TYPE):
     make_backup_snapshot(reason="pre_reset")
     BOT_DATA = json.loads(json.dumps(DEFAULT_DATA))
     save_data()
-    await query.edit_message_text("✅ Reset ho gaya. Purana data backup mein safe hai.")
+    await query.edit_message_text(to_small_caps("✅ reset complete. the previous data is safely stored in a backup."))
 
 
 # ----------------------------------------------------------------------------
@@ -4620,15 +4906,15 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
         menu = BOT_DATA["menus"][menu_id]
         if menu.get("image_file_id") and len(text) > 1024:
             await update.message.reply_text(
-                f"⚠️ Ye menu image ke saath hai, caption limit 1024 characters hai, tumhara text {len(text)} hai. "
-                "Chhota karo ya pehle image hatao."
+                to_small_caps(f"⚠️ this menu has an image, so the caption limit is 1024 characters — your text is {len(text)}. ")
+                + to_small_caps("please shorten it, or remove the image first.")
             )
             return
         menu["text"] = text
         menu["updated_by"] = update.effective_user.id
         menu["updated_at"] = datetime.utcnow().isoformat()
         save_data()
-        await update.message.reply_text(f"✅ '{menu_id}' text update ho gaya.")
+        await update.message.reply_text(to_small_caps(f"✅ '{menu_id}' text updated."))
 
     elif awaiting.startswith("menu_style_source:"):
         menu_id = awaiting.split(":", 1)[1]
@@ -4645,7 +4931,7 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
         elif text.isdigit():
             BOT_DATA["menus"][menu_id]["auto_delete_seconds"] = int(text)
         else:
-            await update.message.reply_text("Number bhejo, ya 'global' likho.")
+            await update.message.reply_text(to_small_caps("send a number, or type 'global'."))
             context.user_data["awaiting"] = awaiting
             return
         save_data()
@@ -4658,12 +4944,12 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
         menu.setdefault("translations", {})
         menu["translations"][code] = {"text": text, "buttons": None}
         save_data()
-        await update.message.reply_text(f"✅ '{menu_id}' ka {LANG_NAMES.get(code, code)} translation save ho gaya.")
+        await update.message.reply_text(to_small_caps(f"✅ {LANG_NAMES.get(code, code)} translation for '{menu_id}' saved."))
 
     elif awaiting == "global_autodelete":
         context.user_data.pop("awaiting", None)
         if not text.isdigit():
-            await update.message.reply_text("Sirf number bhejo.")
+            await update.message.reply_text(to_small_caps("please send a number only."))
             context.user_data["awaiting"] = awaiting
             return
         BOT_DATA["settings"]["global_auto_delete_seconds"] = int(text)
@@ -4673,7 +4959,7 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
     elif awaiting == "autoreply_key":
         context.user_data["autoreply_key_draft"] = text.lower()
         context.user_data["awaiting"] = "autoreply_value"
-        await update.message.reply_text("Ab reply text bhejo.")
+        await update.message.reply_text(to_small_caps("now send the reply text."))
 
     elif awaiting == "autoreply_value":
         context.user_data.pop("awaiting", None)
@@ -4687,24 +4973,24 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
         context.user_data.pop("awaiting", None)
         BOT_DATA["settings"]["auto_replies"].pop(text.lower(), None)
         save_data()
-        await update.message.reply_text("✅ Agar wo keyword tha, hata diya gaya.")
+        await update.message.reply_text(to_small_caps("✅ removed, if that keyword existed."))
 
     elif awaiting == "add_admin_id":
         context.user_data.pop("awaiting", None)
         if not text.isdigit():
-            await update.message.reply_text("Valid numeric user ID bhejo.")
+            await update.message.reply_text(to_small_caps("please send a valid numeric user id."))
             return
         new_id = int(text)
         if new_id not in BOT_DATA["admins"]:
             BOT_DATA["admins"].append(new_id)
             save_data()
-        await update.message.reply_text(f"✅ {new_id} ab admin hai.")
+        await update.message.reply_text(to_small_caps(f"✅ {new_id} is now an admin."))
         await log_event(context, f"👤 Admin added: {new_id} (by {update.effective_user.id})")
 
     elif awaiting == "remove_admin_id":
         context.user_data.pop("awaiting", None)
         if not text.isdigit():
-            await update.message.reply_text("Valid numeric user ID bhejo.")
+            await update.message.reply_text(to_small_caps("please send a valid numeric user id."))
             return
         rem_id = int(text)
         if rem_id in BOT_DATA["admins"]:
@@ -4716,7 +5002,7 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
     elif awaiting == "owner_contact_label":
         context.user_data["owner_contact_label_draft"] = text
         context.user_data["awaiting"] = "owner_contact_id"
-        await update.message.reply_text("Ab user ID ya @username bhejo (jispe button point karega).")
+        await update.message.reply_text(to_small_caps("now send the user id or @username the button should point to."))
 
     elif awaiting == "owner_contact_id":
         context.user_data.pop("awaiting", None)
@@ -4789,8 +5075,8 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
             chat_id = int(text)
         if chat_id is None:
             await update.message.reply_text(
-                "Channel detect nahi hua. Ya to channel se ek message forward karo, "
-                "ya numeric ID (-100...) type karo."
+                to_small_caps("channel not detected. either forward a message from the channel, ")
+                + to_small_caps("or type the numeric id (-100...).")
             )
             context.user_data["awaiting"] = "logger_channel_id"
             return
@@ -4803,7 +5089,7 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
     elif awaiting == "daily_limit":
         context.user_data.pop("awaiting", None)
         if not text.isdigit():
-            await update.message.reply_text("Valid number bhejo.")
+            await update.message.reply_text(to_small_caps("please send a valid number."))
             return
         BOT_DATA["settings"]["daily_limit"] = int(text)
         save_data()
@@ -4820,7 +5106,7 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
     elif awaiting == "developer_id":
         context.user_data.pop("awaiting", None)
         if not text.isdigit():
-            await update.message.reply_text("Valid numeric ID bhejo.")
+            await update.message.reply_text(to_small_caps("please send a valid numeric id."))
             return
         BOT_DATA["settings"]["developer_id"] = int(text)
         save_data()
@@ -4828,9 +5114,9 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
         try:
             chat = await context.bot.get_chat(int(text))
             if not chat.username:
-                note = "\n⚠️ Ye account ka koi @username nahi hai — button kabhi-kabhi khulega nahi. 'Set Link Override' se @username bhejna better hai."
+                note = "\n⚠️ " + to_small_caps("this account has no @username — the button may not always open. sending an @username via 'set link override' is more reliable.")
         except Exception:
-            note = "\n⚠️ Bot is ID tak abhi pahuch nahi paaya (developer ne bot ko kabhi message nahi kiya) — button reliably khulega nahi jab tak 'Set Link Override' se @username na do."
+            note = "\n⚠️ " + to_small_caps("the bot has not reached this id yet (the developer has never messaged the bot) — the button won't open reliably until you set an @username via 'set link override'.")
         refreshed = await refresh_panel_after_save(context, "devsettings", _build_adm_devsettings_view)
         await update.message.reply_text(f"✅ Developer ID set: {text}{note}" + ("" if refreshed else "\n(reopen the developer panel to confirm)"))
 
@@ -4856,7 +5142,7 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
         if chat_id is None and text.lstrip("-").isdigit():
             chat_id = int(text)
         if chat_id is None:
-            await update.message.reply_text("Group detect nahi hua. Forward a message ya numeric ID type karo.")
+            await update.message.reply_text(to_small_caps("group not detected. forward a message from it, or type the numeric id."))
             context.user_data["awaiting"] = "admin_group_id"
             return
         BOT_DATA["settings"]["admin_group_id"] = chat_id
@@ -4868,7 +5154,7 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
         context.user_data.pop("awaiting", None)
         parts = text.strip().split()
         if not parts or not parts[0].isdigit():
-            await update.message.reply_text("⚠️ Valid numeric user ID bhejo (e.g. 123456789 or 123456789 90).")
+            await update.message.reply_text(to_small_caps("⚠️ please send a valid numeric user id (e.g. 123456789 or 123456789 90)."))
             context.user_data["awaiting"] = "premium_grant_userid"
             return
         target_uid = parts[0]
@@ -4893,7 +5179,7 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
     elif awaiting == "plan_step_name":
         name = text.strip()
         if not name:
-            await update.message.reply_text("Khaali naam nahi chalega. Plan ka naam bhejo.")
+            await update.message.reply_text(to_small_caps("a blank name won't work. please send the plan's name."))
             return
         context.user_data.setdefault("new_plan", {})["name"] = name
         context.user_data["awaiting"] = "plan_step_days"
@@ -4901,40 +5187,40 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
 
     elif awaiting == "plan_step_days":
         if not text.strip().isdigit() or int(text.strip()) <= 0:
-            await update.message.reply_text("Valid number bhejo (e.g. 30).")
+            await update.message.reply_text(to_small_caps("please send a valid number (e.g. 30)."))
             return
         context.user_data["new_plan"]["days"] = int(text.strip())
         context.user_data["awaiting"] = "plan_step_inr"
         await update.message.reply_text(
-            "Step 3/4 — ₹ (INR) price bhejo (UPI ke liye). "
-            "Agar UPI se ye plan nahi bechna to '0' bhejo."
+            to_small_caps("step 3/4 — send the ₹ (inr) price for upi payment.") + " "
+            + to_small_caps("if this plan isn't sold via upi, send '0'.")
         )
 
     elif awaiting == "plan_step_inr":
         cleaned = text.strip().replace("₹", "")
         if not cleaned.isdigit():
-            await update.message.reply_text("Valid number bhejo (0 bhi chalega agar UPI price nahi rakhna).")
+            await update.message.reply_text(to_small_caps("please send a valid number (0 is fine if you don't want a upi price)."))
             return
         context.user_data["new_plan"]["price_inr"] = int(cleaned)
         context.user_data["awaiting"] = "plan_step_stars"
         await update.message.reply_text(
-            "Step 4/4 — ⭐ Telegram Stars price bhejo. "
-            "Agar Stars se ye plan nahi bechna to '0' bhejo."
+            to_small_caps("step 4/4 — send the ⭐ telegram stars price.") + " "
+            + to_small_caps("if this plan isn't sold via stars, send '0'.")
         )
 
     elif awaiting == "plan_step_stars":
         context.user_data.pop("awaiting", None)
         cleaned = text.strip()
         if not cleaned.isdigit():
-            await update.message.reply_text("Valid number bhejo (0 bhi chalega).")
+            await update.message.reply_text(to_small_caps("please send a valid number (0 is fine)."))
             context.user_data["awaiting"] = "plan_step_stars"
             return
         draft = context.user_data.pop("new_plan", {})
         draft["price_stars"] = int(cleaned)
         if not draft.get("price_inr") and not draft.get("price_stars"):
             await update.message.reply_text(
-                "⚠️ Plan cancel — kam se kam ek price (₹ ya ⭐) zaroor set karo. "
-                "➕ Add Plan se dobara try karo."
+                to_small_caps("⚠️ plan cancelled — at least one price (₹ or ⭐) must be set.") + " "
+                + to_small_caps("please try again via ➕ add plan.")
             )
         else:
             pid = str(BOT_DATA.get("next_plan_id", 1))
@@ -4965,7 +5251,7 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
     elif awaiting == "adm_ban_unban_userid":
         context.user_data.pop("awaiting", None)
         if not text.isdigit():
-            await update.message.reply_text("Valid numeric user ID bhejo.")
+            await update.message.reply_text(to_small_caps("please send a valid numeric user id."))
             return
         uid_int = int(text)
         if uid_int in BOT_DATA["blocked"]:
@@ -4981,23 +5267,23 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
 
     elif awaiting == "message_user_id":
         if not text.isdigit():
-            await update.message.reply_text("Valid numeric user ID bhejo.")
+            await update.message.reply_text(to_small_caps("please send a valid numeric user id."))
             return
         context.user_data["awaiting"] = "message_user_body"
         context.user_data["message_target"] = int(text)
-        await update.message.reply_text("Ab wo message bhejo jo is user ko bhejna hai.")
+        await update.message.reply_text(to_small_caps("now send the message you want to deliver to this user."))
 
     elif awaiting == "message_user_body":
         context.user_data.pop("awaiting", None)
         target = context.user_data.pop("message_target", None)
         if target is None:
-            await update.message.reply_text("Kuch galat ho gaya, dobara try karo.")
+            await update.message.reply_text(to_small_caps("something went wrong — please try again."))
             return
         try:
             await context.bot.send_message(chat_id=target, text=text)
-            await update.message.reply_text("✅ Message bhej diya.")
+            await update.message.reply_text(to_small_caps("✅ message delivered."))
         except Exception as e:  # noqa: BLE001
-            await update.message.reply_text(f"❌ Bhej nahi paya: {e}")
+            await update.message.reply_text(to_small_caps("❌ could not deliver: ") + str(e))
 
     elif awaiting == "broadcast_content":
         context.user_data.pop("awaiting", None)
@@ -5021,7 +5307,7 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
                 [styled_button("🔀 Toggle Setting", callback_data="btntype:toggle")],
             ]
         )
-        await update.message.reply_text("Button kis type ka hai?", reply_markup=kb)
+        await update.message.reply_text(to_small_caps("what type of button is this?"), reply_markup=kb)
 
     elif awaiting == "btn_step_value":
         flow = context.user_data.get("btn_flow")
@@ -5030,7 +5316,7 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
             return
         flow["data"]["value"] = text
         context.user_data["awaiting"] = "btn_step_row"
-        await update.message.reply_text("Kaunsi row mein ye button aaye (1, 2, 3...)?")
+        await update.message.reply_text(to_small_caps("which row should this button appear in? (1, 2, 3...)"))
 
     elif awaiting == "btn_step_row":
         flow = context.user_data.pop("btn_flow", None)
@@ -5038,7 +5324,7 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
         if not flow:
             return
         if not text.isdigit():
-            await update.message.reply_text("Number bhejo.")
+            await update.message.reply_text(to_small_caps("please send a number."))
             context.user_data["btn_flow"] = flow
             context.user_data["awaiting"] = "btn_step_row"
             return
@@ -5046,11 +5332,11 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
         menu_id = flow["menu_id"]
         BOT_DATA["menus"][menu_id]["buttons"].append(flow["data"])
         save_data()
-        await update.message.reply_text(f"✅ Button add ho gaya '{menu_id}' mein.")
+        await update.message.reply_text(to_small_caps(f"✅ button added to '{menu_id}'."))
 
     else:
         context.user_data.pop("awaiting", None)
-        await update.message.reply_text("Samajh nahi aaya, dobara /admin try karo.")
+        await update.message.reply_text(to_small_caps("that wasn't understood — please try /admin again."))
 
 
 async def handle_admin_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -5069,13 +5355,13 @@ async def handle_admin_media(update: Update, context: ContextTypes.DEFAULT_TYPE)
         menu = BOT_DATA["menus"][menu_id]
         if len(menu.get("text", "")) > 1024:
             await update.message.reply_text(
-                "⚠️ Is menu ka text 1024 characters se lamba hai, image caption mein fit nahi hoga. "
-                "Pehle text chhota karo, fir image lagao."
+                to_small_caps("⚠️ this menu's text is longer than 1024 characters and won't fit as an image caption. ")
+                + to_small_caps("please shorten the text first, then add the image.")
             )
             return
         menu["image_file_id"] = file_id
         save_data()
-        await update.message.reply_text(f"✅ '{menu_id}' ki image update ho gayi.")
+        await update.message.reply_text(to_small_caps(f"✅ '{menu_id}' image updated."))
         return
 
     if awaiting == "broadcast_content":
@@ -5254,12 +5540,12 @@ async def handle_restore_upload(update: Update, context: ContextTypes.DEFAULT_TY
         with open(raw_path, "r", encoding="utf-8") as f:
             incoming = json.load(f)
     except Exception:
-        await update.message.reply_text("❌ Ye valid JSON file nahi hai.")
+        await update.message.reply_text(to_small_caps("❌ this is not a valid json file."))
         os.remove(raw_path)
         return
 
     if not set(DEFAULT_DATA.keys()).issubset(set(incoming.keys())):
-        await update.message.reply_text("❌ Ye backup file jaisi nahi lag rahi. Restore cancel kar diya.")
+        await update.message.reply_text(to_small_caps("❌ this doesn't look like a valid backup file. restore cancelled."))
         os.remove(raw_path)
         return
 
@@ -5269,8 +5555,9 @@ async def handle_restore_upload(update: Update, context: ContextTypes.DEFAULT_TY
     cur_users, new_users = len(BOT_DATA["users"]), len(incoming.get("users", {}))
     cur_admins, new_admins = len(BOT_DATA["admins"]), len(incoming.get("admins", []))
     text = (
-        f"⚠️ Restore Confirmation\n\nUsers: {cur_users} → {new_users}\nAdmins: {cur_admins} → {new_admins}\n\n"
-        "⚠️ Ye current LIVE data ko poori tarah REPLACE kar dega.\n(Current data ki backup pehle le li jayegi.)"
+        to_small_caps("⚠️ restore confirmation") + "\n\n"
+        + f"{to_small_caps('users')}: {cur_users} → {new_users}\n{to_small_caps('admins')}: {cur_admins} → {new_admins}\n\n"
+        + to_small_caps("⚠️ this will completely REPLACE the current live data.") + "\n" + to_small_caps("(the current data will be backed up first.)")
     )
     kb = InlineKeyboardMarkup(
         [[styled_button("✅ Confirm Restore", callback_data="restore_confirm", style="danger"),
@@ -5287,7 +5574,7 @@ async def cb_restore_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
     incoming = context.user_data.pop("pending_restore", None)
     if incoming is None:
-        await query.edit_message_text("Kuch expire ho gaya, dobara file bhejo.")
+        await query.edit_message_text(to_small_caps("this has expired — please send the file again."))
         return
     before_path = make_backup_snapshot(reason="pre_restore")
     before_users = len(BOT_DATA["users"])
@@ -5308,7 +5595,7 @@ async def cb_restore_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     context.user_data.pop("pending_restore", None)
-    await query.edit_message_text("Restore cancel kar diya gaya.")
+    await query.edit_message_text(to_small_caps("restore cancelled."))
 
 
 async def scheduled_backup_job(context: ContextTypes.DEFAULT_TYPE):
@@ -5384,6 +5671,7 @@ SCREEN_RENDERERS.update(
         "adm_users": _render_adm_users,
         "adm_live": _render_adm_live,
         "adm_broadcast": _render_adm_broadcast,
+        "adm_bc_delmenu": _render_adm_bc_delmenu,
         "adm_menu_ui": _render_adm_menu_ui,
         "adm_settings": _render_adm_settings,
         "adm_danger": _render_adm_danger,
@@ -5485,6 +5773,10 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_broadcast")(cb_adm_broadcast), pattern="^adm_broadcast$"))
     app.add_handler(CallbackQueryHandler(cb_adm_bc_new, pattern="^adm_bc_new$"))
     app.add_handler(CallbackQueryHandler(cb_adm_bc_log, pattern="^adm_bc_log$"))
+    app.add_handler(CallbackQueryHandler(nav_tracked("adm_bc_delmenu")(cb_adm_bc_delmenu), pattern="^adm_bc_delmenu$"))
+    app.add_handler(CallbackQueryHandler(cb_adm_bc_delmonth, pattern="^adm_bc_delmonth:"))
+    app.add_handler(CallbackQueryHandler(cb_adm_bc_delconfirm, pattern="^adm_bc_delconfirm:"))
+    app.add_handler(CallbackQueryHandler(cb_adm_bc_deldo, pattern="^adm_bc_deldo:"))
 
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_menu_ui")(cb_adm_menu_ui), pattern="^adm_menu_ui$"))
     app.add_handler(CallbackQueryHandler(cb_adm_menu_edit, pattern="^adm_menu_edit:"))
