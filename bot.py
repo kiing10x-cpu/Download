@@ -1047,7 +1047,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return  # silently ignored, per spec
     is_new = touch_user(update)
     if not check_rate_limit(user_obj.id):
-        await update.message.reply_text("⏳ Thoda slow karo, bahut jaldi jaldi requests aa rahi hain.")
+        await update.message.reply_text("⏳ " + to_small_caps("slow down, too many requests too fast."))
         await delete_incoming(update)
         return
     if BOT_DATA["settings"].get("maintenance") and not is_admin(user_obj.id):
@@ -1211,7 +1211,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if not check_rate_limit(user_id):
-        await update.message.reply_text("⏳ Thoda slow karo, bahut jaldi jaldi requests aa rahi hain.")
+        await update.message.reply_text("⏳ " + to_small_caps("slow down, too many requests too fast."))
         return
 
     match = INSTAGRAM_URL_RE.search(text)
@@ -1256,7 +1256,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = match.group(1)
 
     if is_link_blocked(url) and not is_admin(user_id):
-        await update.message.reply_text("🚫 Ye link ya domain admin ne block kar diya hai.")
+        await update.message.reply_text("🚫 " + to_small_caps("this link/domain has been blocked by admin."))
         return
 
     status_msg = await update.message.reply_text(STR["processing"])
@@ -1438,7 +1438,7 @@ async def cb_get_caption(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = (query.message.chat_id, query.message.message_id)
     caption = _caption_cache.get(key)
     if not caption:
-        await query.message.reply_text("ℹ️ Is post ka koi caption nahi mila (ya cache expire ho gaya).")
+        await query.message.reply_text("ℹ️ " + to_small_caps("no caption found for this post (or cache expired)."))
         return
     # Telegram message limit is 4096 chars — split if needed.
     for i in range(0, len(caption), 4000):
@@ -1461,7 +1461,7 @@ async def cb_check_force_join(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def cb_download_another(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    await query.message.reply_text("🔗 Paste your next Instagram reel link.")
+    await query.message.reply_text("🔗 " + to_small_caps("paste your next instagram reel link."))
 
 
 # ----------------------------------------------------------------------------
@@ -1704,7 +1704,7 @@ async def cb_gift_stars_custom(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     await query.answer()
     context.user_data["awaiting"] = "gift_stars_custom_amount"
-    await query.message.reply_text("Numeric ⭐ amount type karo (e.g. 150).")
+    await query.message.reply_text("✏️ " + to_small_caps("enter a numeric star amount (e.g. 150)."))
 
 
 async def send_stars_invoice(context: ContextTypes.DEFAULT_TYPE, chat_id: int, amount: int):
@@ -1745,10 +1745,10 @@ async def cb_gift_upi(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     if not BOT_DATA["settings"].get("upi_id"):
-        await query.message.reply_text("UPI abhi configure nahi hai.")
+        await query.message.reply_text("⚠️ " + to_small_caps("upi is not configured yet."))
         return
     context.user_data["awaiting"] = "gift_upi_amount"
-    await query.message.reply_text("💳 Amount (₹) type karo:")
+    await query.message.reply_text("💳 " + to_small_caps("enter amount (₹):"))
 
 
 async def start_upi_order(update: Update, context: ContextTypes.DEFAULT_TYPE, amount: int):
@@ -1814,11 +1814,11 @@ async def cb_gift_upi_paid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not order:
         return
     if order["expires_at"] < time.time():
-        await query.message.reply_text("❌ QR expired, generate new one via 🎁 Send a gift.")
+        await query.message.reply_text("❌ " + to_small_caps("qr expired, generate a new one via 🎁 send a gift."))
         return
     order["status"] = "claimed_pending_verify"
     save_data()
-    await query.message.reply_text("✅ Marked as paid — an admin will verify shortly.")
+    await query.message.reply_text("✅ " + to_small_caps("marked as paid — an admin will verify shortly."))
     targets = BOT_DATA.get("admins", [])
     admin_kb = InlineKeyboardMarkup([[
         styled_button("✅ Confirm & Upgrade", callback_data=f"gift_upi_confirm:{oid}", style="success"),
@@ -1883,7 +1883,7 @@ async def cb_support_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     context.user_data["awaiting"] = "support_message"
-    await query.message.reply_text("🆘 Support\n\nDescribe your issue and we'll forward it to the team.")
+    await query.message.reply_text("🆘 " + to_small_caps("support") + "\n\n" + to_small_caps("describe your issue and we'll forward it to the team."))
 
 
 async def handle_user_awaiting_input(update: Update, context: ContextTypes.DEFAULT_TYPE, awaiting: str):
@@ -1903,7 +1903,7 @@ async def handle_user_awaiting_input(update: Update, context: ContextTypes.DEFAU
             except Exception:
                 pass
         await log_event(context, f"🆘 Support message from {user_obj.id}")
-        await update.message.reply_text("✅ Your message has been sent to support, we'll get back to you soon.")
+        await update.message.reply_text("✅ " + to_small_caps("your message has been sent to support, we'll get back to you soon."))
 
     elif awaiting == "ticket_new":
         context.user_data.pop("awaiting", None)
@@ -1916,14 +1916,14 @@ async def handle_user_awaiting_input(update: Update, context: ContextTypes.DEFAU
     elif awaiting == "gift_stars_custom_amount":
         context.user_data.pop("awaiting", None)
         if not text.isdigit() or int(text) <= 0:
-            await update.message.reply_text("Valid ⭐ number bhejo.")
+            await update.message.reply_text("⚠️ " + to_small_caps("please send a valid star number."))
             return
         await send_stars_invoice(context, update.effective_chat.id, int(text))
 
     elif awaiting == "gift_upi_amount":
         context.user_data.pop("awaiting", None)
         if not text.isdigit() or int(text) <= 0:
-            await update.message.reply_text("Valid ₹ amount bhejo.")
+            await update.message.reply_text("⚠️ " + to_small_caps("please send a valid ₹ amount."))
             return
         await start_upi_order(update, context, int(text))
 
@@ -2558,6 +2558,12 @@ async def _render_adm_settings(update: Update, context: ContextTypes.DEFAULT_TYP
             )],
             [styled_button("👑 Owner/Developer Contact", callback_data="adm_owner_contact")],
             [styled_button("📋 Logger Channel", callback_data="adm_logger_channel")],
+            [styled_button(f"📢 Force-Join: {s.get('force_join_channel') or 'OFF'}", callback_data="adm_force_join")],
+            [styled_button(
+                f"📄 Send As Document: {'ON' if s.get('send_as_document') else 'OFF (auto near limit)'}",
+                callback_data="stgl:send_as_document:adm_settings",
+                style="success" if s.get("send_as_document") else "primary",
+            )],
             back_row(),
             home_row(),
         ]
@@ -2654,6 +2660,52 @@ async def cb_adm_logger_channel_set(update: Update, context: ContextTypes.DEFAUL
         "Forward any message from the target channel here (bot must be an "
         "admin there), or just type its numeric ID (looks like -100xxxxxxxxxx)."
     )
+
+
+# ---- v3 §7 — Force-join channel ------------------------------------------------
+
+async def _render_adm_force_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    s = BOT_DATA["settings"]
+    text = (
+        "📢 Force-Join Channel\n\n"
+        f"Channel: {s.get('force_join_channel') or '(not set — force-join disabled)'}\n\n"
+        "When set, users must be a member of this channel before they can "
+        "download reels. Bot must be an admin of the channel to check membership."
+    )
+    kb = InlineKeyboardMarkup(
+        [
+            [styled_button("✏️ Set Channel", callback_data="adm_force_join_set")],
+            [styled_button("❌ Disable", callback_data="adm_force_join_clear", style="danger")],
+            back_row(),
+        ]
+    )
+    await query.edit_message_text(text, reply_markup=kb)
+
+
+async def cb_adm_force_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    await _render_adm_force_join(update, context)
+
+
+async def cb_adm_force_join_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    context.user_data["awaiting"] = "force_join_channel"
+    await query.message.reply_text(
+        "Type the channel username (like @mychannel) or numeric ID (-100xxxxxxxxxx). "
+        "Bot must already be an admin in that channel."
+    )
+
+
+async def cb_adm_force_join_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if not is_admin(update.effective_user.id):
+        return
+    BOT_DATA["settings"]["force_join_channel"] = None
+    save_data()
+    await _render_adm_force_join(update, context)
 
 
 async def cb_settings_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3162,6 +3214,12 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
         save_data()
         await update.message.reply_text(f"✅ Owner/Developer contact set: {label} → {text}")
 
+    elif awaiting == "force_join_channel":
+        context.user_data.pop("awaiting", None)
+        BOT_DATA["settings"]["force_join_channel"] = text.strip()
+        save_data()
+        await update.message.reply_text(f"✅ Force-join channel set: {text.strip()}")
+
     elif awaiting == "logger_channel_id":
         context.user_data.pop("awaiting", None)
         chat_id = None
@@ -3653,6 +3711,7 @@ SCREEN_RENDERERS.update(
         "adm_danger": _render_adm_danger,
         "adm_owner_contact": _render_adm_owner_contact,
         "adm_logger_channel": _render_adm_logger_channel,
+        "adm_force_join": _render_adm_force_join,
         "adm_premium": _render_adm_premium,
         "adm_upi": _render_adm_upi,
         "adm_devsettings": _render_adm_devsettings,
@@ -3687,6 +3746,9 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(cb_adm_owner_contact_set, pattern="^adm_owner_contact_set$"))
     app.add_handler(CallbackQueryHandler(cb_adm_owner_contact_clear, pattern="^adm_owner_contact_clear$"))
     app.add_handler(CallbackQueryHandler(cb_adm_logger_channel_set, pattern="^adm_logger_channel_set$"))
+    app.add_handler(CallbackQueryHandler(nav_tracked("adm_force_join")(cb_adm_force_join), pattern="^adm_force_join$"))
+    app.add_handler(CallbackQueryHandler(cb_adm_force_join_set, pattern="^adm_force_join_set$"))
+    app.add_handler(CallbackQueryHandler(cb_adm_force_join_clear, pattern="^adm_force_join_clear$"))
 
     app.add_handler(CallbackQueryHandler(cb_get_caption, pattern="^get_caption$"))
     app.add_handler(CallbackQueryHandler(cb_download_another, pattern="^download_another$"))
