@@ -2684,9 +2684,6 @@ async def cmd_precheckout(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_successful_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sp = update.message.successful_payment
     uid = str(update.effective_user.id)
-    # v5 — every completed star payment counts toward the leaderboard,
-    # whether it was a plan purchase or a free-amount support gift.
-    record_donation(uid, update.effective_user.full_name, sp.total_amount, "stars")
     # v4 — a star payment for a specific admin-defined plan grants THAT plan's
     # day count; a generic/free-amount star gift keeps the old flat setting.
     plan_id = None
@@ -2705,20 +2702,28 @@ async def cmd_successful_payment(update: Update, context: ContextTypes.DEFAULT_T
         )
         log_line = f"⭐ Plan purchased — {sp.total_amount} stars from {update.effective_user.id} ({plan['name']}), premium granted"
     else:
-        # v4 — this is a voluntary support gift, not a plan purchase, so the
-        # thank-you reads like a thank-you (not an invoice receipt), and it
-        # no longer mixes plan-shaped wording in.
-        days = BOT_DATA["settings"].get("premium_days_per_star_gift", 30)
-        grant_premium(uid, days)
+        # FIX — a voluntary support gift (no plan attached) must NOT auto-
+        # grant Premium; that made zero sense to a user paying ₹1/1 star as
+        # a tip and getting "premium added for 30 days" back. It's now a
+        # pure thank-you, nothing unlocked.
+        # FIX — leaderboard must ONLY count real 🎁 Send Gift donations, not
+        # subscription/plan purchases, so record_donation() moved here.
+        record_donation(uid, update.effective_user.full_name, sp.total_amount, "stars")
         text = (
             "🎉 " + to_small_caps("thank you so much for the support!") + "\n\n"
-            f"💫 {to_small_caps('you sent')}: {sp.total_amount} ⭐\n"
-            f"🎁 {to_small_caps('as a small thank-you, premium has been added for')} {days} {to_small_caps('days')}\n\n"
+            f"💫 {to_small_caps('you sent')}: {sp.total_amount} ⭐\n\n"
             + to_small_caps("it really means a lot — thank you! ❤️")
         )
-        log_line = f"⭐ Gift received — {sp.total_amount} stars from {update.effective_user.id}, premium granted"
+        log_line = f"⭐ Gift received — {sp.total_amount} stars from {update.effective_user.id}"
     await update.message.reply_text(text)
     await log_event(context, log_line)
+    # FIX — "stars bhejega to kaise pata chalega": Stars payments settle
+    # instantly through Telegram's own payment system (no manual admin
+    # verification possible or needed), but the admin still had zero way to
+    # know it happened unless a logger channel was configured. Every star
+    # payment now also DMs every admin directly, guaranteed, regardless of
+    # logger-channel setup.
+    await dm_all_admins(context, "💰 " + log_line)
 
 
 async def cb_gift_upi(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2828,12 +2833,33 @@ async def cb_gift_upi_paid(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     order["status"] = "claimed_pending_verify"
     save_data()
-    await query.message.reply_text("✅ " + to_small_caps("marked as paid — an admin will verify shortly."))
-    targets = BOT_DATA.get("admins", [])
     plan = find_premium_plan(order.get("plan_id")) if order.get("plan_id") else None
+    # FIX — "jab i've paid click kare tab QR expire ho jaye": the QR photo
+    # message is now deleted immediately on tap instead of sitting there
+    # indefinitely with a "marked as paid" note stacked below it.
+    try:
+        await query.message.delete()
+    except Exception:
+        try:
+            await query.edit_message_reply_markup(None)
+        except Exception:
+            pass
+    # FIX — clearer wording, same for plan purchases and gifts.
+    user_text = (
+        "✅ " + to_small_caps("your payment has been sent to admin.") + "\n"
+        + to_small_caps("admin will verify and notify you shortly.")
+    )
+    await context.bot.send_message(chat_id=query.message.chat_id, text=user_text)
+    targets = BOT_DATA.get("admins", [])
     kind = f"Plan purchase ({plan['name']})" if plan else "Support gift"
+    # FIX — admin gets a real decision, not just a one-way "confirm":
+    # Approve/Decline for a plan purchase (unlocks or refuses the plan),
+    # Received/Not Received for a free-amount gift (records or ignores it).
+    approve_label = "✅ Approve Payment" if plan else "✅ Received"
+    decline_label = "❌ Decline Payment" if plan else "❌ Not Received"
     admin_kb = InlineKeyboardMarkup([[
-        styled_button("✅ Confirm & Upgrade", callback_data=f"gift_upi_confirm:{oid}", style="success"),
+        styled_button(approve_label, callback_data=f"gift_upi_confirm:{oid}", style="success"),
+        styled_button(decline_label, callback_data=f"gift_upi_decline:{oid}", style="danger"),
     ]])
     for target in targets:
         try:
@@ -2847,8 +2873,7 @@ async def cb_gift_upi_paid(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cb_gift_upi_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """BUGFIX #3 — admin taps this to actually verify + upgrade the user;
-    previously a UPI 'gift' never upgraded anyone even after being marked paid."""
+    """Admin taps Approve (plan order) or Received (free-amount gift)."""
     query = update.callback_query
     await query.answer()
     if not is_admin(update.effective_user.id):
@@ -2861,41 +2886,77 @@ async def cb_gift_upi_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE
     order["status"] = "paid"
     save_data()
     uid = str(order["user_id"])
-    # v5 — every confirmed UPI order counts toward the leaderboard, whether
-    # it was a plan purchase or a free-amount support gift.
     donor_name = BOT_DATA["users"].get(uid, {}).get("name") or f"User {uid}"
-    record_donation(uid, donor_name, order["amount"], "inr")
-    # v4 — an order tied to a specific admin-defined plan grants THAT plan's
-    # day count and reads like a purchase receipt; a generic/free-amount
-    # UPI gift is a voluntary support tip, so it gets a proper thank-you
-    # instead of plan-shaped wording.
     plan = find_premium_plan(order.get("plan_id")) if order.get("plan_id") else None
     if plan:
         days = plan.get("days", 30)
+        grant_premium(uid, days)
         user_text = (
-            "✅ " + to_small_caps("payment confirmed!") + "\n\n"
+            "✅ " + to_small_caps("payment approved!") + "\n\n"
             f"💎 {to_small_caps('plan')}: {plan['name']}\n"
             f"💳 {to_small_caps('paid')}: ₹{order['amount']}\n"
             f"⏳ {to_small_caps('premium unlocked for')} {days} {to_small_caps('days')}"
         )
-        log_line = f"💳 UPI order #{oid} confirmed by admin {update.effective_user.id} ({plan['name']}), premium granted"
+        log_line = f"💳 UPI order #{oid} approved by admin {update.effective_user.id} ({plan['name']}), premium granted"
+        admin_ack = f"✅ Order #{oid} approved, plan unlocked for the user."
     else:
-        days = BOT_DATA["settings"].get("premium_days_per_upi_gift", 30)
+        # FIX — a free-amount gift/support payment does NOT unlock any
+        # premium plan on its own; "Received" just confirms the money
+        # arrived and says thanks. If the admin wants to reward it, that's
+        # a separate, explicit action (e.g. gifting a plan manually).
+        # FIX — leaderboard must ONLY count real 🎁 Send Gift donations, not
+        # subscription/plan purchases, so record_donation() moved here.
+        record_donation(uid, donor_name, order["amount"], "inr")
         user_text = (
             "🎉 " + to_small_caps("thank you so much for the support!") + "\n\n"
-            f"💫 {to_small_caps('you sent')}: ₹{order['amount']}\n"
-            f"🎁 {to_small_caps('as a small thank-you, premium has been added for')} {days} {to_small_caps('days')}\n\n"
+            f"💫 {to_small_caps('you sent')}: ₹{order['amount']}\n\n"
             + to_small_caps("it really means a lot — thank you! ❤️")
         )
-        log_line = f"💳 UPI order #{oid} confirmed by admin {update.effective_user.id}, premium granted"
-    grant_premium(uid, days)
+        log_line = f"💳 UPI gift #{oid} marked received by admin {update.effective_user.id}"
+        admin_ack = f"✅ Order #{oid} marked received."
     try:
         await context.bot.send_message(order["user_id"], user_text)
     except Exception:
         pass
     try:
         await query.edit_message_reply_markup(None)
-        await query.message.reply_text(f"✅ Order #{oid} confirmed, user upgraded.")
+        await query.message.reply_text(admin_ack)
+    except Exception:
+        pass
+    await log_event(context, log_line)
+
+
+async def cb_gift_upi_decline(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """FIX — admin now has a real 'no' option: Decline Payment (plan order)
+    or Not Received (free-amount gift). Nothing is granted, no donation is
+    recorded, and the user is told clearly instead of being left hanging."""
+    query = update.callback_query
+    await query.answer()
+    if not is_admin(update.effective_user.id):
+        return
+    oid = query.data.split(":", 1)[1]
+    order = BOT_DATA["gift_orders"].get(oid)
+    if not order or order["status"] in ("paid", "declined"):
+        await query.answer("Already handled or not found.", show_alert=True)
+        return
+    order["status"] = "declined"
+    save_data()
+    plan = find_premium_plan(order.get("plan_id")) if order.get("plan_id") else None
+    user_text = (
+        "❌ " + to_small_caps("your payment could not be verified.") + "\n"
+        + to_small_caps("if you believe this is a mistake, please contact support.")
+    )
+    log_line = (
+        f"💳 UPI order #{oid} declined by admin {update.effective_user.id}"
+        + (f" ({plan['name']})" if plan else " (gift)")
+    )
+    try:
+        await context.bot.send_message(order["user_id"], user_text)
+    except Exception:
+        pass
+    try:
+        await query.edit_message_reply_markup(None)
+        await query.message.reply_text(f"❌ Order #{oid} declined.")
     except Exception:
         pass
     await log_event(context, log_line)
@@ -3071,23 +3132,32 @@ async def cb_adm_block_domain(update: Update, context: ContextTypes.DEFAULT_TYPE
 # ----------------------------------------------------------------------------
 
 def admin_panel_keyboard():
+    # FIX — "sare buttons same size ke hi rakho": mixed 1-per-row and
+    # 2-per-row rows made buttons look inconsistently sized (a lone button
+    # fills the whole row width, a paired button only fills half). Every
+    # top-level Admin Panel entry is now one-per-row, so they're all the
+    # same width. Also splits the old combined "Leaderboard & Sharing"
+    # entry into two separate buttons/sections, and renames "Premium
+    # Plans" to "Premium" (plans + premium-user tools now live together
+    # under it).
     return InlineKeyboardMarkup(
         [
-            [styled_button("💎 Premium Plans", callback_data="adm_premium"),
-             styled_button("💳 UPI Settings", callback_data="adm_upi")],
-            [styled_button("🏆 Leaderboard & Sharing", callback_data="adm_leaderboard")],
-            [styled_button("👨‍💻 Developer Settings", callback_data="adm_devsettings"),
-             styled_button("🎧 Support Settings", callback_data="adm_support_settings")],
-            [styled_button("🎫 Tickets", callback_data="adm_tickets"),
-             styled_button("📊 Bot Stats", callback_data="adm_stats")],
-            [styled_button("🌐 Language Settings", callback_data="adm_lang_manage"),
-             styled_button("📢 Broadcast", callback_data="adm_broadcast")],
-            [styled_button("👥 Users & Groups", callback_data="adm_users"),
-             styled_button("🎨 Menu & UI", callback_data="adm_menu_ui")],
-            [styled_button("⚙️ Settings & Admins", callback_data="adm_settings"),
-             styled_button("🛑 Danger Zone", callback_data="adm_danger")],
-            [styled_button("📋 Activity Log", callback_data="adm_activity"),
-             styled_button("🧪 Self-Test", callback_data="adm_selftest")],
+            [styled_button("💎 Premium", callback_data="adm_premium")],
+            [styled_button("💳 UPI Settings", callback_data="adm_upi")],
+            [styled_button("🏆 Leaderboard", callback_data="adm_leaderboard")],
+            [styled_button("📤 Share Settings", callback_data="adm_share")],
+            [styled_button("👨‍💻 Developer Settings", callback_data="adm_devsettings")],
+            [styled_button("🎧 Support Settings", callback_data="adm_support_settings")],
+            [styled_button("🎫 Tickets", callback_data="adm_tickets")],
+            [styled_button("📊 Bot Stats", callback_data="adm_stats")],
+            [styled_button("🌐 Language Settings", callback_data="adm_lang_manage")],
+            [styled_button("📢 Broadcast", callback_data="adm_broadcast")],
+            [styled_button("👥 Users & Groups", callback_data="adm_users")],
+            [styled_button("🎨 Menu & UI", callback_data="adm_menu_ui")],
+            [styled_button("⚙️ Settings & Admins", callback_data="adm_settings")],
+            [styled_button("🛑 Danger Zone", callback_data="adm_danger")],
+            [styled_button("📋 Activity Log", callback_data="adm_activity")],
+            [styled_button("🧪 Self-Test", callback_data="adm_selftest")],
             [styled_button("🕵️ Live User Feed", callback_data="adm_live")],
         ]
     )
@@ -3871,34 +3941,28 @@ async def cb_adm_force_join_test(update: Update, context: ContextTypes.DEFAULT_T
 
 
 def _build_adm_leaderboard_view():
+    # FIX — split out of the old combined "Leaderboard & Sharing" screen;
+    # this screen is now Leaderboard-only. Share settings moved to their
+    # own "📤 Share Settings" section (see _build_adm_share_view below).
     s = BOT_DATA["settings"]
     lb_on = s.get("leaderboard_enabled", False)
-    share_on = s.get("share_enabled", True)
-    share_url = s.get("share_url") or to_small_caps("(default — bot's own link)")
     donor_count = len([d for d in BOT_DATA.get("donations", {}).values() if d.get("score", 0) > 0])
     text = (
-        "🏆 Leaderboard & Sharing\n\n"
-        f"Leaderboard: {'✅ ON' if lb_on else '❌ OFF'} — shown inside 🎁 Send Gift, "
+        "🏆 Leaderboard\n\n"
+        f"Status: {'✅ ON' if lb_on else '❌ OFF'} — shown inside 🎁 Send Gift, "
         f"{donor_count} donor(s) ranked so far.\n\n"
-        f"Share button (under My Usage): {'✅ ON' if share_on else '❌ OFF'}\n"
-        f"Share URL: {share_url}\n\n"
-        "Premium Plans are managed separately — see 💎 Premium Plans in the Admin Panel."
+        "Only voluntary 🎁 Send Gift donations count here — Premium Plan "
+        "purchases are subscriptions, not gifts, so they're never counted.\n\n"
+        + build_leaderboard_text()
     )
     kb_rows = [
         [styled_button(
             f"{'✅' if lb_on else '❌'} Leaderboard",
             callback_data="stgl:leaderboard_enabled:adm_leaderboard",
         )],
-        [styled_button("📢 Post Leaderboard", callback_data="adm_post_leaderboard")],
-        [styled_button(
-            f"{'✅' if share_on else '❌'} Share Button",
-            callback_data="stgl:share_enabled:adm_leaderboard",
-        )],
-        [styled_button("✏️ Set Share URL", callback_data="adm_share_url_set")],
+        [styled_button("📢 Post Leaderboard to All Users", callback_data="adm_post_leaderboard")],
+        back_row(),
     ]
-    if s.get("share_url"):
-        kb_rows.append([styled_button("🗑️ Reset Share URL", callback_data="adm_share_url_clear")])
-    kb_rows.append(back_row())
     return text, InlineKeyboardMarkup(kb_rows)
 
 
@@ -3914,31 +3978,75 @@ async def cb_adm_leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def cb_adm_post_leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Admin can post the current leaderboard into the configured logger
-    channel (if set) as a shareable card, in addition to it showing up
-    inside Send Gift. Falls back to posting it right here in the admin's
-    own chat if no logger channel is configured, so the button always does
-    something useful."""
+    """FIX — this used to only post into the logger channel (or the admin's
+    own chat as a fallback), so it never actually reached users — exactly
+    the "sirf mere chat me raha, users me nahi gaya" bug. It now broadcasts
+    the leaderboard to every user the bot knows about, same delivery path
+    as the real Broadcast feature, and still cross-posts to the logger
+    channel too if one is configured."""
     query = update.callback_query
     await query.answer()
     if not is_admin(update.effective_user.id):
         return
     text = build_leaderboard_text()
+    sent, failed = 0, 0
+    for uid in list(BOT_DATA["users"].keys()):
+        try:
+            m = await context.bot.send_message(int(uid), text)
+            track_sent_message(int(uid), m.message_id)
+            await schedule_delete(context, int(uid), m.message_id, BOT_DATA["settings"].get("global_auto_delete_seconds", 0))
+            sent += 1
+        except Exception:
+            failed += 1
     channel = BOT_DATA["settings"].get("logger_channel_id") if BOT_DATA["settings"].get("logger_enabled") else None
     if channel:
         try:
             await context.bot.send_message(channel, text)
-            await query.message.reply_text("✅ " + to_small_caps("posted to the logger channel."))
-            return
-        except Exception as e:
-            await query.message.reply_text(f"⚠️ Couldn't post to logger channel ({e}). Posting here instead:")
-    await query.message.reply_text(text)
+        except Exception:
+            pass
+    await query.message.reply_text(f"✅ {to_small_caps('leaderboard posted to all users')}\nSent: {sent} | Failed: {failed}")
+    await log_event(context, f"🏆 Leaderboard posted to users by {update.effective_user.id} — {sent} recipients")
+
+
+def _build_adm_share_view():
+    # FIX — split out of the old combined "Leaderboard & Sharing" screen;
+    # this is now its own standalone "📤 Share Settings" section.
+    s = BOT_DATA["settings"]
+    share_on = s.get("share_enabled", True)
+    share_url = s.get("share_url") or to_small_caps("(default — bot's own link)")
+    text = (
+        "📤 Share Settings\n\n"
+        f"Share button (under My Usage): {'✅ ON' if share_on else '❌ OFF'}\n"
+        f"Share URL: {share_url}"
+    )
+    kb_rows = [
+        [styled_button(
+            f"{'✅' if share_on else '❌'} Share Button",
+            callback_data="stgl:share_enabled:adm_share",
+        )],
+        [styled_button("✏️ Set Share URL", callback_data="adm_share_url_set")],
+    ]
+    if s.get("share_url"):
+        kb_rows.append([styled_button("🗑️ Reset Share URL", callback_data="adm_share_url_clear")])
+    kb_rows.append(back_row())
+    return text, InlineKeyboardMarkup(kb_rows)
+
+
+async def _render_adm_share(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    text, kb = _build_adm_share_view()
+    await query.edit_message_text(text, reply_markup=kb)
+
+
+async def cb_adm_share(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    await _render_adm_share(update, context)
 
 
 async def cb_adm_share_url_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    remember_panel_message(context, query, "leaderboard")
+    remember_panel_message(context, query, "share")
     context.user_data["awaiting"] = "share_url"
     await query.message.reply_text(
         "Type the URL the '📤 Share' button (under My Usage) should open — "
@@ -3953,7 +4061,7 @@ async def cb_adm_share_url_clear(update: Update, context: ContextTypes.DEFAULT_T
         return
     BOT_DATA["settings"]["share_url"] = None
     save_data()
-    await _render_adm_leaderboard(update, context)
+    await _render_adm_share(update, context)
 
 
 async def cb_settings_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4140,15 +4248,19 @@ async def _render_adm_danger(update: Update, context: ContextTypes.DEFAULT_TYPE)
 def _build_adm_premium_view():
     s = BOT_DATA["settings"]
     plans = s.get("premium_plans", [])
+    premium_count = sum(1 for uid in BOT_DATA["users"] if is_premium_active(uid))
     lines = [
-        f"💎 Premium Plans\n\nMaster switch: {'ON' if s.get('premium_enabled') else 'OFF'}",
+        f"💎 Premium\n\nMaster switch: {'ON' if s.get('premium_enabled') else 'OFF'}",
         f"Daily free limit: {s.get('daily_limit', 20)}",
+        f"👥 Active premium users: {premium_count}",
         "",
     ]
     kb_rows = [
         [styled_button(f"🔀 Master Switch: {'ON' if s.get('premium_enabled') else 'OFF'}",
                         callback_data="stgl:premium_enabled:adm_premium")],
         [styled_button("✏️ Set Daily Limit", callback_data="adm_set_dailylimit")],
+        [styled_button("👥 See Premium Users", callback_data="adm_premium_users")],
+        [styled_button("➕ Add Premium User (by ID)", callback_data="adm_premium_grant")],
     ]
     if not plans:
         lines.append("No plans yet — tap ➕ Add Plan below.")
@@ -4187,6 +4299,59 @@ async def _render_adm_premium(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def cb_adm_premium(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     await _render_adm_premium(update, context)
+
+
+# ---- NEW — See Premium Users / manually grant premium by user ID --------------
+
+async def cb_adm_premium_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """👥 See Premium Users — lists every user currently marked premium,
+    with days remaining (or 'no expiry' for lifetime grants)."""
+    query = update.callback_query
+    await query.answer()
+    if not is_admin(update.effective_user.id):
+        return
+    rows = []
+    now = datetime.utcnow()
+    for uid, u in BOT_DATA["users"].items():
+        if not is_premium_active(uid):
+            continue
+        name = u.get("name") or f"User {uid}"
+        exp = u.get("plan_expires_at")
+        if exp:
+            try:
+                remaining = (datetime.fromisoformat(exp) - now).days
+                when = f"{remaining}d left" if remaining >= 0 else "expiring"
+            except Exception:
+                when = "unknown expiry"
+        else:
+            when = "no expiry"
+        rows.append(f"• {name} (`{uid}`) — {when}")
+    if rows:
+        text = "👥 " + to_small_caps("premium users") + f" ({len(rows)})\n\n" + "\n".join(rows[:60])
+        if len(rows) > 60:
+            text += f"\n… and {len(rows) - 60} more"
+    else:
+        text = "👥 " + to_small_caps("no premium users right now.")
+    kb = InlineKeyboardMarkup([back_row("adm_premium")])
+    await query.edit_message_text(text, reply_markup=kb, parse_mode="Markdown")
+
+
+async def cb_adm_premium_grant(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """➕ Add Premium User (by ID) — admin types a Telegram user ID (and
+    optionally how many days) and premium unlocks automatically, no
+    payment/plan flow needed. Same manual-override tool admins expect for
+    comps, testers, or fixing a missed payment."""
+    query = update.callback_query
+    await query.answer()
+    if not is_admin(update.effective_user.id):
+        return
+    remember_panel_message(context, query, "premium")
+    context.user_data["awaiting"] = "premium_grant_userid"
+    await query.message.reply_text(
+        "👤 Send the user's Telegram ID to unlock Premium for.\n"
+        "Optionally add days after a space (default 30) — e.g. `123456789 90`.",
+        parse_mode="Markdown",
+    )
 
 
 # ---- Premium plan CRUD (add / toggle / delete) ---------------------------------
@@ -4605,8 +4770,8 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
             url = "https://t.me/" + url.lstrip("@")
         BOT_DATA["settings"]["share_url"] = url
         save_data()
-        refreshed = await refresh_panel_after_save(context, "leaderboard", _build_adm_leaderboard_view)
-        await update.message.reply_text(f"✅ Share URL set: {url}" + ("" if refreshed else "\n(reopen the leaderboard panel to confirm)"))
+        refreshed = await refresh_panel_after_save(context, "share", _build_adm_share_view)
+        await update.message.reply_text(f"✅ Share URL set: {url}" + ("" if refreshed else "\n(reopen the share panel to confirm)"))
 
     elif awaiting == "logger_channel_id":
         context.user_data.pop("awaiting", None)
@@ -4698,6 +4863,32 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
         save_data()
         refreshed = await refresh_panel_after_save(context, "support_settings", _build_adm_support_settings_view)
         await update.message.reply_text(f"✅ Ticket group set to {chat_id}." + ("" if refreshed else "\n(reopen the support panel to confirm)"))
+
+    elif awaiting == "premium_grant_userid":
+        context.user_data.pop("awaiting", None)
+        parts = text.strip().split()
+        if not parts or not parts[0].isdigit():
+            await update.message.reply_text("⚠️ Valid numeric user ID bhejo (e.g. 123456789 or 123456789 90).")
+            context.user_data["awaiting"] = "premium_grant_userid"
+            return
+        target_uid = parts[0]
+        days = 30
+        if len(parts) > 1 and parts[1].isdigit() and int(parts[1]) > 0:
+            days = int(parts[1])
+        grant_premium(target_uid, days)
+        refreshed = await refresh_panel_after_save(context, "premium", _build_adm_premium_view)
+        await update.message.reply_text(
+            f"✅ Premium unlocked for user {target_uid} — {days} days."
+            + ("" if refreshed else "\n(reopen the premium panel to confirm)")
+        )
+        try:
+            await context.bot.send_message(
+                int(target_uid),
+                "🎉 " + to_small_caps("premium has been unlocked for your account!") + f"\n⏳ {to_small_caps('valid for')} {days} {to_small_caps('days')}",
+            )
+        except Exception:
+            pass
+        await log_event(context, f"💎 Premium manually granted to {target_uid} ({days}d) by admin {update.effective_user.id}")
 
     elif awaiting == "plan_step_name":
         name = text.strip()
@@ -5205,6 +5396,7 @@ SCREEN_RENDERERS.update(
         "adm_support_settings": _render_adm_support_settings,
         "adm_tickets": _render_adm_tickets,
         "adm_leaderboard": _render_adm_leaderboard,
+        "adm_share": _render_adm_share,
     }
 )
 
@@ -5242,6 +5434,7 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_force_join")(cb_adm_force_join), pattern="^adm_force_join$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_leaderboard")(cb_adm_leaderboard), pattern="^adm_leaderboard$"))
     app.add_handler(CallbackQueryHandler(cb_adm_post_leaderboard, pattern="^adm_post_leaderboard$"))
+    app.add_handler(CallbackQueryHandler(nav_tracked("adm_share")(cb_adm_share), pattern="^adm_share$"))
     app.add_handler(CallbackQueryHandler(cb_adm_share_url_set, pattern="^adm_share_url_set$"))
     app.add_handler(CallbackQueryHandler(cb_adm_share_url_clear, pattern="^adm_share_url_clear$"))
     app.add_handler(CallbackQueryHandler(cb_adm_force_join_set, pattern="^adm_force_join_set$"))
@@ -5269,6 +5462,7 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(cb_gift_upi, pattern="^gift_upi$"))
     app.add_handler(CallbackQueryHandler(cb_gift_upi_paid, pattern="^gift_upi_paid:"))
     app.add_handler(CallbackQueryHandler(cb_gift_upi_confirm, pattern="^gift_upi_confirm:"))
+    app.add_handler(CallbackQueryHandler(cb_gift_upi_decline, pattern="^gift_upi_decline:"))
     app.add_handler(PreCheckoutQueryHandler(cmd_precheckout))
     app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, cmd_successful_payment))
     app.add_handler(CallbackQueryHandler(cb_nav, pattern="^nav:"))
@@ -5327,6 +5521,8 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_logger_channel")(cb_adm_logger_channel), pattern="^adm_logger_channel$"))
 
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_premium")(cb_adm_premium), pattern="^adm_premium$"))
+    app.add_handler(CallbackQueryHandler(cb_adm_premium_users, pattern="^adm_premium_users$"))
+    app.add_handler(CallbackQueryHandler(cb_adm_premium_grant, pattern="^adm_premium_grant$"))
     app.add_handler(CallbackQueryHandler(cb_adm_plan_add, pattern="^adm_plan_add$"))
     app.add_handler(CallbackQueryHandler(cb_adm_plan_toggle, pattern="^adm_plan_toggle:"))
     app.add_handler(CallbackQueryHandler(cb_adm_plan_del, pattern="^adm_plan_del:"))
