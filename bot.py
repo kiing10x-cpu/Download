@@ -1299,6 +1299,7 @@ def build_keyboard_from_buttons(buttons, menu_id):
 
 
 async def render_menu(context: ContextTypes.DEFAULT_TYPE, chat_id: int, menu_id: str, existing_message=None, lang: str = None):
+    await _clear_ephemeral(context, chat_id)
     menu = BOT_DATA["menus"].get(menu_id)
     if not menu:
         await context.bot.send_message(chat_id, f"⚠️ Menu '{menu_id}' nahi mila.")
@@ -1523,6 +1524,33 @@ async def delete_incoming(update: Update):
         await update.message.delete()
     except Exception:
         pass
+
+
+# ----------------------------------------------------------------------------
+# FIX — "chat ekdum clear rakhna hai": the Send-Gift/Stars support flow (pick
+# amount -> pay) used to leave a trail of "choose an amount" / invoice
+# messages sitting in the chat forever. These are now tracked per-user and
+# swept away the moment the person opens any other menu (Start, My Usage,
+# Gift menu, Admin Panel) — same "disappears on next menu" behaviour asked
+# for, without needing a bot restart or persistent duplicate messages.
+# ----------------------------------------------------------------------------
+
+def _track_ephemeral(context: ContextTypes.DEFAULT_TYPE, message) -> None:
+    if message is None:
+        return
+    ids = context.user_data.setdefault("ephemeral_msg_ids", [])
+    ids.append((message.chat_id, message.message_id))
+
+
+async def _clear_ephemeral(context: ContextTypes.DEFAULT_TYPE, chat_id: int = None) -> None:
+    ids = context.user_data.pop("ephemeral_msg_ids", [])
+    for cid, mid in ids:
+        if chat_id is not None and cid != chat_id:
+            continue
+        try:
+            await context.bot.delete_message(chat_id=cid, message_id=mid)
+        except Exception:
+            pass
 
 
 async def require_disclaimer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -2339,6 +2367,7 @@ async def cb_ticket_reopen(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ----------------------------------------------------------------------------
 
 async def show_usage_screen(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _clear_ephemeral(context, update.effective_chat.id)
     uid = str(update.effective_user.id)
     u = BOT_DATA["users"].setdefault(uid, {})
     today = datetime.utcnow().strftime("%Y-%m-%d")
@@ -2470,6 +2499,7 @@ async def show_gift_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     v5 — the top-donor leaderboard now lives right inside this screen
     (not a separate top-level menu button), and only when the admin has
     turned it on in the Admin Panel."""
+    await _clear_ephemeral(context, update.effective_chat.id)
     kb_rows = [[styled_button("⭐ Send Stars", callback_data="gift_stars", style="success")]]
     if BOT_DATA["settings"].get("upi_id"):
         kb_rows.append([styled_button("💳 Pay via UPI", callback_data="gift_upi", style="primary")])
@@ -2498,18 +2528,21 @@ async def cb_view_leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def cb_gift_stars(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    # FIX — amounts changed from 10/50/100 to 50/100/500 per request; the
+    # "Another amount" / "Dismiss" row below is left exactly as it was.
     kb = InlineKeyboardMarkup([
         [
-            styled_button("⭐ 10", callback_data="gift_stars_amt:10"),
             styled_button("⭐ 50", callback_data="gift_stars_amt:50"),
             styled_button("⭐ 100", callback_data="gift_stars_amt:100"),
+            styled_button("⭐ 500", callback_data="gift_stars_amt:500"),
         ],
         [
             styled_button("➕ Another amount", callback_data="gift_stars_custom"),
             styled_button("🗑 Dismiss", callback_data="gift_dismiss"),
         ],
     ])
-    await query.message.reply_text("⭐ " + to_small_caps("choose an amount:"), reply_markup=kb)
+    msg = await query.message.reply_text("⭐ " + to_small_caps("choose an amount:"), reply_markup=kb)
+    _track_ephemeral(context, msg)
 
 
 async def cb_gift_dismiss(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2525,7 +2558,8 @@ async def cb_gift_stars_custom(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     await query.answer()
     context.user_data["awaiting"] = "gift_stars_custom_amount"
-    await query.message.reply_text("✏️ " + to_small_caps("enter a numeric star amount (e.g. 150)."))
+    msg = await query.message.reply_text("✏️ " + to_small_caps("enter a numeric star amount (e.g. 150)."))
+    _track_ephemeral(context, msg)
 
 
 def record_donation(uid: str, name: str, amount: float, kind: str):
@@ -2621,7 +2655,7 @@ async def cb_gift_plan_upi(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def send_stars_invoice(context: ContextTypes.DEFAULT_TYPE, chat_id: int, amount: int, plan_id: str = None, plan_name: str = None):
     title = f"{plan_name} — Premium ⭐" if plan_name else "Gift the developer ⭐"
     desc = f"Unlock {plan_name}." if plan_name else f"Send {amount} Telegram Stars as a gift."
-    await context.bot.send_invoice(
+    return await context.bot.send_invoice(
         chat_id=chat_id,
         title=title,
         description=desc,
@@ -2636,7 +2670,11 @@ async def cb_gift_stars_amount(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     await query.answer()
     amount = int(query.data.split(":", 1)[1])
-    await send_stars_invoice(context, query.message.chat_id, amount)
+    # FIX — "chat ekdum clear rakhna hai": this invoice is part of the
+    # optional support/tip flow (no plan attached), so it's tracked and
+    # gets swept away automatically the moment another menu is opened.
+    msg = await send_stars_invoice(context, query.message.chat_id, amount)
+    _track_ephemeral(context, msg)
 
 
 async def cmd_precheckout(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2915,7 +2953,8 @@ async def handle_user_awaiting_input(update: Update, context: ContextTypes.DEFAU
         if not text.isdigit() or int(text) <= 0:
             await update.message.reply_text("⚠️ " + to_small_caps("please send a valid star number."))
             return
-        await send_stars_invoice(context, update.effective_chat.id, int(text))
+        msg = await send_stars_invoice(context, update.effective_chat.id, int(text))
+        _track_ephemeral(context, msg)
 
     elif awaiting == "gift_upi_amount":
         context.user_data.pop("awaiting", None)
@@ -3067,6 +3106,7 @@ def home_row():
 async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         return
+    await _clear_ephemeral(context, update.effective_chat.id)
     context.user_data["adm_nav_stack"] = ["adm_home"]
     sent = await update.message.reply_text("🛠️ Admin Panel", reply_markup=admin_panel_keyboard())
     await track_and_refresh_panel(context, update.effective_chat.id, "admin", sent)
@@ -4402,6 +4442,12 @@ async def cb_adm_reset_do(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE, awaiting: str):
     text = (update.message.text or "").strip()
+    # FIX — "jo admin ne bheja usko chat se delete kar de, bas panel section
+    # pe wo add ho jaye": every admin config-input message (plan steps, URLs,
+    # IDs, menu text, etc.) is now auto-deleted right after being read, same
+    # cleanup pattern /start and /admin already use — only the confirmation /
+    # refreshed panel view stays in chat, not the raw text the admin typed.
+    await delete_incoming(update)
 
     if awaiting.startswith("menu_text:"):
         menu_id = awaiting.split(":", 1)[1]
@@ -4721,7 +4767,7 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
             refreshed = await refresh_panel_after_save(context, "premium", _build_adm_premium_view)
             await update.message.reply_text(
                 f"✅ Plan added: {plan['name']} — {' / '.join(price_bits)} — {plan['days']}d — turned ON.\n"
-                "It's now visible to users in the 🎁 gift menu."
+                "It's now visible to users in 📊 My Usage (above the Share button)."
                 + ("" if refreshed else "\n(reopen the premium panel to confirm)")
             )
 
@@ -4821,6 +4867,9 @@ async def handle_admin_media(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user_id = update.effective_user.id
     if not awaiting or not is_admin(user_id):
         return
+    # Same chat-cleanup as handle_admin_text_input — the admin's uploaded
+    # photo/video used to set a menu image is deleted right after being read.
+    await delete_incoming(update)
 
     if awaiting.startswith("menu_image:") and update.message.photo:
         menu_id = awaiting.split(":", 1)[1]
