@@ -20,6 +20,7 @@ Setup:
 
 import os
 import io
+import html
 import re
 import json
 import csv
@@ -726,11 +727,7 @@ DEFAULT_MENUS = {
         ),
         "parse_mode": None,
         "image_file_id": None,
-        "buttons": [
-            {"label": to_small_caps("🏠 main menu"), "type": "menu", "value": "start", "row": 1, "style": "primary"},
-            {"label": "🆘 Support", "type": "callback", "value": "support_start", "row": 2, "style": "primary"},
-            {"label": "🚫 Report Copyright Issue", "type": "callback", "value": "report_copyright", "row": 2, "style": "danger"},
-        ],
+        "buttons": [],
         "auto_delete_seconds": None,
         "updated_by": None,
         "updated_at": None,
@@ -784,11 +781,15 @@ DEFAULT_MENUS = {
     },
     "maintenance": {
         "text": (
-            "🛠 <b>Under Maintenance</b>\n"
-            "We're currently performing scheduled improvements.\n"
-            "Please check back in a little while — thanks for your patience!"
+            "╭━━━━━━━━━━━━━━━━━━╮\n"
+            "✦ 𝗠𝗔𝗜𝗡𝗧𝗘𝗡𝗔𝗡𝗖𝗘 ✦\n"
+            "╰━━━━━━━━━━━━━━━━━━╯\n\n"
+            "⚙️ 𝘛𝘩𝘦 𝘣𝘰𝘵 𝘪𝘴 𝘤𝘶𝘳𝘳𝘦𝘯𝘵𝘭𝘺 𝘶𝘯𝘥𝘦𝘳𝘨𝘰𝘪𝘯𝘨\n"
+            "𝘶𝘱𝘨𝘳𝘢𝘥𝘦𝘴 𝘵𝘰 𝘣𝘳𝘪𝘯𝘨 𝘺𝘰𝘶\n"
+            "𝘢 𝘴𝘮𝘰𝘰𝘵𝘩𝘦𝘳 𝘦𝘹𝘱𝘦𝘳𝘪𝘦𝘯𝘤𝘦.\n\n"
+            "⏳ 𝘞𝘦’𝘭𝘭 𝘣𝘦 𝘣𝘢𝘤𝘬 𝘴𝘰𝘰𝘯."
         ),
-        "parse_mode": "HTML",
+        "parse_mode": None,
         "image_file_id": None,
         "buttons": [],
         "auto_delete_seconds": None,
@@ -871,12 +872,15 @@ DEFAULT_DATA = {
     "metrics": {"reels_downloaded": 0, "start_count": 0, "broadcasts_sent": 0},
     "tickets": {},               # v2 §6 — ticket_id(str) -> {...}
     "ticket_msg_map": {},        # v2 §6 — admin_group_message_id(str) -> ticket_id
+    "support_msg_map": {},       # one-shot support admin-message-id(str) -> user_id(str)
     "next_ticket_id": 1,
     "panel_msg": {},              # v2 §11 — chat_id(str) -> last panel message_id
     "gift_orders": {},            # v2 §4 — order_id(str) -> {...} (UPI pending payments)
     "next_gift_id": 1,
     "next_plan_id": 1,            # v4 — admin-defined premium plans
     "donations": {},              # uid(str) -> {"name", "stars", "inr", "score"} — leaderboard source
+    "maintenance_notified": [],   # chat_id(int) list — everyone shown the maintenance notice,
+                                   # so we know exactly who to ping with BOT_LIVE_TEXT on toggle-off
 }
 
 # ----------------------------------------------------------------------------
@@ -1609,7 +1613,10 @@ async def _replace_rkb_screen(context: ContextTypes.DEFAULT_TYPE, chat_id: int, 
     persisted panel_msg store as /start and /admin, so it survives a bot
     restart, not just context.user_data."""
     msg = await context.bot.send_message(chat_id, text, reply_markup=reply_markup)
-    await track_and_refresh_panel(context, chat_id, f"rkb_{key}", msg)
+    # All persistent reply-keyboard actions share one panel slot. This means
+    # the user's own button message remains in chat, while only the latest
+    # bot-side screen is replaced on every button tap.
+    await track_and_refresh_panel(context, chat_id, "rkb_latest", msg)
     return msg
 
 
@@ -1720,6 +1727,63 @@ async def show_force_join_prompt(update: Update, context: ContextTypes.DEFAULT_T
     await context.bot.send_message(chat_id, text, reply_markup=InlineKeyboardMarkup(kb_rows))
 
 
+MAINTENANCE_FOLLOWUP_TEXT = (
+    "✦ ʏᴏᴜ’ʟʟ ʙᴇ ɴᴏᴛɪꜰɪᴇᴅ\n"
+    "ᴡʜᴇɴ ᴛʜᴇ ʙᴏᴛ ɪꜱ ʙᴀᴄᴋ.\n\n"
+    "ᴀᴘᴏʟᴏɢɪᴇꜱ ꜰᴏʀ ᴛʜᴇ ɪɴᴄᴏɴᴠᴇɴɪᴇɴᴄᴇ,\n"
+    "ᴀɴᴅ ᴛʜᴀɴᴋ ʏᴏᴜ ꜰᴏʀ ʏᴏᴜʀ ᴘᴀᴛɪᴇɴᴄᴇ. ✦"
+)
+
+BOT_LIVE_TEXT = (
+    "╭━━━━━━━━━━━━━━━━━━╮\n"
+    "✦ 𝗕𝗢𝗧 𝗜𝗦 𝗟𝗜𝗩𝗘 ✦\n"
+    "╰━━━━━━━━━━━━━━━━━━╯\n\n"
+    "✨ 𝘔𝘢𝘪𝘯𝘵𝘦𝘯𝘢𝘯𝘤𝘦 𝘩𝘢𝘴 𝘣𝘦𝘦𝘯 𝘴𝘶𝘤𝘤𝘦𝘴𝘴𝘧𝘶𝘭𝘭𝘺 𝘤𝘰𝘮𝘱𝘭𝘦𝘵𝘦𝘥!\n\n"
+    "🚀 𝘛𝘩𝘦 𝘣𝘰𝘵 𝘪𝘴 𝘯𝘰𝘸\n"
+    "𝘶𝘱𝘨𝘳𝘢𝘥𝘦𝘥, 𝘪𝘮𝘱𝘳𝘰𝘷𝘦𝘥 & 𝘴𝘮𝘰𝘰𝘵𝘩𝘦𝘳.\n\n"
+    "💫 𝘛𝘩𝘢𝘯𝘬 𝘺𝘰𝘶 𝘧𝘰𝘳 𝘺𝘰𝘶𝘳 𝘱𝘢𝘵𝘪𝘦𝘯𝘤𝘦 & 𝘴𝘶𝘱𝘱𝘰𝘳𝘵! 𝘐𝘧 𝘺𝘰𝘶 𝘧𝘢𝘤𝘦 𝘢𝘯𝘺 𝘣𝘶𝘨𝘴, 𝘱𝘭𝘦𝘢𝘴𝘦 𝘴𝘩𝘢𝘳𝘦 𝘺𝘰𝘶𝘳 𝘧𝘦𝘦𝘥𝘣𝘢𝘤𝘬.\n\n"
+    "✦ 𝘌𝘯𝘫𝘰𝘺 𝘵𝘩𝘦 𝘯𝘦𝘸 𝘦𝘹𝘱𝘦𝘳𝘪𝘦𝘯𝘤𝘦. ✦"
+)
+
+async def send_maintenance_notice(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
+    """Show the two-part maintenance notice without stacking duplicates."""
+    try:
+        first = await render_menu(context, chat_id, "maintenance")
+        follow_key = f"maintenance_followup:{chat_id}"
+        previous = BOT_DATA.get("panel_msg", {}).get(follow_key)
+        if previous and previous != first.message_id:
+            try:
+                await context.bot.delete_message(chat_id=chat_id, message_id=previous)
+            except Exception:
+                pass
+        follow = await context.bot.send_message(chat_id=chat_id, text=MAINTENANCE_FOLLOWUP_TEXT)
+        BOT_DATA.setdefault("panel_msg", {})[follow_key] = follow.message_id
+        # Remember every chat_id shown the notice, so that when maintenance
+        # is switched off we know exactly who to notify with BOT_LIVE_TEXT
+        # (instead of nobody finding out except by tapping something again).
+        notified = BOT_DATA.setdefault("maintenance_notified", [])
+        if chat_id not in notified:
+            notified.append(chat_id)
+        save_data()
+        return first
+    except Exception:
+        return None
+
+
+async def broadcast_bot_live(context: ContextTypes.DEFAULT_TYPE):
+    """Ping everyone who saw the maintenance notice, telling them the bot is
+    back up — then clear the list so it doesn't grow forever / re-notify
+    people on the next maintenance cycle."""
+    chat_ids = BOT_DATA.get("maintenance_notified", [])
+    for chat_id in chat_ids:
+        try:
+            await context.bot.send_message(chat_id=chat_id, text=BOT_LIVE_TEXT)
+        except Exception:
+            pass
+    BOT_DATA["maintenance_notified"] = []
+    save_data()
+
+
 async def require_gate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     """The single source of truth for 'is this user allowed to do anything
     yet'. Combines the disclaimer-acceptance gate AND the force-join gate —
@@ -1755,6 +1819,13 @@ async def cb_global_button_gate(update: Update, context: ContextTypes.DEFAULT_TY
     if not query:
         return
     data = query.data or ""
+    if BOT_DATA["settings"].get("maintenance") and not is_admin(update.effective_user.id):
+        await send_maintenance_notice(context, update.effective_chat.id)
+        try:
+            await query.answer()
+        except Exception:
+            pass
+        raise ApplicationHandlerStop
     if data in ("agree_terms", "check_force_join"):
         return
     if not await require_gate(update, context):
@@ -1817,7 +1888,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await delete_incoming(update)
         return
     if BOT_DATA["settings"].get("maintenance") and not is_admin(user_obj.id):
-        await render_menu(context, update.effective_chat.id, "maintenance")
+        await send_maintenance_notice(context, update.effective_chat.id)
         await delete_incoming(update)
         return
 
@@ -1857,7 +1928,6 @@ async def cmd_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await require_gate(update, context):
         await delete_incoming(update)
         return
-    await delete_incoming(update)
     langs = BOT_DATA["settings"].get("languages", [])
     if not langs:
         await _replace_rkb_screen(
@@ -1917,9 +1987,26 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if is_blocked(user_obj.id) and not is_admin(user_obj.id):
         return  # silently ignored, per spec
 
+    # Maintenance is a hard global lock for non-admins: no reply-keyboard
+    # action, support flow, reel parsing, auto-reply or media flow can run.
+    if BOT_DATA["settings"].get("maintenance") and not is_admin(user_obj.id):
+        await send_maintenance_notice(context, update.effective_chat.id)
+        return
+
     # v2 §6 — an admin replying (in the admin group / their DM) to a forwarded
     # ticket message routes straight back to that user, bypassing everything else.
     if update.message.reply_to_message and is_admin(user_obj.id):
+        support_uid = BOT_DATA.get("support_msg_map", {}).get(str(update.message.reply_to_message.message_id))
+        if support_uid:
+            try:
+                await context.bot.copy_message(
+                    chat_id=int(support_uid),
+                    from_chat_id=update.effective_chat.id,
+                    message_id=update.message.message_id,
+                )
+            except Exception:
+                pass
+            return
         tid = BOT_DATA["ticket_msg_map"].get(str(update.message.reply_to_message.message_id))
         if tid:
             await handle_admin_ticket_reply(update, context, tid)
@@ -1959,33 +2046,27 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # same replace-in-place screen, so repeat taps on ANY of these buttons
     # — not just My Usage — leave only the most recent copy behind.
     if text == RKB_DOWNLOAD:
-        await delete_incoming(update)
         await _replace_rkb_screen(
             context, update.effective_chat.id, "download",
             "🔗 " + to_small_caps("paste your instagram reel link here"),
         )
         return
     if text == RKB_USAGE:
-        await delete_incoming(update)
         await show_usage_screen(update, context)
         return
     if text == RKB_GIFT:
-        await delete_incoming(update)
         await show_gift_menu(update, context)
         return
     if text == RKB_LANGUAGE:
         await cmd_language(update, context)
         return
     if text == RKB_DEVELOPER:
-        await delete_incoming(update)
         await show_developer_button(update, context)
         return
     if text == RKB_HOWTO:
-        await delete_incoming(update)
         await _replace_rkb_screen(context, update.effective_chat.id, "howto", STR["how_to_use"])
         return
     if text == RKB_SUPPORT:
-        await delete_incoming(update)
         await support_button_entry(update, context)
         return
     if text == RKB_ADMINPANEL and is_admin(user_id):
@@ -2035,9 +2116,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if BOT_DATA["settings"].get("maintenance") and not is_admin(user_id):
-        await render_menu(context, update.effective_chat.id, "maintenance")
-        return
+    # Maintenance is already enforced at the top of handle_text().
 
     # (disclaimer + force-join already verified by require_gate() above —
     # no need to re-check either one here)
@@ -2444,16 +2523,20 @@ async def handle_admin_ticket_reply(update: Update, context: ContextTypes.DEFAUL
 
 
 async def support_button_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    uid = str(user.id)
-    user_rec = BOT_DATA["users"].setdefault(uid, {})
-    open_tid = user_rec.get("open_ticket_id")
+    """One-shot support flow: user gets exactly one message to submit.
+    The admin receives a mention and can reply directly to that single support
+    message; there is no lingering open-ticket state."""
     chat_id = update.effective_chat.id
-    if open_tid and str(open_tid) in BOT_DATA["tickets"] and BOT_DATA["tickets"][str(open_tid)]["status"] == "open":
-        await context.bot.send_message(chat_id, f"🎫 Ticket #{open_tid} already open — just send your message here.")
-        return
-    context.user_data["awaiting"] = "ticket_new"
-    await context.bot.send_message(chat_id, STR["support_prompt"])
+    context.user_data["awaiting"] = "support_message"
+    await _replace_rkb_screen(
+        context, chat_id, "support",
+        "╭━━━━━━━━━━━━━━━━━━╮\n"
+        "✦ 𝗦𝗨𝗣𝗣𝗢𝗥𝗧 ✦\n"
+        "╰━━━━━━━━━━━━━━━━━━╯\n\n"
+        "💬 Send your issue in one message.\n"
+        "🛠 An admin will try to resolve it.\n\n"
+        "↳ Send the issue in one text message only.",
+    )
 
 
 async def cb_ticket_close(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3147,18 +3230,36 @@ async def handle_user_awaiting_input(update: Update, context: ContextTypes.DEFAU
 
     if awaiting == "support_message":
         context.user_data.pop("awaiting", None)
-        payload = f"🆘 Support message from {user_obj.id} (@{user_obj.username or 'no username'}):\n\n{text}"
+        mention = f'<a href="tg://user?id={user_obj.id}">{html.escape(user_obj.full_name)}</a>'
+        payload = (
+            "╭━━━━━━━━━━━━━━━━━━╮\n"
+            "✦ 𝗡𝗘𝗪 𝗦𝗨𝗣𝗣𝗢𝗥𝗧 𝗠𝗘𝗦𝗦𝗔𝗚𝗘 ✦\n"
+            "╰━━━━━━━━━━━━━━━━━━╯\n\n"
+            f"👤 {mention}\n"
+            f"🆔 <code>{user_obj.id}</code>\n\n"
+            f"💬 {html.escape(text)}\n\n"
+            "↩️ Reply to this message to contact the user directly.\n"
+            "🛠 An admin will try to resolve the issue as soon as possible."
+        )
         support_chat_id = BOT_DATA["settings"].get("support_chat_id")
         targets = [support_chat_id] if support_chat_id else BOT_DATA.get("admins", [])
         for target in targets:
             if not target:
                 continue
             try:
-                await context.bot.send_message(chat_id=target, text=payload)
+                sent = await context.bot.send_message(
+                    chat_id=target, text=payload, parse_mode="HTML"
+                )
+                # Replying to this one message routes the admin's response
+                # directly to the user; no permanent open-ticket state needed.
+                BOT_DATA.setdefault("support_msg_map", {})[str(sent.message_id)] = str(user_obj.id)
             except Exception:
                 pass
-        await log_event(context, f"🆘 Support message from {user_obj.id}")
-        await update.message.reply_text("✅ " + to_small_caps("your message has been sent to support, we'll get back to you soon."))
+        save_data()
+        await log_event(context, f"🆘 One-shot support message from {user_obj.id}")
+        await update.message.reply_text(
+            "✅ " + to_small_caps("your message has been sent to support. an admin will try to resolve it.")
+        )
 
     elif awaiting == "ticket_new":
         context.user_data.pop("awaiting", None)
@@ -4562,13 +4663,39 @@ async def cb_settings_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not is_admin(update.effective_user.id):
         return
     _, key, return_to = query.data.split(":", 2)
-    BOT_DATA["settings"][key] = not bool(BOT_DATA["settings"].get(key, False))
+    was_on = bool(BOT_DATA["settings"].get(key, False))
+    BOT_DATA["settings"][key] = not was_on
     save_data()
+
+    if key == "maintenance":
+        if BOT_DATA["settings"]["maintenance"]:
+            await query.answer(to_small_caps("maintenance enabled."), show_alert=False)
+            try:
+                await query.message.edit_text(
+                    "╭━━━━━━━━━━━━━━━━━━╮\n"
+                    "✦ 𝗠𝗔𝗜𝗡𝗧𝗘𝗡𝗔𝗡𝗖𝗘 𝗢𝗡 ✦\n"
+                    "╰━━━━━━━━━━━━━━━━━━╯\n\n"
+                    "⚙️ All user actions are now locked.\n"
+                    "Only admins can use the bot while maintenance is active.",
+                    reply_markup=InlineKeyboardMarkup([back_row(), home_row()]),
+                )
+            except Exception:
+                pass
+        else:
+            await query.answer(to_small_caps("bot is live again."), show_alert=False)
+            try:
+                await query.message.edit_text(BOT_LIVE_TEXT, reply_markup=InlineKeyboardMarkup([back_row(), home_row()]))
+            except Exception:
+                pass
+            # Tell every user who actually hit the maintenance wall — not
+            # just the admin looking at this panel — that the bot is back.
+            await broadcast_bot_live(context)
+        return
+
     renderer = SCREEN_RENDERERS.get(return_to)
     if renderer is not None:
         await renderer(update, context)
     else:
-        # Still give feedback instead of doing nothing if a screen is missing.
         await query.answer(to_small_caps("✅ updated."), show_alert=False)
 
 
@@ -5932,6 +6059,19 @@ async def inactive_reengage_job(context: ContextTypes.DEFAULT_TYPE):
 # App wiring
 # ----------------------------------------------------------------------------
 
+async def cmd_unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Friendly fallback for every unregistered /unknown command."""
+    user = update.effective_user
+    if user and is_blocked(user.id) and not is_admin(user.id):
+        return
+    if user and BOT_DATA["settings"].get("maintenance") and not is_admin(user.id):
+        await send_maintenance_notice(context, update.effective_chat.id)
+        return
+    await update.message.reply_text(
+        "Hey that command format doesn't work\nJust send /start 🚀"
+    )
+
+
 async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """#13 — escape hatch out of any stuck admin/user text-input flow."""
     for key in (
@@ -6002,6 +6142,7 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("block", cmd_block))
     app.add_handler(CommandHandler("unblock", cmd_unblock))
     app.add_handler(CommandHandler("cancel", cmd_cancel))
+    app.add_handler(MessageHandler(filters.COMMAND, cmd_unknown))
 
     app.add_handler(CallbackQueryHandler(cb_agree_terms, pattern="^agree_terms$"))
     app.add_handler(CallbackQueryHandler(cb_report_copyright, pattern="^report_copyright$"))
