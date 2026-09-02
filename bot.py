@@ -546,6 +546,7 @@ DEFAULT_DATA = {
         "force_join_channel": None,   # v3 §7 — @channelusername or -100id; None = disabled
         "send_as_document": False,    # v3 §8 — send reels as document instead of video
         "document_mode_threshold_mb": 45,  # auto-switch to document above this size
+        "premium_plans": [],  # v4 — admin-defined plans: {id, name, days, price_inr, price_stars, enabled}
     },
     "broadcast_log": [],
     "restore_log": [],
@@ -561,6 +562,7 @@ DEFAULT_DATA = {
     "panel_msg": {},              # v2 §11 — chat_id(str) -> last panel message_id
     "gift_orders": {},            # v2 §4 — order_id(str) -> {...} (UPI pending payments)
     "next_gift_id": 1,
+    "next_plan_id": 1,            # v4 — admin-defined premium plans
 }
 
 # ----------------------------------------------------------------------------
@@ -1082,6 +1084,42 @@ async def track_and_refresh_panel(context: ContextTypes.DEFAULT_TYPE, chat_id: i
             pass
     BOT_DATA["panel_msg"][key] = sent_message.message_id
     save_data()
+
+
+def remember_panel_message(context: ContextTypes.DEFAULT_TYPE, query, screen_key: str):
+    """BUGFIX (buttons feel 'dead') — when an admin taps 'Set X', the panel
+    message stays on screen unchanged while the bot waits for a text reply.
+    Once the value is saved, that same panel used to just sit there stale —
+    the only feedback was a small extra confirmation message further down
+    the chat, easy to miss, and it never said which of many possible
+    settings screens it belonged to. We remember exactly which panel
+    message triggered this input, so we can edit THAT message in place
+    once the value is saved — the admin sees the screen itself flip to the
+    new value immediately, not just a text line."""
+    context.user_data["panel_refresh"] = {
+        "chat_id": query.message.chat_id,
+        "message_id": query.message.message_id,
+        "screen": screen_key,
+    }
+
+
+async def refresh_panel_after_save(context: ContextTypes.DEFAULT_TYPE, screen_key: str, build_fn) -> bool:
+    """Edits the original admin-panel screen (remembered via
+    remember_panel_message) in place to reflect a just-saved value.
+    Returns True if it succeeded, so callers can still send a plain
+    confirmation as a fallback if the panel message is gone."""
+    info = context.user_data.get("panel_refresh")
+    if not info or info.get("screen") != screen_key:
+        return False
+    context.user_data.pop("panel_refresh", None)
+    text, kb = build_fn()
+    try:
+        await context.bot.edit_message_text(
+            chat_id=info["chat_id"], message_id=info["message_id"], text=text, reply_markup=kb,
+        )
+        return True
+    except Exception:
+        return False
 
 
 async def cb_nav(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1863,9 +1901,23 @@ async def show_developer_button(update: Update, context: ContextTypes.DEFAULT_TY
 # ----------------------------------------------------------------------------
 
 async def show_gift_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    kb_rows = [[styled_button("⭐ Send Stars", callback_data="gift_stars", style="success")]]
+    kb_rows = []
+    s = BOT_DATA["settings"]
+    plans = [p for p in s.get("premium_plans", []) if p.get("enabled")] if s.get("premium_enabled") else []
+    if plans:
+        for p in plans:
+            price_bits = []
+            if p.get("price_inr"):
+                price_bits.append(f"₹{p['price_inr']}")
+            if p.get("price_stars"):
+                price_bits.append(f"{p['price_stars']}⭐")
+            label = f"💎 {p['name']} — {' / '.join(price_bits)} ({p.get('days', 30)}d)"
+            kb_rows.append([styled_button(label, callback_data=f"gift_plan:{p['id']}", style="success")])
+        kb_rows.append([styled_button("⭐ Send Stars (any amount)", callback_data="gift_stars")])
+    else:
+        kb_rows.append([styled_button("⭐ Send Stars", callback_data="gift_stars", style="success")])
     if BOT_DATA["settings"].get("upi_id"):
-        kb_rows.append([styled_button("💳 Pay via UPI", callback_data="gift_upi", style="primary")])
+        kb_rows.append([styled_button("💳 Pay via UPI (custom amount)", callback_data="gift_upi", style="primary")])
     target = update.callback_query.message if update.callback_query else update.message
     await target.reply_text("🎁 " + to_small_caps("send a gift — pick a method:"), reply_markup=InlineKeyboardMarkup(kb_rows))
 
@@ -1894,12 +1946,67 @@ async def cb_gift_stars_custom(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.message.reply_text("✏️ " + to_small_caps("enter a numeric star amount (e.g. 150)."))
 
 
-async def send_stars_invoice(context: ContextTypes.DEFAULT_TYPE, chat_id: int, amount: int):
+def find_premium_plan(pid: str):
+    for p in BOT_DATA["settings"].get("premium_plans", []):
+        if p["id"] == pid:
+            return p
+    return None
+
+
+async def cb_gift_plan(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """User tapped a specific admin-defined plan in the gift menu — show only
+    the payment methods the admin actually priced for this plan."""
+    query = update.callback_query
+    await query.answer()
+    pid = query.data.split(":", 1)[1]
+    plan = find_premium_plan(pid)
+    if not plan or not plan.get("enabled"):
+        await query.message.reply_text("⚠️ " + to_small_caps("this plan is no longer available."))
+        return
+    kb_rows = []
+    if plan.get("price_stars"):
+        kb_rows.append([styled_button(f"⭐ Pay {plan['price_stars']} Stars", callback_data=f"gift_plan_stars:{pid}", style="success")])
+    if plan.get("price_inr") and BOT_DATA["settings"].get("upi_id"):
+        kb_rows.append([styled_button(f"💳 Pay ₹{plan['price_inr']} via UPI", callback_data=f"gift_plan_upi:{pid}", style="primary")])
+    if not kb_rows:
+        await query.message.reply_text("⚠️ " + to_small_caps("no payment method available for this plan right now."))
+        return
+    await query.message.reply_text(
+        f"💎 {plan['name']} — {plan.get('days', 30)} days\nChoose how to pay:",
+        reply_markup=InlineKeyboardMarkup(kb_rows),
+    )
+
+
+async def cb_gift_plan_stars(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    pid = query.data.split(":", 1)[1]
+    plan = find_premium_plan(pid)
+    if not plan or not plan.get("enabled") or not plan.get("price_stars"):
+        await query.message.reply_text("⚠️ " + to_small_caps("this plan is no longer available."))
+        return
+    await send_stars_invoice(context, query.message.chat_id, plan["price_stars"], plan_id=pid, plan_name=plan["name"])
+
+
+async def cb_gift_plan_upi(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    pid = query.data.split(":", 1)[1]
+    plan = find_premium_plan(pid)
+    if not plan or not plan.get("enabled") or not plan.get("price_inr"):
+        await query.message.reply_text("⚠️ " + to_small_caps("this plan is no longer available."))
+        return
+    await start_upi_order(update, context, plan["price_inr"], plan_id=pid)
+
+
+async def send_stars_invoice(context: ContextTypes.DEFAULT_TYPE, chat_id: int, amount: int, plan_id: str = None, plan_name: str = None):
+    title = f"{plan_name} — Premium ⭐" if plan_name else "Gift the developer ⭐"
+    desc = f"Unlock {plan_name}." if plan_name else f"Send {amount} Telegram Stars as a gift."
     await context.bot.send_invoice(
         chat_id=chat_id,
-        title="Gift the developer ⭐",
-        description=f"Send {amount} Telegram Stars as a gift.",
-        payload=f"stars_gift:{amount}:{chat_id}:{int(time.time())}",
+        title=title,
+        description=desc,
+        payload=f"stars_gift:{amount}:{chat_id}:{int(time.time())}:{plan_id or ''}",
         provider_token="",  # not used for XTR
         currency="XTR",
         prices=[LabeledPrice(label=f"{amount} Stars", amount=amount)],
@@ -1920,12 +2027,24 @@ async def cmd_precheckout(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_successful_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sp = update.message.successful_payment
     uid = str(update.effective_user.id)
-    days = BOT_DATA["settings"].get("premium_days_per_star_gift", 30)
+    # v4 — a star payment for a specific admin-defined plan grants THAT plan's
+    # day count; a generic/free-amount star gift keeps the old flat setting.
+    plan_id = None
+    parts = (sp.invoice_payload or "").split(":")
+    if len(parts) >= 5 and parts[4]:
+        plan_id = parts[4]
+    plan = find_premium_plan(plan_id) if plan_id else None
+    if plan:
+        days = plan.get("days", 30)
+        plan_label = f" ({plan['name']})"
+    else:
+        days = BOT_DATA["settings"].get("premium_days_per_star_gift", 30)
+        plan_label = ""
     grant_premium(uid, days)
     await update.message.reply_text(
-        f"✅ " + to_small_caps(f"thanks for the {sp.total_amount}⭐ gift! premium unlocked for {days} days.")
+        f"✅ " + to_small_caps(f"thanks for the {sp.total_amount}⭐ payment! premium{plan_label} unlocked for {days} days.")
     )
-    await log_event(context, f"⭐ Gift received — {sp.total_amount} stars from {update.effective_user.id}, premium granted")
+    await log_event(context, f"⭐ Payment received — {sp.total_amount} stars from {update.effective_user.id}{plan_label}, premium granted")
 
 
 async def cb_gift_upi(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1938,14 +2057,14 @@ async def cb_gift_upi(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.message.reply_text("💳 " + to_small_caps("enter amount (₹):"))
 
 
-async def start_upi_order(update: Update, context: ContextTypes.DEFAULT_TYPE, amount: int):
+async def start_upi_order(update: Update, context: ContextTypes.DEFAULT_TYPE, amount: int, plan_id: str = None):
     upi_id = BOT_DATA["settings"].get("upi_id")
     oid = str(BOT_DATA["next_gift_id"])
     BOT_DATA["next_gift_id"] += 1
     expires_at = time.time() + 600  # 10 minutes
     order = {
         "id": oid, "user_id": update.effective_user.id, "amount": amount,
-        "expires_at": expires_at, "status": "pending",
+        "expires_at": expires_at, "status": "pending", "plan_id": plan_id,
     }
     BOT_DATA["gift_orders"][oid] = order
     save_data()
@@ -2042,12 +2161,20 @@ async def cb_gift_upi_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE
     order["status"] = "paid"
     save_data()
     uid = str(order["user_id"])
-    days = BOT_DATA["settings"].get("premium_days_per_upi_gift", 30)
+    # v4 — an order tied to a specific admin-defined plan grants THAT plan's
+    # day count; a generic/free-amount UPI gift keeps the old flat setting.
+    plan = find_premium_plan(order.get("plan_id")) if order.get("plan_id") else None
+    if plan:
+        days = plan.get("days", 30)
+        plan_label = f" ({plan['name']})"
+    else:
+        days = BOT_DATA["settings"].get("premium_days_per_upi_gift", 30)
+        plan_label = ""
     grant_premium(uid, days)
     try:
         await context.bot.send_message(
             order["user_id"],
-            "✅ " + to_small_caps(f"payment confirmed! premium unlocked for {days} days."),
+            "✅ " + to_small_caps(f"payment confirmed! premium{plan_label} unlocked for {days} days."),
         )
     except Exception:
         pass
@@ -2056,7 +2183,7 @@ async def cb_gift_upi_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.message.reply_text(f"✅ Order #{oid} confirmed, user upgraded.")
     except Exception:
         pass
-    await log_event(context, f"💳 UPI order #{oid} confirmed by admin {update.effective_user.id}, premium granted")
+    await log_event(context, f"💳 UPI order #{oid} confirmed by admin {update.effective_user.id}{plan_label}, premium granted")
 
 
 # ----------------------------------------------------------------------------
@@ -2766,8 +2893,7 @@ async def cb_adm_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ---- Owner/Developer credit button (#10) --------------------------------------
 
-async def _render_adm_owner_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
+def _build_adm_owner_contact_view():
     s = BOT_DATA["settings"]
     current = s.get("owner_display_user_id")
     label = s.get("owner_display_label") or "👑 Developer"
@@ -2785,6 +2911,12 @@ async def _render_adm_owner_contact(update: Update, context: ContextTypes.DEFAUL
             back_row(),
         ]
     )
+    return text, kb
+
+
+async def _render_adm_owner_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    text, kb = _build_adm_owner_contact_view()
     await query.edit_message_text(text, reply_markup=kb)
 
 
@@ -2796,6 +2928,7 @@ async def cb_adm_owner_contact(update: Update, context: ContextTypes.DEFAULT_TYP
 async def cb_adm_owner_contact_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    remember_panel_message(context, query, "owner_contact")
     context.user_data["awaiting"] = "owner_contact_label"
     await query.message.reply_text("Button label bhejo (e.g. '👑 Developer' or '💬 Contact Us').")
 
@@ -2811,8 +2944,7 @@ async def cb_adm_owner_contact_clear(update: Update, context: ContextTypes.DEFAU
 
 # ---- Logger channel (#14) ------------------------------------------------------
 
-async def _render_adm_logger_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
+def _build_adm_logger_channel_view():
     s = BOT_DATA["settings"]
     text = (
         "📋 Logger Channel\n\n"
@@ -2831,6 +2963,12 @@ async def _render_adm_logger_channel(update: Update, context: ContextTypes.DEFAU
             back_row(),
         ]
     )
+    return text, kb
+
+
+async def _render_adm_logger_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    text, kb = _build_adm_logger_channel_view()
     await query.edit_message_text(text, reply_markup=kb)
 
 
@@ -2842,6 +2980,7 @@ async def cb_adm_logger_channel(update: Update, context: ContextTypes.DEFAULT_TY
 async def cb_adm_logger_channel_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    remember_panel_message(context, query, "logger_channel")
     context.user_data["awaiting"] = "logger_channel_id"
     await query.message.reply_text(
         "Forward any message from the target channel here (bot must be an "
@@ -2851,22 +2990,31 @@ async def cb_adm_logger_channel_set(update: Update, context: ContextTypes.DEFAUL
 
 # ---- v3 §7 — Force-join channel ------------------------------------------------
 
-async def _render_adm_force_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
+def _build_adm_force_join_view():
     s = BOT_DATA["settings"]
+    channel = s.get("force_join_channel")
     text = (
         "📢 Force-Join Channel\n\n"
-        f"Channel: {s.get('force_join_channel') or '(not set — force-join disabled)'}\n\n"
+        f"Channel: {channel or '(not set — force-join disabled)'}\n\n"
         "When set, users must be a member of this channel before they can "
-        "download reels. Bot must be an admin of the channel to check membership."
+        "download reels. Bot must be an admin of the channel to check membership.\n\n"
+        "⚠️ Note: you and other bot admins ALWAYS bypass this check, by design — "
+        "so testing with your own admin account will never show the block screen. "
+        "Test with a normal (non-admin) account, or use 🧪 Test Now below."
     )
-    kb = InlineKeyboardMarkup(
-        [
-            [styled_button("✏️ Set Channel", callback_data="adm_force_join_set")],
-            [styled_button("❌ Disable", callback_data="adm_force_join_clear")],
-            back_row(),
-        ]
-    )
+    kb_rows = [
+        [styled_button("✏️ Set Channel", callback_data="adm_force_join_set")],
+    ]
+    if channel:
+        kb_rows.append([styled_button("🧪 Test Now", callback_data="adm_force_join_test")])
+    kb_rows.append([styled_button("❌ Disable", callback_data="adm_force_join_clear")])
+    kb_rows.append(back_row())
+    return text, InlineKeyboardMarkup(kb_rows)
+
+
+async def _render_adm_force_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    text, kb = _build_adm_force_join_view()
     await query.edit_message_text(text, reply_markup=kb)
 
 
@@ -2878,6 +3026,7 @@ async def cb_adm_force_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cb_adm_force_join_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    remember_panel_message(context, query, "force_join")
     context.user_data["awaiting"] = "force_join_channel"
     await query.message.reply_text(
         "Type the channel username (like @mychannel) or numeric ID (-100xxxxxxxxxx). "
@@ -2893,6 +3042,42 @@ async def cb_adm_force_join_clear(update: Update, context: ContextTypes.DEFAULT_
     BOT_DATA["settings"]["force_join_channel"] = None
     save_data()
     await _render_adm_force_join(update, context)
+
+
+async def cb_adm_force_join_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Live diagnostic — actually calls the Bot API right now and shows the
+    exact result/error, instead of the admin having to guess why nobody is
+    getting blocked. This is the #1 real-world cause of 'force-join doesn't
+    work': the bot silently isn't an admin in the target channel, or the
+    channel string is wrong — and that used to only get logged, never shown."""
+    query = update.callback_query
+    await query.answer()
+    channel = BOT_DATA["settings"].get("force_join_channel")
+    if not channel:
+        await query.message.reply_text("⚠️ No force-join channel is set.")
+        return
+    lines = [f"🧪 Testing force-join channel: {channel}\n"]
+    try:
+        me = await context.bot.get_me()
+        chat = await context.bot.get_chat(channel)
+        lines.append(f"✅ Bot can see the channel: {chat.title or chat.id}")
+        member = await context.bot.get_chat_member(chat_id=channel, user_id=me.id)
+        if member.status in ("administrator", "creator"):
+            lines.append("✅ Bot IS an admin there — membership checks will work.")
+        else:
+            lines.append(
+                "❌ Bot is a MEMBER but NOT an admin there — get_chat_member calls for "
+                "other users will fail and force-join will silently fail OPEN "
+                "(let everyone through). Make the bot an admin in this channel."
+            )
+    except Exception as e:
+        lines.append(
+            f"❌ Bot could NOT access this channel at all ({e}).\n"
+            "This is almost always the reason force-join 'doesn't work' — the bot "
+            "must be added to the channel as an ADMIN first. Double-check the "
+            "username/ID too."
+        )
+    await query.message.reply_text("\n".join(lines))
 
 
 async def cb_settings_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3076,20 +3261,50 @@ async def _render_adm_danger(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 # ---- v2 §8 new admin screens: Premium / UPI / Developer / Support / Tickets --
 
+def _build_adm_premium_view():
+    s = BOT_DATA["settings"]
+    plans = s.get("premium_plans", [])
+    lines = [
+        f"💎 Premium Plans\n\nMaster switch: {'ON' if s.get('premium_enabled') else 'OFF'}",
+        f"Daily free limit: {s.get('daily_limit', 20)}",
+        "",
+    ]
+    kb_rows = [
+        [styled_button(f"🔀 Master Switch: {'ON' if s.get('premium_enabled') else 'OFF'}",
+                        callback_data="stgl:premium_enabled:adm_premium")],
+        [styled_button("✏️ Set Daily Limit", callback_data="adm_set_dailylimit")],
+    ]
+    if not plans:
+        lines.append("No plans yet — tap ➕ Add Plan below.")
+    else:
+        lines.append("Your plans (tap a plan's row buttons to toggle/delete):")
+        for p in plans:
+            state = "🟢 ON" if p.get("enabled") else "🔴 OFF"
+            price_bits = []
+            if p.get("price_inr"):
+                price_bits.append(f"₹{p['price_inr']}")
+            if p.get("price_stars"):
+                price_bits.append(f"{p['price_stars']}⭐")
+            price_str = " / ".join(price_bits) if price_bits else "(no price set)"
+            lines.append(f"• {p['name']} — {price_str} — {p.get('days', 30)}d — {state}")
+            kb_rows.append([
+                styled_button(f"{'🔴 Turn Off' if p.get('enabled') else '🟢 Turn On'} · {p['name']}",
+                              callback_data=f"adm_plan_toggle:{p['id']}"),
+                styled_button("🗑", callback_data=f"adm_plan_del:{p['id']}"),
+            ])
+    kb_rows.append([styled_button("➕ Add Plan", callback_data="adm_plan_add")])
+    kb_rows.append(back_row())
+    kb_rows.append(home_row())
+    text = "\n".join(lines) + (
+        "\n\nWhen master switch is ON and a plan is toggled ON, that plan shows up "
+        "immediately to every user in the 🎁 gift/upgrade menu."
+    )
+    return text, InlineKeyboardMarkup(kb_rows)
+
+
 async def _render_adm_premium(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    s = BOT_DATA["settings"]
-    text = (
-        f"💎 Premium Plans\n\nEnabled: {'ON' if s.get('premium_enabled') else 'OFF'}\n"
-        f"Daily free limit: {s.get('daily_limit', 20)}"
-    )
-    kb = InlineKeyboardMarkup([
-        [styled_button(f"🔀 Premium: {'ON' if s.get('premium_enabled') else 'OFF'}",
-                        callback_data="stgl:premium_enabled:adm_premium",
-                        )],
-        [styled_button("✏️ Set Daily Limit", callback_data="adm_set_dailylimit")],
-        back_row(), home_row(),
-    ])
+    text, kb = _build_adm_premium_view()
     await query.edit_message_text(text, reply_markup=kb)
 
 
@@ -3098,22 +3313,64 @@ async def cb_adm_premium(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _render_adm_premium(update, context)
 
 
+# ---- Premium plan CRUD (add / toggle / delete) ---------------------------------
+
+async def cb_adm_plan_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    remember_panel_message(context, query, "premium")
+    context.user_data["new_plan"] = {}
+    context.user_data["awaiting"] = "plan_step_name"
+    await query.message.reply_text(
+        "➕ New plan — step 1/4\nPlan ka naam bhejo (e.g. 'Monthly', 'Weekly Pro')."
+    )
+
+
+async def cb_adm_plan_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    pid = query.data.split(":", 1)[1]
+    for p in BOT_DATA["settings"].get("premium_plans", []):
+        if p["id"] == pid:
+            p["enabled"] = not p.get("enabled")
+            save_data()
+            await log_event(context, f"💎 Plan '{p['name']}' toggled {'ON' if p['enabled'] else 'OFF'} by {update.effective_user.id}")
+            break
+    await _render_adm_premium(update, context)
+
+
+async def cb_adm_plan_del(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    pid = query.data.split(":", 1)[1]
+    plans = BOT_DATA["settings"].get("premium_plans", [])
+    BOT_DATA["settings"]["premium_plans"] = [p for p in plans if p["id"] != pid]
+    save_data()
+    await _render_adm_premium(update, context)
+
+
 async def cb_adm_set_dailylimit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    remember_panel_message(context, query, "premium")
     context.user_data["awaiting"] = "daily_limit"
     await query.message.reply_text("Naya daily free-download limit (number) bhejo.")
 
 
-async def _render_adm_upi(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
+def _build_adm_upi_view():
     upi = BOT_DATA["settings"].get("upi_id")
     kb = InlineKeyboardMarkup([
         [styled_button("✏️ Set UPI ID", callback_data="adm_upi_set")],
         [styled_button("❌ Clear", callback_data="adm_upi_clear")],
         back_row(), home_row(),
     ])
-    await query.edit_message_text(f"💳 UPI Settings\n\nCurrent: {upi or '(not set)'}", reply_markup=kb)
+    return f"💳 UPI Settings\n\nCurrent: {upi or '(not set)'}", kb
+
+
+async def _render_adm_upi(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    text, kb = _build_adm_upi_view()
+    await query.edit_message_text(text, reply_markup=kb)
 
 
 async def cb_adm_upi(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3124,6 +3381,7 @@ async def cb_adm_upi(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cb_adm_upi_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    remember_panel_message(context, query, "upi")
     context.user_data["awaiting"] = "upi_id"
     await query.message.reply_text("UPI ID bhejo (e.g. name@bank).")
 
@@ -3136,8 +3394,7 @@ async def cb_adm_upi_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text("✅ UPI ID cleared.", reply_markup=InlineKeyboardMarkup([back_row()]))
 
 
-async def _render_adm_devsettings(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
+def _build_adm_devsettings_view():
     s = BOT_DATA["settings"]
     text = (
         f"👨‍💻 Developer Settings\n\nNumeric ID: {s.get('developer_id') or '(not set)'}\n"
@@ -3148,6 +3405,12 @@ async def _render_adm_devsettings(update: Update, context: ContextTypes.DEFAULT_
         [styled_button("✏️ Set Link Override", callback_data="adm_dev_link")],
         back_row(), home_row(),
     ])
+    return text, kb
+
+
+async def _render_adm_devsettings(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    text, kb = _build_adm_devsettings_view()
     await query.edit_message_text(text, reply_markup=kb)
 
 
@@ -3159,6 +3422,7 @@ async def cb_adm_devsettings(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def cb_adm_dev_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    remember_panel_message(context, query, "devsettings")
     context.user_data["awaiting"] = "developer_id"
     await query.message.reply_text("Developer ki numeric user ID bhejo.")
 
@@ -3166,20 +3430,24 @@ async def cb_adm_dev_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cb_adm_dev_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    remember_panel_message(context, query, "devsettings")
     context.user_data["awaiting"] = "developer_link"
     await query.message.reply_text("t.me/username link bhejo (ya 'clear' likh do hatane ke liye).")
 
 
-async def _render_adm_support_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
+def _build_adm_support_settings_view():
     gid = BOT_DATA["settings"].get("admin_group_id")
     kb = InlineKeyboardMarkup([
         [styled_button("✏️ Set Ticket Group", callback_data="adm_group_set")],
         back_row(), home_row(),
     ])
-    await query.edit_message_text(
-        f"🎧 Support Settings\n\nTicket group: {gid or '(not set — falls back to admin DMs)'}", reply_markup=kb
-    )
+    return f"🎧 Support Settings\n\nTicket group: {gid or '(not set — falls back to admin DMs)'}", kb
+
+
+async def _render_adm_support_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    text, kb = _build_adm_support_settings_view()
+    await query.edit_message_text(text, reply_markup=kb)
 
 
 async def cb_adm_support_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3190,6 +3458,7 @@ async def cb_adm_support_settings(update: Update, context: ContextTypes.DEFAULT_
 async def cb_adm_group_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    remember_panel_message(context, query, "support_settings")
     context.user_data["awaiting"] = "admin_group_id"
     await query.message.reply_text(
         "Forward any message from the ticket group here (bot must be admin there), "
@@ -3408,7 +3677,8 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
         BOT_DATA["settings"]["owner_display_label"] = label
         BOT_DATA["settings"]["owner_display_user_id"] = text.lstrip("@")
         save_data()
-        await update.message.reply_text(f"✅ Owner/Developer contact set: {label} → {text}")
+        refreshed = await refresh_panel_after_save(context, "owner_contact", _build_adm_owner_contact_view)
+        await update.message.reply_text(f"✅ Owner/Developer contact set: {label} → {text}" + ("" if refreshed else "\n(panel screen above may be stale — reopen it to confirm)"))
 
     elif awaiting == "force_join_channel":
         context.user_data.pop("awaiting", None)
@@ -3440,7 +3710,8 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
                     "double-check the username/id and make sure the bot is an admin there."
                 )
             )
-        await update.message.reply_text(f"✅ Force-join channel set: {channel}{warning}")
+        refreshed = await refresh_panel_after_save(context, "force_join", lambda: _build_adm_force_join_view())
+        await update.message.reply_text(f"✅ Force-join channel set: {channel}{warning}" + ("" if refreshed else "\n(reopen the force-join panel to confirm)"))
 
     elif awaiting == "logger_channel_id":
         context.user_data.pop("awaiting", None)
@@ -3466,7 +3737,8 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
         BOT_DATA["settings"]["logger_channel_id"] = chat_id
         BOT_DATA["settings"]["logger_enabled"] = True
         save_data()
-        await update.message.reply_text(f"✅ Logger channel set to {chat_id} and enabled.")
+        refreshed = await refresh_panel_after_save(context, "logger_channel", _build_adm_logger_channel_view)
+        await update.message.reply_text(f"✅ Logger channel set to {chat_id} and enabled." + ("" if refreshed else "\n(reopen the logger panel to confirm)"))
 
     elif awaiting == "daily_limit":
         context.user_data.pop("awaiting", None)
@@ -3475,13 +3747,15 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
             return
         BOT_DATA["settings"]["daily_limit"] = int(text)
         save_data()
-        await update.message.reply_text(f"✅ Daily limit set to {text}.")
+        refreshed = await refresh_panel_after_save(context, "premium", _build_adm_premium_view)
+        await update.message.reply_text(f"✅ Daily limit set to {text}." + ("" if refreshed else "\n(reopen the premium panel to confirm)"))
 
     elif awaiting == "upi_id":
         context.user_data.pop("awaiting", None)
         BOT_DATA["settings"]["upi_id"] = text
         save_data()
-        await update.message.reply_text(f"✅ UPI ID set: {text}")
+        refreshed = await refresh_panel_after_save(context, "upi", _build_adm_upi_view)
+        await update.message.reply_text(f"✅ UPI ID set: {text}" + ("" if refreshed else "\n(reopen the UPI panel to confirm)"))
 
     elif awaiting == "developer_id":
         context.user_data.pop("awaiting", None)
@@ -3497,13 +3771,15 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
                 note = "\n⚠️ Ye account ka koi @username nahi hai — button kabhi-kabhi khulega nahi. 'Set Link Override' se @username bhejna better hai."
         except Exception:
             note = "\n⚠️ Bot is ID tak abhi pahuch nahi paaya (developer ne bot ko kabhi message nahi kiya) — button reliably khulega nahi jab tak 'Set Link Override' se @username na do."
-        await update.message.reply_text(f"✅ Developer ID set: {text}{note}")
+        refreshed = await refresh_panel_after_save(context, "devsettings", _build_adm_devsettings_view)
+        await update.message.reply_text(f"✅ Developer ID set: {text}{note}" + ("" if refreshed else "\n(reopen the developer panel to confirm)"))
 
     elif awaiting == "developer_link":
         context.user_data.pop("awaiting", None)
         BOT_DATA["settings"]["developer_link"] = None if text.lower() == "clear" else text
         save_data()
-        await update.message.reply_text("✅ Developer link updated.")
+        refreshed = await refresh_panel_after_save(context, "devsettings", _build_adm_devsettings_view)
+        await update.message.reply_text("✅ Developer link updated." + ("" if refreshed else "\n(reopen the developer panel to confirm)"))
 
     elif awaiting == "admin_group_id":
         context.user_data.pop("awaiting", None)
@@ -3525,7 +3801,80 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
             return
         BOT_DATA["settings"]["admin_group_id"] = chat_id
         save_data()
-        await update.message.reply_text(f"✅ Ticket group set to {chat_id}.")
+        refreshed = await refresh_panel_after_save(context, "support_settings", _build_adm_support_settings_view)
+        await update.message.reply_text(f"✅ Ticket group set to {chat_id}." + ("" if refreshed else "\n(reopen the support panel to confirm)"))
+
+    elif awaiting == "plan_step_name":
+        name = text.strip()
+        if not name:
+            await update.message.reply_text("Khaali naam nahi chalega. Plan ka naam bhejo.")
+            return
+        context.user_data.setdefault("new_plan", {})["name"] = name
+        context.user_data["awaiting"] = "plan_step_days"
+        await update.message.reply_text("Step 2/4 — Plan kitne din chalega? (e.g. 30)")
+
+    elif awaiting == "plan_step_days":
+        if not text.strip().isdigit() or int(text.strip()) <= 0:
+            await update.message.reply_text("Valid number bhejo (e.g. 30).")
+            return
+        context.user_data["new_plan"]["days"] = int(text.strip())
+        context.user_data["awaiting"] = "plan_step_inr"
+        await update.message.reply_text(
+            "Step 3/4 — ₹ (INR) price bhejo (UPI ke liye). "
+            "Agar UPI se ye plan nahi bechna to '0' bhejo."
+        )
+
+    elif awaiting == "plan_step_inr":
+        cleaned = text.strip().replace("₹", "")
+        if not cleaned.isdigit():
+            await update.message.reply_text("Valid number bhejo (0 bhi chalega agar UPI price nahi rakhna).")
+            return
+        context.user_data["new_plan"]["price_inr"] = int(cleaned)
+        context.user_data["awaiting"] = "plan_step_stars"
+        await update.message.reply_text(
+            "Step 4/4 — ⭐ Telegram Stars price bhejo. "
+            "Agar Stars se ye plan nahi bechna to '0' bhejo."
+        )
+
+    elif awaiting == "plan_step_stars":
+        context.user_data.pop("awaiting", None)
+        cleaned = text.strip()
+        if not cleaned.isdigit():
+            await update.message.reply_text("Valid number bhejo (0 bhi chalega).")
+            context.user_data["awaiting"] = "plan_step_stars"
+            return
+        draft = context.user_data.pop("new_plan", {})
+        draft["price_stars"] = int(cleaned)
+        if not draft.get("price_inr") and not draft.get("price_stars"):
+            await update.message.reply_text(
+                "⚠️ Plan cancel — kam se kam ek price (₹ ya ⭐) zaroor set karo. "
+                "➕ Add Plan se dobara try karo."
+            )
+        else:
+            pid = str(BOT_DATA.get("next_plan_id", 1))
+            BOT_DATA["next_plan_id"] = BOT_DATA.get("next_plan_id", 1) + 1
+            plan = {
+                "id": pid,
+                "name": draft.get("name", "Plan"),
+                "days": draft.get("days", 30),
+                "price_inr": draft.get("price_inr", 0),
+                "price_stars": draft.get("price_stars", 0),
+                "enabled": True,
+            }
+            BOT_DATA["settings"].setdefault("premium_plans", []).append(plan)
+            save_data()
+            await log_event(context, f"💎 New plan added: {plan['name']} by {update.effective_user.id}")
+            price_bits = []
+            if plan["price_inr"]:
+                price_bits.append(f"₹{plan['price_inr']}")
+            if plan["price_stars"]:
+                price_bits.append(f"{plan['price_stars']}⭐")
+            refreshed = await refresh_panel_after_save(context, "premium", _build_adm_premium_view)
+            await update.message.reply_text(
+                f"✅ Plan added: {plan['name']} — {' / '.join(price_bits)} — {plan['days']}d — turned ON.\n"
+                "It's now visible to users in the 🎁 gift menu."
+                + ("" if refreshed else "\n(reopen the premium panel to confirm)")
+            )
 
     elif awaiting == "message_user_id":
         if not text.isdigit():
@@ -3971,6 +4320,7 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_force_join")(cb_adm_force_join), pattern="^adm_force_join$"))
     app.add_handler(CallbackQueryHandler(cb_adm_force_join_set, pattern="^adm_force_join_set$"))
     app.add_handler(CallbackQueryHandler(cb_adm_force_join_clear, pattern="^adm_force_join_clear$"))
+    app.add_handler(CallbackQueryHandler(cb_adm_force_join_test, pattern="^adm_force_join_test$"))
 
     app.add_handler(CallbackQueryHandler(cb_get_caption, pattern="^get_caption$"))
     app.add_handler(CallbackQueryHandler(cb_download_another, pattern="^download_another$"))
@@ -3981,6 +4331,9 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(cb_ticket_reopen, pattern="^tk_reopen:"))
 
     app.add_handler(CallbackQueryHandler(cb_gift_menu, pattern="^gift_menu$"))
+    app.add_handler(CallbackQueryHandler(cb_gift_plan, pattern="^gift_plan:"))
+    app.add_handler(CallbackQueryHandler(cb_gift_plan_stars, pattern="^gift_plan_stars:"))
+    app.add_handler(CallbackQueryHandler(cb_gift_plan_upi, pattern="^gift_plan_upi:"))
     app.add_handler(CallbackQueryHandler(cb_gift_stars, pattern="^gift_stars$"))
     app.add_handler(CallbackQueryHandler(cb_gift_stars_custom, pattern="^gift_stars_custom$"))
     app.add_handler(CallbackQueryHandler(cb_gift_stars_amount, pattern="^gift_stars_amt:"))
@@ -4042,6 +4395,9 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_logger_channel")(cb_adm_logger_channel), pattern="^adm_logger_channel$"))
 
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_premium")(cb_adm_premium), pattern="^adm_premium$"))
+    app.add_handler(CallbackQueryHandler(cb_adm_plan_add, pattern="^adm_plan_add$"))
+    app.add_handler(CallbackQueryHandler(cb_adm_plan_toggle, pattern="^adm_plan_toggle:"))
+    app.add_handler(CallbackQueryHandler(cb_adm_plan_del, pattern="^adm_plan_del:"))
     app.add_handler(CallbackQueryHandler(cb_adm_set_dailylimit, pattern="^adm_set_dailylimit$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_upi")(cb_adm_upi), pattern="^adm_upi$"))
     app.add_handler(CallbackQueryHandler(cb_adm_upi_set, pattern="^adm_upi_set$"))
