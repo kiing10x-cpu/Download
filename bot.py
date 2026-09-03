@@ -1651,10 +1651,13 @@ async def render_menu(context: ContextTypes.DEFAULT_TYPE, chat_id: int, menu_id:
             elif not image and has_photo:
                 await existing_message.delete()
                 sent_message = await context.bot.send_message(
-                    chat_id, text=text, parse_mode=parse_mode, reply_markup=kb, protect_content=protect
+                    chat_id, text=text, parse_mode=parse_mode, reply_markup=kb, protect_content=protect,
+                    disable_web_page_preview=True,
                 )
             else:
-                await existing_message.edit_text(text=text, parse_mode=parse_mode, reply_markup=kb)
+                await existing_message.edit_text(
+                    text=text, parse_mode=parse_mode, reply_markup=kb, disable_web_page_preview=True
+                )
                 sent_message = existing_message
         else:
             if image:
@@ -1663,7 +1666,8 @@ async def render_menu(context: ContextTypes.DEFAULT_TYPE, chat_id: int, menu_id:
                 )
             else:
                 sent_message = await context.bot.send_message(
-                    chat_id, text=text, parse_mode=parse_mode, reply_markup=kb, protect_content=protect
+                    chat_id, text=text, parse_mode=parse_mode, reply_markup=kb, protect_content=protect,
+                    disable_web_page_preview=True,
                 )
     except Exception:
         log.exception("render_menu failed for %s, sending fresh", menu_id)
@@ -1674,7 +1678,8 @@ async def render_menu(context: ContextTypes.DEFAULT_TYPE, chat_id: int, menu_id:
                 )
             else:
                 sent_message = await context.bot.send_message(
-                    chat_id, text=text, parse_mode=parse_mode, reply_markup=kb, protect_content=protect
+                    chat_id, text=text, parse_mode=parse_mode, reply_markup=kb, protect_content=protect,
+                    disable_web_page_preview=True,
                 )
         except Exception:
             log.exception("render_menu completely failed for %s", menu_id)
