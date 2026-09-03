@@ -2146,19 +2146,17 @@ async def show_post_onboarding(context: ContextTypes.DEFAULT_TYPE, chat_id: int,
         try:
             # BUGFIX — a persistent ReplyKeyboardMarkup can only be attached
             # by sending SOME message with it (Telegram has no "attach
-            # keyboard silently" call), but the old "⌨️" text used for this
-            # stayed visible in the chat and looked like a stray, confusing
-            # message. We still send a throwaway message to attach the
-            # keyboard, but with invisible text, then delete it immediately
-            # — the reply keyboard stays attached (it's chat-wide, not tied
-            # to any one message) while nothing visible is left behind.
+            # keyboard silently" call). We send a throwaway message with
+            # invisible text to carry it. IMPORTANT: we no longer delete this
+            # message right after sending it — doing so was racy on some
+            # clients and could make the whole bottom keyboard (Download
+            # Reel / My Usage / etc.) flash and disappear again within a
+            # second, instead of staying attached. Since the text itself is
+            # invisible, leaving the message in place costs nothing visually
+            # but keeps the keyboard reliably permanent.
             kb_msg = await context.bot.send_message(
                 chat_id, "\u2063", reply_markup=main_reply_keyboard(is_admin(int(uid)))
             )
-            try:
-                await kb_msg.delete()
-            except Exception:
-                pass
         except Exception:
             pass
         BOT_DATA["users"].setdefault(uid, {})["reply_kb_sent"] = True
