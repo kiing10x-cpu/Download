@@ -490,15 +490,14 @@ STR = {
     "done": "✅ " + to_small_caps("your reel is ready!") + "\n🎬 " + to_small_caps("saved and sent below"),
     "usage_title": to_small_caps("usage overview"),
     "how_to_use": (
-        to_small_caps("how to use") + "\n\n"
-        + "1️⃣ " + to_small_caps("copy any instagram reel link") + "\n"
-        + "2️⃣ " + to_small_caps("paste it here in chat") + "\n"
-        + "3️⃣ " + to_small_caps("wait a few seconds") + "\n"
-        + "4️⃣ " + to_small_caps("download your reel instantly") + "\n\n"
-        + to_small_caps("tips") + "\n"
-        + "✅ " + to_small_caps("no watermark") + "\n"
-        + "✅ " + to_small_caps("works with private links too") + "\n"
-        + "✅ " + to_small_caps("unlimited with premium")
+        "<blockquote>"
+        "𝐇𝐎𝐖 𝐓𝐎 𝐔𝐒𝐄\n\n"
+        "➤ Cᴏᴘʏ ᴀɴʏ Iɴsᴛᴀɢʀᴀᴍ Rᴇᴇʟ ʟɪɴᴋ\n\n"
+        "➤ Pᴀsᴛᴇ ᴛʜᴇ ʟɪɴᴋ ʜᴇʀᴇ ɪɴ ᴄʜᴀᴛ\n\n"
+        "➤ Wᴀɪᴛ ᴀ ғᴇᴡ sᴇᴄᴏɴᴅs\n\n"
+        "➤ Gᴇᴛ ʏᴏᴜʀ Rᴇᴇʟ ᴅᴏᴡɴʟᴏᴀᴅᴇᴅ ɪɴsᴛᴀɴᴛʟʏ\n\n"
+        "➤ 𝐍𝐎𝐓𝐄 : Oɴʟʏ Pᴜʙʟɪᴄ Iɴsᴛᴀɢʀᴀᴍ Rᴇᴇʟ ʟɪɴᴋs ᴀʀᴇ sᴜᴘᴘᴏʀᴛᴇᴅ"
+        "</blockquote>"
     ),
     "support_prompt": to_small_caps("describe your issue (text/photo/video)"),
     "ticket_created": lambda tid: "✅ " + to_small_caps(f"ticket #{tid} created. we'll reply soon"),
@@ -719,12 +718,22 @@ DEFAULT_MENUS = {
     "start": {
         "text": (
             "<blockquote>"
-            + f"『 {to_small_caps('welcome')}, {{first_name}} 』\n\n"
-            + f"{to_small_caps('welcome to')} {{bot_link}}\n\n"
-            + f"{to_small_caps('send any instagram reel link and get your video back in high quality, quickly and effortlessly.')}\n\n"
-            + "✦ " + to_small_caps("fast • simple • high quality") + " ✦"
-            + "</blockquote>\n\n"
-            f"{to_small_caps('use the buttons below to get started, explore the bot, and discover more features.')}"
+            "Hᴇʟʟᴏ, {username}!\n\n"
+            "𝐖𝐄𝐋𝐂𝐎𝐌𝐄 ᴛᴏ {bot_name}\n\n"
+            "Yᴏᴜʀ ᴘᴇʀsᴏɴᴀʟ Iɴsᴛᴀɢʀᴀᴍ Rᴇᴇʟ ᴀssɪsᴛᴀɴᴛ.\n\n"
+            "𝐓𝐇𝐈𝐒 𝐁𝐎𝐓 𝐂𝐀𝐍\n\n"
+            "➤ Dᴏᴡɴʟᴏᴀᴅ Iɴsᴛᴀɢʀᴀᴍ Rᴇᴇʟs\n\n"
+            "➤ Gᴇᴛ Rᴇᴇʟ Cᴀᴘᴛɪᴏɴs\n\n"
+            "➤ Gᴇᴛ Rᴇᴇʟ Aᴜᴅɪᴏ\n\n"
+            "𝐖𝐇𝐘 𝐂𝐇𝐎𝐎𝐒𝐄 𝐔𝐒?\n\n"
+            "➤ Nᴏ Wᴀᴛᴇʀᴍᴀᴋs\n\n"
+            "➤ Hɪɢʜ-Qᴜᴀʟɪᴛʏ Rᴇᴇʟ Dᴏᴡɴʟᴏᴀᴅs\n\n"
+            "➤ Fᴀsᴛ ᴀɴᴅ Sᴍᴏᴏᴛʜ Sᴇʀᴠɪᴄᴇ\n\n"
+            "➤ Hᴀssʟᴇ-Fʀᴇᴇ ᴀɴᴅ Eᴀsʏ ᴛᴏ Uꜱᴇ\n\n"
+            "➤ Sᴀᴠᴇs Tɪᴍᴇ ᴀɴᴅ Eғғᴏʀᴛ\n\n"
+            "➤ Rᴇᴇʟ, Cᴀᴘᴛɪᴏɴ ᴀɴᴅ Aᴜᴅɪᴏ ɪɴ Oɴᴇ Pʟᴀᴄᴇ\n\n"
+            "➤ Nᴏ Exᴛʀᴀ Tᴏᴏʟs ᴏʀ Cᴏᴍᴘʟɪᴄᴀᴛᴇᴅ Sᴛᴇᴘs"
+            "</blockquote>"
         ),
         "parse_mode": "HTML",
         "image_file_id": None,
@@ -754,6 +763,7 @@ DEFAULT_MENUS = {
         "parse_mode": "HTML",
         "image_file_id": None,
         "buttons": [
+            {"label": to_small_caps("📝 caption"), "type": "callback", "value": "get_caption", "row": 1, "style": "primary"},
             {"label": to_small_caps("🎵 audio"), "type": "callback", "value": "get_audio", "row": 1, "style": "primary"},
         ],
         "auto_delete_seconds": None,
@@ -862,7 +872,6 @@ DEFAULT_DATA = {
     "settings": {
         "maintenance": False,
         "protect_broadcasts": True,
-        "broadcast_attach_start_button": True,
         "global_auto_delete_seconds": 0,
         "small_caps_buttons_default": True,
         "auto_replies": {},
@@ -1530,29 +1539,28 @@ async def render_menu(context: ContextTypes.DEFAULT_TYPE, chat_id: int, menu_id:
     parse_mode = menu.get("parse_mode") or None
     image = menu.get("image_file_id")
 
-    # Welcome-screen personalization — {first_name} / {bot_link} placeholders
-    # are only resolved for the "start" menu so an admin editing other menu
-    # text doesn't need to worry about stray curly braces breaking anything.
-    if menu_id == "start" and ("{first_name}" in text or "{bot_link}" in text):
-        if "{first_name}" in text:
+    # Welcome-screen personalization — supports {username}/{bot_name} and
+    # legacy {first_name}/{bot_link} placeholders for the start menu.
+    if menu_id == "start":
+        if "{username}" in text or "{first_name}" in text:
             stored_name = BOT_DATA["users"].get(str(chat_id), {}).get("name") or ""
             first_name = stored_name.split(" ")[0] if stored_name else "there"
-            text = text.replace("{first_name}", html.escape(first_name))
-        if "{bot_link}" in text:
+            user_display = html.escape(first_name)
+            # Make the user's displayed name open their Telegram profile.
+            username_link = f'<a href="tg://user?id={int(chat_id)}">{user_display}</a>'
+            text = text.replace("{username}", username_link)
+            text = text.replace("{first_name}", user_display)
+        if "{bot_name}" in text or "{bot_link}" in text:
+            bot_name = "our bot"
             bot_link = "our bot"
             try:
                 me = await _cached_get_me(context)
                 display_name = html.escape(me.first_name or "our bot")
-                if me.username:
-                    bot_link = f'<a href="https://t.me/{me.username}">{display_name}</a>'
-                else:
-                    bot_link = display_name
+                bot_name = display_name
+                bot_link = f'<a href="https://t.me/{me.username}">{display_name}</a>' if me.username else display_name
             except Exception as e:
-                # Previously silent — a transient get_me() failure meant the
-                # welcome message's bot-name link just quietly stayed as
-                # plain "our bot" text with no clickable link and no trace
-                # of why. Now it's visible in the admin Activity Log too.
-                log_error("bot_link_resolve", f"render_menu couldn't resolve bot link: {e}")
+                log_error("bot_link_resolve", f"render_menu couldn't resolve bot name/link: {e}")
+            text = text.replace("{bot_name}", bot_name)
             text = text.replace("{bot_link}", bot_link)
 
     # #10 — owner/developer credit button, injected at render time (not part
@@ -1727,7 +1735,7 @@ async def cb_toggle_menu_button(update: Update, context: ContextTypes.DEFAULT_TY
 # styled the welcome text even once. Fixed by shielding these tokens with
 # private-use sentinel characters (untouched by every style function) before
 # styling, then restoring the real placeholder text afterwards.
-_WELCOME_PLACEHOLDERS = ["{first_name}", "{bot_link}"]
+_WELCOME_PLACEHOLDERS = ["{first_name}", "{bot_link}", "{username}", "{bot_name}"]
 
 
 def apply_style_preserving_placeholders(func, text: str) -> str:
@@ -1753,7 +1761,7 @@ async def send_style_preview(context, chat_id, source_text):
     await context.bot.send_message(chat_id, to_small_caps("🅰️ choose a style:"), reply_markup=InlineKeyboardMarkup(rows))
 
 
-async def _replace_rkb_screen(context: ContextTypes.DEFAULT_TYPE, chat_id: int, key: str, text: str, reply_markup=None):
+async def _replace_rkb_screen(context: ContextTypes.DEFAULT_TYPE, chat_id: int, key: str, text: str, reply_markup=None, parse_mode=None):
     """Delete the previous message shown for this reply-keyboard screen (if
     any) before sending the new one — for EVERY persistent bottom button
     (📊 My Usage, 🎁 Send A Gift, 👨‍💻 Developer, 📘 How To Use, 🎧 Support,
@@ -1762,7 +1770,7 @@ async def _replace_rkb_screen(context: ContextTypes.DEFAULT_TYPE, chat_id: int, 
     under the last one every time, click after click. Uses the same
     persisted panel_msg store as /start and /admin, so it survives a bot
     restart, not just context.user_data."""
-    msg = await context.bot.send_message(chat_id, text, reply_markup=reply_markup)
+    msg = await context.bot.send_message(chat_id, text, reply_markup=reply_markup, parse_mode=parse_mode)
     # All persistent reply-keyboard actions share one panel slot. This means
     # the user's own button message remains in chat, while only the latest
     # bot-side screen is replaced on every button tap.
@@ -2190,60 +2198,6 @@ async def cb_maint_notify_me_done(update: Update, context: ContextTypes.DEFAULT_
         pass
 
 
-async def cb_bc_start_now(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """The 🚀 Start Bot button attached to broadcasts. By the time this
-    fires, cb_global_button_gate has already enforced maintenance /
-    disclaimer / force-join for us — so if we're here, the user is clear
-    to proceed. We deliver the same experience as /start, straight into
-    the chat, the instant they tap the button (no separate manual start
-    needed, no URL redirect).
-
-    Also attributes the tap back to the broadcast it came from (via the id
-    baked into callback_data) and live-edits that broadcast's admin report
-    with an updated started-count — so the admin watches it climb in real
-    time instead of only ever seeing a one-time snapshot."""
-    query = update.callback_query
-    user_obj = update.effective_user
-    chat_id = update.effective_chat.id
-    try:
-        await query.answer("🚀 " + to_small_caps("starting..."))
-    except Exception:
-        pass
-    if is_blocked(user_obj.id) and not is_admin(user_obj.id):
-        return
-    is_new = touch_user(update)
-    BOT_DATA["metrics"]["start_count"] = BOT_DATA["metrics"].get("start_count", 0) + 1
-
-    # Attribute this tap to its broadcast, if it carries one.
-    parts = query.data.split(":", 1)
-    if len(parts) == 2:
-        try:
-            broadcast_id = int(parts[1])
-        except ValueError:
-            broadcast_id = None
-        if broadcast_id is not None:
-            entry = next(
-                (e for e in BOT_DATA.get("broadcast_log", []) if e.get("id") == broadcast_id), None
-            )
-            if entry is not None and user_obj.id not in entry.setdefault("start_clicked_users", []):
-                entry["start_clicked_users"].append(user_obj.id)
-                entry["start_clicked"] = entry.get("start_clicked", 0) + 1
-                if entry.get("report_chat_id") and entry.get("report_message_id"):
-                    try:
-                        await context.bot.edit_message_text(
-                            chat_id=entry["report_chat_id"],
-                            message_id=entry["report_message_id"],
-                            text=_broadcast_report_text(entry),
-                        )
-                    except Exception:
-                        pass  # report message may have been deleted/edited elsewhere — clicks are still counted
-
-    save_data()
-    await notify_admins_new_start(context, update, is_new)
-    sent = await show_post_onboarding(context, chat_id, str(user_obj.id))
-    await track_and_refresh_panel(context, chat_id, "start", sent)
-
-
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_obj = update.effective_user
     if is_blocked(user_obj.id) and not is_admin(user_obj.id):
@@ -2413,9 +2367,17 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # this is always safe.
         context.user_data.pop("awaiting", None)
     if text == RKB_DOWNLOAD:
+        download_text = (
+            "<blockquote>"
+            "𝘞𝘢𝘯𝘵 𝘵𝘰 𝘥𝘰𝘸𝘯𝘭𝘰𝘢𝘥 𝘢 𝘙𝘦𝘦𝘭?\n\n"
+            "➤ 𝘊𝘰𝘱𝘺 𝘵𝘩𝘦 𝘙𝘦𝘦𝘭 𝘭𝘪𝘯𝘬 𝘧𝘳𝘰𝘮 𝘐𝘯𝘴𝘵𝘢𝘨𝘳𝘢𝘮\n\n"
+            "➤ 𝘗𝘢𝘴𝘵𝘦 𝘵𝘩𝘦 𝘭𝘪𝘯𝘬 𝘩𝘦𝘳𝘦\n\n"
+            "𝘛𝘩𝘢𝘵'𝘴 𝘪𝘵 — 𝘐'𝘭𝘭 𝘥𝘰 𝘵𝘩𝘦 𝘳𝘦𝘴𝘵."
+            "</blockquote>"
+        )
         await _replace_rkb_screen(
             context, update.effective_chat.id, "download",
-            "🔗 " + to_small_caps("paste your instagram reel link here"),
+            download_text, parse_mode="HTML",
         )
         return
     if text == RKB_USAGE:
@@ -2431,7 +2393,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_developer_button(update, context)
         return
     if text == RKB_HOWTO:
-        await _replace_rkb_screen(context, update.effective_chat.id, "howto", STR["how_to_use"])
+        await _replace_rkb_screen(context, update.effective_chat.id, "howto", STR["how_to_use"], parse_mode="HTML")
         return
     if text == RKB_SUPPORT:
         await support_button_entry(update, context)
@@ -2623,16 +2585,32 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         menu = BOT_DATA["menus"]["reel_result"]
         translation = menu.get("translations", {}).get(lang) if lang else None
         base_caption = (translation or {}).get("text") or menu.get("text", "")
-        buttons = (translation or {}).get("buttons") or menu.get("buttons", [])
-        kb = build_keyboard_from_buttons(buttons, "reel_result")
+        # The delivered reel gets a purpose-built action row.  The old
+        # Caption callback is intentionally removed: short captions use
+        # Telegram's native CopyTextButton, while long captions fall back
+        # to a callback that sends the complete caption for normal copy.
         parse_mode = menu.get("parse_mode") or None
+        kb = None
 
-        # Extra reel-specific action buttons, always appended after whatever
-        # admin-configured buttons the reel_result menu has (e.g. Audio):
-        # a native one-tap Copy Caption (Telegram's own clipboard-copy
-        # control, capped at 256 chars) with a safe fallback for longer
-        # captions, plus a Remove button to delete the delivered reel.
-        extra_rows = []
+        # v2 §9 — native Telegram blockquote with extra reel info, HTML only.
+        if parse_mode == "HTML":
+            import html as _html
+            # Keep the caption visibly quoted under the reel.  Telegram's
+            # native copy button can copy up to 256 characters; longer
+            # captions get a callback fallback below so nothing is lost.
+            preview = ig_caption[:700] + ("…" if len(ig_caption) > 700 else "")
+            bq = (
+                "<blockquote expandable>"
+                f"📋 {_html.escape(preview) or '(none)'}"
+                "</blockquote>"
+            )
+            result_caption = f"{base_caption}\n\n{bq}"
+        else:
+            result_caption = base_caption
+
+        # Action row: Audio replaces the old Caption button; Remove takes
+        # the old Audio button's position.  Copy Caption is a native Telegram
+        # copy control when possible, with a safe long-caption fallback.
         if ig_caption:
             if len(ig_caption) <= 256:
                 copy_btn = InlineKeyboardButton(
@@ -2641,24 +2619,16 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
             else:
                 copy_btn = styled_button("📋 Copy Caption", callback_data="copy_caption", style="primary")
-            extra_rows.append([copy_btn])
-        extra_rows.append([styled_button("❌ Remove", callback_data="remove_reel", style="danger")])
-        existing_rows = list(kb.inline_keyboard) if kb else []
-        kb = InlineKeyboardMarkup(existing_rows + extra_rows)
-
-        # v2 §9 — native Telegram blockquote with extra reel info, HTML only.
-        if parse_mode == "HTML":
-            import html as _html
-            preview = ig_caption[:300] + ("…" if len(ig_caption) > 300 else "")
-            bq = (
-                "<blockquote expandable>"
-                f"📋 Caption: {_html.escape(preview) or '(none)'}\n"
-                f"👤 Uploader: {_html.escape(ig_uploader) or 'n/a'}"
-                "</blockquote>"
-            )
-            result_caption = f"{base_caption}\n\n{bq}"
         else:
-            result_caption = base_caption
+            copy_btn = None
+        action_row = [
+            styled_button("🎵 Audio", callback_data="get_audio", style="primary"),
+            styled_button("❌ Remove", callback_data="remove_reel", style="danger"),
+        ]
+        kb_rows = [action_row]
+        if copy_btn is not None:
+            kb_rows.insert(0, [copy_btn])
+        kb = InlineKeyboardMarkup(kb_rows)
 
         anim_task.cancel()
         protect = bool(BOT_DATA["settings"].get("lock_all_content", False))
@@ -2676,8 +2646,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     video=vid, caption=result_caption, parse_mode=parse_mode, reply_markup=kb, protect_content=protect
                 )
 
-        # Cache the real Instagram caption + source URL so the "Caption" and
-        # "🎵 Audio" buttons under THIS specific video can use them, keyed
+        # Cache the real Instagram caption + source URL so the Copy Caption
+        # fallback, Audio button, and Remove button under THIS specific video
+        # can use them, keyed
         # to this exact message. The video file itself is deleted right
         # after sending (see finally: below), so Audio re-downloads
         # audio-only from the cached URL rather than needing the video kept
@@ -4573,8 +4544,7 @@ async def cb_adm_users_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.message.reply_text(to_small_caps("send the id of the user you want to message."))
 
 
-# ---- Broadcast (v6 — rebuilt: reliable delivery, a /start button, a full
-# delivery report, and month-wise delete) -------------------------------------
+# ---- Broadcast (reliable delivery, admin copy, /broadcast command, and month-wise delete) ----
 #
 # What changed and why:
 #  1. do_broadcast() used to fire every send back-to-back with zero pacing.
@@ -4591,37 +4561,11 @@ async def cb_adm_users_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
 #  3. Every successfully delivered message ID is now recorded per user
 #     against the broadcast, so a broadcast can be pulled back out of every
 #     recipient's chat later (see Delete Broadcast below).
-#  4. Optional "🚀 Start Bot" button: a deep-link URL button
-#     (t.me/<bot>?start=broadcast) that a user can tap straight from the
-#     broadcast to open/start the bot — handy when the broadcast reaches
-#     someone via a forward or a channel post.
-
 BROADCAST_SEND_DELAY = 0.05  # ~20 msg/sec — safely under Telegram's cap
 
 
-async def _broadcast_start_button_kb(context: ContextTypes.DEFAULT_TYPE, broadcast_id=None):
-    """Builds the optional single-button keyboard attached to every
-    broadcast when 'Attach Start Button' is ON.
-
-    This used to be a URL deep-link (t.me/bot?start=...), which only
-    *opened the chat* — Telegram still made the user tap its own native
-    "START" button afterwards, so most people never actually re-engaged.
-    It's now a real callback button: tapping it fires cb_bc_start_now
-    below, which delivers the full /start experience immediately, right
-    there in the broadcast message's chat — no extra tap needed.
-
-    The broadcast_id is baked into callback_data so cb_bc_start_now can
-    attribute each tap back to the exact broadcast it came from, and live-
-    update that broadcast's report with how many people have started."""
-    cb = f"bc_start_now:{broadcast_id}" if broadcast_id is not None else "bc_start_now"
-    return InlineKeyboardMarkup([[styled_button("🚀 Start Bot", callback_data=cb)]])
-
-
 def _broadcast_report_text(entry: dict) -> str:
-    """Builds the broadcast completion report — used both right after a
-    broadcast finishes sending, and again every time cb_bc_start_now edits
-    it live as users tap the 🚀 Start Bot button, so the delivered/blocked/
-    failed/started numbers are always the same text in both places."""
+    """Build the normal broadcast completion report."""
     total = entry.get("total_targeted", 0)
     sent = entry.get("recipients", 0)
     blocked = entry.get("blocked", 0)
@@ -4629,67 +4573,18 @@ def _broadcast_report_text(entry: dict) -> str:
     other_failed = entry.get("other_failed", 0)
     recovered = entry.get("recovered", 0)
     failed_total = blocked + invalid_chat + other_failed
-    start_attached = entry.get("start_attached", False)
-    started = entry.get("start_clicked", 0)
-    report = (
+    return (
         "✅ " + to_small_caps("broadcast complete") + "\n\n"
         + to_small_caps("total targeted") + f": {total}\n"
         + to_small_caps("delivered successfully") + f": {sent}\n"
         + to_small_caps("not delivered") + f": {failed_total}\n\n"
         + to_small_caps("breakdown — why some were not delivered") + "\n"
-        + f"🚫 " + to_small_caps("blocked the bot / account deactivated") + f": {blocked}\n"
-        + f"⚠️ " + to_small_caps("chat unavailable / never started the bot") + f": {invalid_chat}\n"
-        + f"❓ " + to_small_caps("other delivery error") + f": {other_failed}\n"
-        + (f"🔁 " + to_small_caps("recovered after a brief rate-limit pause") + f": {recovered}\n" if recovered else "")
-        + "\n🔐 " + to_small_caps("forward-lock") + f": {'✅ ON' if entry.get('protect') else '❌ OFF'}\n"
-        + "🚀 " + to_small_caps("start button attached") + f": {'YES' if start_attached else 'NO'}"
+        + "🚫 " + to_small_caps("blocked the bot / account deactivated") + f": {blocked}\n"
+        + "⚠️ " + to_small_caps("chat unavailable / never started the bot") + f": {invalid_chat}\n"
+        + "❓ " + to_small_caps("other delivery error") + f": {other_failed}\n"
+        + ("🔁 " + to_small_caps("recovered after a brief rate-limit pause") + f": {recovered}\n" if recovered else "")
+        + "\n🔐 " + to_small_caps("forward-lock") + f": {'✅ ON' if entry.get('protect') else '❌ OFF'}"
     )
-    if start_attached:
-        report += (
-            "\n\n📊 " + to_small_caps("live — start button activity") + "\n"
-            + "👆 " + to_small_caps("clicked start") + f": {started} / {sent}"
-            + (f" ({started * 100 // sent}%)" if sent else "")
-        )
-    return report
-
-
-async def _render_adm_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    s = BOT_DATA["settings"]
-    protect = s.get("protect_broadcasts", True)
-    attach_start = s.get("broadcast_attach_start_button", True)
-    kb = InlineKeyboardMarkup(
-        [
-            [styled_button("📢 New Broadcast", callback_data="adm_bc_new"),
-             styled_button("📜 Broadcast Log", callback_data="adm_bc_log")],
-            [styled_button(
-                toggle_label("🔐 Forward-Lock", protect),
-                callback_data="stgl:protect_broadcasts:adm_broadcast",
-            ),
-             styled_button(
-                toggle_label("🚀 Start Button", attach_start),
-                callback_data="stgl:broadcast_attach_start_button:adm_broadcast",
-            )],
-            [styled_button("🗑 Delete Broadcast", callback_data="adm_bc_delmenu")],
-            [styled_button("🚀 /start Broadcast", callback_data="adm_start_broadcast")],
-            back_row(),
-            home_row(),
-        ]
-    )
-    total_users = len(BOT_DATA["users"])
-    body = (
-        to_small_caps("📢 broadcast centre") + "\n"
-        + to_small_caps("send an announcement to every registered user") + "\n\n"
-        + to_small_caps("total reachable users") + f": {total_users}\n\n"
-        + to_small_caps("start button attaches a tap-to-start link so users can open the bot directly") + "\n"
-        + to_small_caps("/start broadcast sends the normal bot welcome message as an alive/working notification")
-    )
-    await query.edit_message_text(body, reply_markup=kb)
-
-
-async def cb_adm_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer()
-    await _render_adm_broadcast(update, context)
 
 
 async def cb_adm_start_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4725,6 +4620,8 @@ async def cb_adm_start_broadcast_confirm(update: Update, context: ContextTypes.D
 
     for uid in targets:
         try:
+            # Render the exact same start destination/menu users get from /start,
+            # without pretending Telegram received a command from the bot.
             await context.bot.send_message(chat_id=int(uid), text="/start")
             sent += 1
         except RetryAfter as e:
@@ -4749,16 +4646,37 @@ async def cb_adm_start_broadcast_confirm(update: Update, context: ContextTypes.D
     await log_event(context, f"🚀 /start broadcast by {update.effective_user.id} — {sent} delivered, {failed} failed")
 
 
-async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Admin command equivalent of the Broadcast Centre's New Broadcast button."""
-    if not is_admin(update.effective_user.id):
-        return
-    context.user_data["awaiting"] = "broadcast_content"
-    await update.message.reply_text(
-        to_small_caps("📢 send your broadcast now") + "\n"
-        + to_small_caps("text, photo or video — one single message") + "\n\n"
-        + to_small_caps("it will be delivered to every registered user and this admin chat, respecting your forward-lock setting")
+async def _render_adm_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    s = BOT_DATA["settings"]
+    protect = s.get("protect_broadcasts", True)
+    kb = InlineKeyboardMarkup(
+        [
+            [styled_button("📢 New Broadcast", callback_data="adm_bc_new"),
+             styled_button("📜 Broadcast Log", callback_data="adm_bc_log")],
+            [styled_button(
+                toggle_label("🔐 Forward-Lock", protect),
+                callback_data="stgl:protect_broadcasts:adm_broadcast",
+            ),
+             styled_button("🚀 /start Broadcast", callback_data="adm_start_broadcast")],
+            [styled_button("🗑 Delete Broadcast", callback_data="adm_bc_delmenu")],
+            back_row(),
+            home_row(),
+        ]
     )
+    total_users = len(BOT_DATA["users"])
+    body = (
+        to_small_caps("📢 broadcast centre") + "\n"
+        + to_small_caps("send an announcement to every registered user") + "\n\n"
+        + to_small_caps("total reachable users") + f": {total_users}\n\n"
+        + to_small_caps("/start broadcast sends the normal bot welcome message as an alive/working notification")
+    )
+    await query.edit_message_text(body, reply_markup=kb)
+
+
+async def cb_adm_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    await _render_adm_broadcast(update, context)
 
 
 async def cb_adm_bc_new(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4768,7 +4686,7 @@ async def cb_adm_bc_new(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.message.reply_text(
         to_small_caps("📢 send your broadcast now") + "\n"
         + to_small_caps("text, photo or video — one single message") + "\n\n"
-        + to_small_caps("it will be delivered to every user, respecting your forward-lock and start-button settings")
+        + to_small_caps("it will be delivered to every registered user and this admin chat, respecting your forward-lock setting")
     )
 
 
@@ -4788,8 +4706,6 @@ async def cb_adm_bc_log(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 + to_small_caps("blocked") + f" {e.get('blocked', 0)} • "
                 + to_small_caps("failed") + f" {e.get('other_failed', 0)}"
             )
-            if e.get("start_attached"):
-                line += " • " + to_small_caps("started") + f" {e.get('start_clicked', 0)}"
             lines.append(line)
         text = "\n".join(lines)
     kb = InlineKeyboardMarkup([back_row("adm_broadcast")])
@@ -4802,10 +4718,8 @@ async def do_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # broadcast-specific forward-lock toggle.
     s = BOT_DATA["settings"]
     protect = s.get("protect_broadcasts", True) or s.get("lock_all_content", False)
-    attach_start = s.get("broadcast_attach_start_button", True)
     broadcast_id = BOT_DATA.get("broadcast_next_id", 1)
     BOT_DATA["broadcast_next_id"] = broadcast_id + 1
-    start_kb = await _broadcast_start_button_kb(context, broadcast_id) if attach_start else None
 
     status_msg = await update.message.reply_text(
         "📢 " + to_small_caps("broadcast in progress...") + " 0%"
@@ -4896,9 +4810,6 @@ async def do_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "total_targeted": total,
         "messages": delivered_ids,  # {user_id: message_id} — used by Delete Broadcast
         "protect": protect,
-        "start_attached": bool(start_kb),
-        "start_clicked": 0,
-        "start_clicked_users": [],
         "report_chat_id": None,
         "report_message_id": None,
     }
@@ -7163,6 +7074,18 @@ async def cmd_unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin command equivalent of the Broadcast Centre's New Broadcast button."""
+    if not is_admin(update.effective_user.id):
+        return
+    context.user_data["awaiting"] = "broadcast_content"
+    await update.message.reply_text(
+        to_small_caps("📢 send your broadcast now") + "\n"
+        + to_small_caps("text, photo or video — one single message") + "\n\n"
+        + to_small_caps("it will be delivered to every registered user and this admin chat, respecting your forward-lock setting")
+    )
+
+
 async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """#13 — escape hatch out of any stuck admin/user text-input flow."""
     for key in (
@@ -7352,6 +7275,7 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("language", cmd_language))
     app.add_handler(CommandHandler("admin", cmd_admin))
+    app.add_handler(CommandHandler("broadcast", cmd_broadcast))
     app.add_handler(CommandHandler("dbstatus", cmd_dbstatus))
     app.add_handler(CommandHandler("health", cmd_health))
     app.add_handler(CommandHandler("database", cmd_database))
@@ -7361,7 +7285,6 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("block", cmd_block))
     app.add_handler(CommandHandler("unblock", cmd_unblock))
     app.add_handler(CommandHandler("cancel", cmd_cancel))
-    app.add_handler(CommandHandler("broadcast", cmd_broadcast))
     app.add_handler(MessageHandler(filters.COMMAND, cmd_unknown))
 
     app.add_handler(CallbackQueryHandler(cb_agree_terms, pattern="^agree_terms$"))
@@ -7383,9 +7306,10 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(cb_adm_force_join_remove, pattern="^adm_force_join_remove$"))
     app.add_handler(CallbackQueryHandler(cb_adm_force_join_test, pattern="^adm_force_join_test$"))
 
+    # Reel action buttons
     app.add_handler(CallbackQueryHandler(cb_get_caption, pattern="^get_caption$"))
-    app.add_handler(CallbackQueryHandler(cb_get_audio, pattern="^get_audio$"))
     app.add_handler(CallbackQueryHandler(cb_copy_caption, pattern="^copy_caption$"))
+    app.add_handler(CallbackQueryHandler(cb_get_audio, pattern="^get_audio$"))
     app.add_handler(CallbackQueryHandler(cb_remove_reel, pattern="^remove_reel$"))
     app.add_handler(CallbackQueryHandler(cb_download_another, pattern="^download_another$"))
     app.add_handler(CallbackQueryHandler(cb_check_force_join, pattern="^check_force_join$"))
@@ -7455,7 +7379,6 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(cb_adm_menu_trans, pattern="^adm_menu_trans:"))
     app.add_handler(CallbackQueryHandler(cb_adm_menu_trans_edit, pattern="^adm_menu_trans_edit:"))
     app.add_handler(CallbackQueryHandler(cb_setlang, pattern="^setlang:"))
-    app.add_handler(CallbackQueryHandler(cb_bc_start_now, pattern="^bc_start_now"))
     app.add_handler(CallbackQueryHandler(cb_maint_notify_me, pattern="^maint_notify_me$"))
     app.add_handler(CallbackQueryHandler(cb_maint_notify_me_done, pattern="^maint_notify_me_done$"))
     app.add_handler(CallbackQueryHandler(cb_adm_btn_add, pattern="^adm_btn_add:"))
