@@ -703,11 +703,11 @@ def styled_kb_button(text, style=None):
 DEFAULT_MENUS = {
     "start": {
         "text": (
-            f"『 {to_small_caps('welcome')}, {{first_name}} 』\n\n"
-            f"{to_small_caps('welcome to')} {{bot_link}}\n\n"
-            f"{to_small_caps('send any instagram reel link and get your video back in high quality, quickly and effortlessly.')}\n\n"
             "<blockquote>"
-            + to_small_caps("fast • simple • high quality")
+            + f"『 {to_small_caps('welcome')}, {{first_name}} 』\n\n"
+            + f"{to_small_caps('welcome to')} {{bot_link}}\n\n"
+            + f"{to_small_caps('send any instagram reel link and get your video back in high quality, quickly and effortlessly.')}\n\n"
+            + "✦ " + to_small_caps("fast • simple • high quality") + " ✦"
             + "</blockquote>\n\n"
             f"{to_small_caps('use the buttons below to get started, explore the bot, and discover more features.')}"
         ),
@@ -789,6 +789,36 @@ DEFAULT_MENUS = {
             "𝘶𝘱𝘨𝘳𝘢𝘥𝘦𝘴 𝘵𝘰 𝘣𝘳𝘪𝘯𝘨 𝘺𝘰𝘶\n"
             "𝘢 𝘴𝘮𝘰𝘰𝘵𝘩𝘦𝘳 𝘦𝘹𝘱𝘦𝘳𝘪𝘦𝘯𝘤𝘦.\n\n"
             "⏳ 𝘞𝘦’𝘭𝘭 𝘣𝘦 𝘣𝘢𝘤𝘬 𝘴𝘰𝘰𝘯."
+        ),
+        "parse_mode": None,
+        "image_file_id": None,
+        "buttons": [],
+        "auto_delete_seconds": None,
+        "updated_by": None,
+        "updated_at": None,
+        "translations": {},
+    },
+    "maintenance_followup": {
+        "text": (
+            "✧ " + to_small_caps("you'll be notified the moment we're back online") + "\n\n"
+            + to_small_caps("we appreciate your patience — thank you for sticking with us.") + " ✧"
+        ),
+        "parse_mode": None,
+        "image_file_id": None,
+        "buttons": [],
+        "auto_delete_seconds": None,
+        "updated_by": None,
+        "updated_at": None,
+        "translations": {},
+    },
+    "bot_live": {
+        "text": (
+            "╭━━━━━━━━━━━━━━━━━━╮\n"
+            "✦ 𝗕𝗢𝗧 𝗜𝗦 𝗟𝗜𝗩𝗘 ✦\n"
+            "╰━━━━━━━━━━━━━━━━━━╯\n\n"
+            "✨ " + to_small_caps("maintenance has been completed successfully.") + "\n\n"
+            "🚀 " + to_small_caps("the bot is now upgraded, improved and smoother than before.") + "\n\n"
+            "💫 " + to_small_caps("thank you for your patience and support — enjoy the new experience.")
         ),
         "parse_mode": None,
         "image_file_id": None,
@@ -1749,28 +1779,40 @@ async def show_force_join_prompt(update: Update, context: ContextTypes.DEFAULT_T
     await context.bot.send_message(chat_id, text, reply_markup=InlineKeyboardMarkup(kb_rows))
 
 
-MAINTENANCE_FOLLOWUP_TEXT = (
-    "✦ ʏᴏᴜ’ʟʟ ʙᴇ ɴᴏᴛɪꜰɪᴇᴅ\n"
-    "ᴡʜᴇɴ ᴛʜᴇ ʙᴏᴛ ɪꜱ ʙᴀᴄᴋ.\n\n"
-    "ᴀᴘᴏʟᴏɢɪᴇꜱ ꜰᴏʀ ᴛʜᴇ ɪɴᴄᴏɴᴠᴇɴɪᴇɴᴄᴇ,\n"
-    "ᴀɴᴅ ᴛʜᴀɴᴋ ʏᴏᴜ ꜰᴏʀ ʏᴏᴜʀ ᴘᴀᴛɪᴇɴᴄᴇ. ✦"
+# NOTE: the maintenance notice, its follow-up line, and the "bot is live
+# again" message are now all fully admin-customisable — edit them anytime
+# via 🎨 Menu & UI → maintenance / maintenance_followup / bot_live. Nothing
+# is hardcoded anymore; the constants below only exist as a last-resort
+# fallback if a menu entry is ever missing from storage.
+_MAINTENANCE_FOLLOWUP_FALLBACK = (
+    "✧ " + to_small_caps("you'll be notified the moment we're back online") + "\n\n"
+    + to_small_caps("we appreciate your patience — thank you for sticking with us.") + " ✧"
 )
-
-BOT_LIVE_TEXT = (
+_BOT_LIVE_FALLBACK = (
     "╭━━━━━━━━━━━━━━━━━━╮\n"
     "✦ 𝗕𝗢𝗧 𝗜𝗦 𝗟𝗜𝗩𝗘 ✦\n"
     "╰━━━━━━━━━━━━━━━━━━╯\n\n"
-    "✨ 𝘔𝘢𝘪𝘯𝘵𝘦𝘯𝘢𝘯𝘤𝘦 𝘩𝘢𝘴 𝘣𝘦𝘦𝘯 𝘴𝘶𝘤𝘤𝘦𝘴𝘴𝘧𝘶𝘭𝘭𝘺 𝘤𝘰𝘮𝘱𝘭𝘦𝘵𝘦𝘥!\n\n"
-    "🚀 𝘛𝘩𝘦 𝘣𝘰𝘵 𝘪𝘴 𝘯𝘰𝘸\n"
-    "𝘶𝘱𝘨𝘳𝘢𝘥𝘦𝘥, 𝘪𝘮𝘱𝘳𝘰𝘷𝘦𝘥 & 𝘴𝘮𝘰𝘰𝘵𝘩𝘦𝘳.\n\n"
-    "💫 𝘛𝘩𝘢𝘯𝘬 𝘺𝘰𝘶 𝘧𝘰𝘳 𝘺𝘰𝘶𝘳 𝘱𝘢𝘵𝘪𝘦𝘯𝘤𝘦 & 𝘴𝘶𝘱𝘱𝘰𝘳𝘵! 𝘐𝘧 𝘺𝘰𝘶 𝘧𝘢𝘤𝘦 𝘢𝘯𝘺 𝘣𝘶𝘨𝘴, 𝘱𝘭𝘦𝘢𝘴𝘦 𝘴𝘩𝘢𝘳𝘦 𝘺𝘰𝘶𝘳 𝘧𝘦𝘦𝘥𝘣𝘢𝘤𝘬.\n\n"
-    "✦ 𝘌𝘯𝘫𝘰𝘺 𝘵𝘩𝘦 𝘯𝘦𝘸 𝘦𝘹𝘱𝘦𝘳𝘪𝘦𝘯𝘤𝘦. ✦"
+    "✨ " + to_small_caps("maintenance has been completed successfully.")
 )
 
+
 async def send_maintenance_notice(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
-    """Show the two-part maintenance notice without stacking duplicates."""
+    """Show the two-part maintenance notice without stacking duplicates.
+
+    A short "typing…" pause now sits between the two messages instead of
+    firing them back-to-back — feels like a real reply rather than a wall
+    of text dumped at once, and gives a small, deliberate breathing gap."""
     try:
         first = await render_menu(context, chat_id, "maintenance")
+
+        # small natural gap + a genuine "typing…" indicator before the
+        # follow-up line lands, instead of both messages landing at once.
+        try:
+            await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+        except Exception:
+            pass
+        await asyncio.sleep(1.4)
+
         follow_key = f"maintenance_followup:{chat_id}"
         previous = BOT_DATA.get("panel_msg", {}).get(follow_key)
         if previous and previous != first.message_id:
@@ -1778,11 +1820,15 @@ async def send_maintenance_notice(context: ContextTypes.DEFAULT_TYPE, chat_id: i
                 await context.bot.delete_message(chat_id=chat_id, message_id=previous)
             except Exception:
                 pass
-        follow = await context.bot.send_message(chat_id=chat_id, text=MAINTENANCE_FOLLOWUP_TEXT)
+        follow_menu = BOT_DATA["menus"].get("maintenance_followup", {})
+        follow_text = follow_menu.get("text") or _MAINTENANCE_FOLLOWUP_FALLBACK
+        follow = await context.bot.send_message(
+            chat_id=chat_id, text=follow_text, parse_mode=follow_menu.get("parse_mode"),
+        )
         BOT_DATA.setdefault("panel_msg", {})[follow_key] = follow.message_id
         # Remember every chat_id shown the notice, so that when maintenance
-        # is switched off we know exactly who to notify with BOT_LIVE_TEXT
-        # (instead of nobody finding out except by tapping something again).
+        # is switched off we know exactly who to notify (instead of nobody
+        # finding out except by tapping something again).
         notified = BOT_DATA.setdefault("maintenance_notified", [])
         if chat_id not in notified:
             notified.append(chat_id)
@@ -1796,10 +1842,12 @@ async def broadcast_bot_live(context: ContextTypes.DEFAULT_TYPE):
     """Ping everyone who saw the maintenance notice, telling them the bot is
     back up — then clear the list so it doesn't grow forever / re-notify
     people on the next maintenance cycle."""
+    live_menu = BOT_DATA["menus"].get("bot_live", {})
+    live_text = live_menu.get("text") or _BOT_LIVE_FALLBACK
     chat_ids = BOT_DATA.get("maintenance_notified", [])
     for chat_id in chat_ids:
         try:
-            await context.bot.send_message(chat_id=chat_id, text=BOT_LIVE_TEXT)
+            await context.bot.send_message(chat_id=chat_id, text=live_text, parse_mode=live_menu.get("parse_mode"))
         except Exception:
             pass
     BOT_DATA["maintenance_notified"] = []
@@ -1927,6 +1975,30 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sent = await show_post_onboarding(context, update.effective_chat.id, str(user_obj.id))
     await track_and_refresh_panel(context, update.effective_chat.id, "start", sent)
     await delete_incoming(update)
+
+
+async def cb_bc_start_now(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """The 🚀 Start Bot button attached to broadcasts. By the time this
+    fires, cb_global_button_gate has already enforced maintenance /
+    disclaimer / force-join for us — so if we're here, the user is clear
+    to proceed. We deliver the same experience as /start, straight into
+    the chat, the instant they tap the button (no separate manual start
+    needed, no URL redirect)."""
+    query = update.callback_query
+    user_obj = update.effective_user
+    chat_id = update.effective_chat.id
+    try:
+        await query.answer("🚀 " + to_small_caps("starting..."))
+    except Exception:
+        pass
+    if is_blocked(user_obj.id) and not is_admin(user_obj.id):
+        return
+    is_new = touch_user(update)
+    BOT_DATA["metrics"]["start_count"] = BOT_DATA["metrics"].get("start_count", 0) + 1
+    save_data()
+    await notify_admins_new_start(context, update, is_new)
+    sent = await show_post_onboarding(context, chat_id, str(user_obj.id))
+    await track_and_refresh_panel(context, chat_id, "start", sent)
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3768,14 +3840,16 @@ BROADCAST_SEND_DELAY = 0.05  # ~20 msg/sec — safely under Telegram's cap
 
 
 async def _broadcast_start_button_kb(context: ContextTypes.DEFAULT_TYPE):
-    """Builds the optional single-button keyboard offering a direct
-    deep-link into the bot, used when 'Attach Start Button' is ON."""
-    try:
-        me = await context.bot.get_me()
-        url = f"https://t.me/{me.username}?start=broadcast"
-    except Exception:
-        return None
-    return InlineKeyboardMarkup([[styled_button("🚀 Start Bot", url=url)]])
+    """Builds the optional single-button keyboard attached to every
+    broadcast when 'Attach Start Button' is ON.
+
+    This used to be a URL deep-link (t.me/bot?start=...), which only
+    *opened the chat* — Telegram still made the user tap its own native
+    "START" button afterwards, so most people never actually re-engaged.
+    It's now a real callback button: tapping it fires cb_bc_start_now
+    below, which delivers the full /start experience immediately, right
+    there in the broadcast message's chat — no extra tap needed."""
+    return InlineKeyboardMarkup([[styled_button("🚀 Start Bot", callback_data="bc_start_now")]])
 
 
 async def _render_adm_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4332,6 +4406,7 @@ async def _render_adm_settings(update: Update, context: ContextTypes.DEFAULT_TYP
                  toggle_label("🔒 Maintenance", s.get('maintenance')),
                  callback_data="stgl:maintenance:adm_settings",
              )],
+            [styled_button("✏️ Edit Maintenance Messages", callback_data="adm_menu_edit:maintenance")],
             [styled_button(f"⏱ Global Auto-Delete: {s.get('global_auto_delete_seconds', 0)}s", callback_data="adm_set_autodelete"),
              styled_button("💬 Auto-Replies", callback_data="adm_autoreply_list")],
             [styled_button("👤 Manage Admins", callback_data="adm_manage_admins"),
@@ -4352,7 +4427,9 @@ async def _render_adm_settings(update: Update, context: ContextTypes.DEFAULT_TYP
         ]
     )
     await query.edit_message_text(
-        "⚙️ Settings\n" + to_small_caps("configure core bot behaviour below"),
+        "⚙️ " + to_small_caps("settings") + "\n"
+        + to_small_caps("configure core bot behaviour below.") + "\n"
+        + to_small_caps("tip: the maintenance-on, waiting and bot-live-again messages are all editable text — tap ✏️ edit maintenance messages, or find them (maintenance / maintenance_followup / bot_live) under 🎨 menu & ui."),
         reply_markup=kb,
     )
 
@@ -4705,23 +4782,33 @@ async def cb_settings_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE)
     save_data()
 
     if key == "maintenance":
+        # BUGFIX — this confirmation screen was never pushed onto the admin
+        # nav stack, so cb_adm_back's stack.pop() ended up dropping the real
+        # parent (adm_settings) instead, dumping the admin straight onto the
+        # Admin Home panel. Pointing "Back" directly at `return_to` (which is
+        # always "adm_settings" here) fixes that without touching the stack.
         if BOT_DATA["settings"]["maintenance"]:
-            await query.answer(to_small_caps("maintenance enabled."), show_alert=False)
+            await query.answer("🔒 " + to_small_caps("maintenance enabled."), show_alert=False)
             try:
                 await query.message.edit_text(
                     "╭━━━━━━━━━━━━━━━━━━╮\n"
                     "✦ 𝗠𝗔𝗜𝗡𝗧𝗘𝗡𝗔𝗡𝗖𝗘 𝗢𝗡 ✦\n"
                     "╰━━━━━━━━━━━━━━━━━━╯\n\n"
-                    "⚙️ All user actions are now locked.\n"
-                    "Only admins can use the bot while maintenance is active.",
-                    reply_markup=InlineKeyboardMarkup([back_row(), home_row()]),
+                    "⚙️ " + to_small_caps("all user actions are now locked.") + "\n"
+                    + to_small_caps("only admins can use the bot while maintenance is active."),
+                    reply_markup=InlineKeyboardMarkup([back_row(return_to), home_row()]),
                 )
             except Exception:
                 pass
         else:
-            await query.answer(to_small_caps("bot is live again."), show_alert=False)
+            await query.answer("🚀 " + to_small_caps("bot is live again."), show_alert=False)
+            live_menu = BOT_DATA["menus"].get("bot_live", {})
             try:
-                await query.message.edit_text(BOT_LIVE_TEXT, reply_markup=InlineKeyboardMarkup([back_row(), home_row()]))
+                await query.message.edit_text(
+                    live_menu.get("text") or _BOT_LIVE_FALLBACK,
+                    parse_mode=live_menu.get("parse_mode"),
+                    reply_markup=InlineKeyboardMarkup([back_row(return_to), home_row()]),
+                )
             except Exception:
                 pass
             # Tell every user who actually hit the maintenance wall — not
@@ -6263,6 +6350,7 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(cb_adm_menu_trans, pattern="^adm_menu_trans:"))
     app.add_handler(CallbackQueryHandler(cb_adm_menu_trans_edit, pattern="^adm_menu_trans_edit:"))
     app.add_handler(CallbackQueryHandler(cb_setlang, pattern="^setlang:"))
+    app.add_handler(CallbackQueryHandler(cb_bc_start_now, pattern="^bc_start_now$"))
     app.add_handler(CallbackQueryHandler(cb_adm_btn_add, pattern="^adm_btn_add:"))
     app.add_handler(CallbackQueryHandler(cb_adm_btn_del, pattern="^adm_btn_del:"))
     app.add_handler(CallbackQueryHandler(cb_adm_btn_style, pattern="^adm_btn_style:"))
