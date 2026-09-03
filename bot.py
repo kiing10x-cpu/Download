@@ -782,13 +782,10 @@ DEFAULT_MENUS = {
     },
     "maintenance": {
         "text": (
-            "╭━━━━━━━━━━━━━━━━━━╮\n"
-            "✦ 𝗠𝗔𝗜𝗡𝗧𝗘𝗡𝗔𝗡𝗖𝗘 ✦\n"
-            "╰━━━━━━━━━━━━━━━━━━╯\n\n"
-            "⚙️ 𝘛𝘩𝘦 𝘣𝘰𝘵 𝘪𝘴 𝘤𝘶𝘳𝘳𝘦𝘯𝘵𝘭𝘺 𝘶𝘯𝘥𝘦𝘳𝘨𝘰𝘪𝘯𝘨\n"
-            "𝘶𝘱𝘨𝘳𝘢𝘥𝘦𝘴 𝘵𝘰 𝘣𝘳𝘪𝘯𝘨 𝘺𝘰𝘶\n"
-            "𝘢 𝘴𝘮𝘰𝘰𝘵𝘩𝘦𝘳 𝘦𝘹𝘱𝘦𝘳𝘪𝘦𝘯𝘤𝘦.\n\n"
-            "⏳ 𝘞𝘦’𝘭𝘭 𝘣𝘦 𝘣𝘢𝘤𝘬 𝘴𝘰𝘰𝘯."
+            "🔧 " + to_bold_sans("Maintenance") + "\n\n"
+            + to_small_caps("the bot is briefly offline for scheduled upgrades.") + "\n"
+            + to_small_caps("we're working to bring you a smoother experience.") + "\n\n"
+            + "⏳ " + to_small_caps("we'll be back shortly — thanks for your patience.")
         ),
         "parse_mode": None,
         "image_file_id": None,
@@ -800,8 +797,8 @@ DEFAULT_MENUS = {
     },
     "maintenance_followup": {
         "text": (
-            "✧ " + to_small_caps("you'll be notified the moment we're back online") + "\n\n"
-            + to_small_caps("we appreciate your patience — thank you for sticking with us.") + " ✧"
+            to_small_caps("you'll be notified the moment we're back online.") + "\n"
+            + to_small_caps("thanks for sticking with us.")
         ),
         "parse_mode": None,
         "image_file_id": None,
@@ -813,12 +810,9 @@ DEFAULT_MENUS = {
     },
     "bot_live": {
         "text": (
-            "╭━━━━━━━━━━━━━━━━━━╮\n"
-            "✦ 𝗕𝗢𝗧 𝗜𝗦 𝗟𝗜𝗩𝗘 ✦\n"
-            "╰━━━━━━━━━━━━━━━━━━╯\n\n"
-            "✨ " + to_small_caps("maintenance has been completed successfully.") + "\n\n"
-            "🚀 " + to_small_caps("the bot is now upgraded, improved and smoother than before.") + "\n\n"
-            "💫 " + to_small_caps("thank you for your patience and support — enjoy the new experience.")
+            "✅ " + to_bold_sans("Bot is live") + "\n\n"
+            + to_small_caps("maintenance is complete — everything's back up and running.") + "\n"
+            + to_small_caps("thanks for your patience, and enjoy the improvements.")
         ),
         "parse_mode": None,
         "image_file_id": None,
@@ -1785,25 +1779,74 @@ async def show_force_join_prompt(update: Update, context: ContextTypes.DEFAULT_T
 # is hardcoded anymore; the constants below only exist as a last-resort
 # fallback if a menu entry is ever missing from storage.
 _MAINTENANCE_FOLLOWUP_FALLBACK = (
-    "✧ " + to_small_caps("you'll be notified the moment we're back online") + "\n\n"
-    + to_small_caps("we appreciate your patience — thank you for sticking with us.") + " ✧"
+    to_small_caps("you'll be notified the moment we're back online.") + "\n"
+    + to_small_caps("thanks for sticking with us.")
 )
 _BOT_LIVE_FALLBACK = (
-    "╭━━━━━━━━━━━━━━━━━━╮\n"
-    "✦ 𝗕𝗢𝗧 𝗜𝗦 𝗟𝗜𝗩𝗘 ✦\n"
-    "╰━━━━━━━━━━━━━━━━━━╯\n\n"
-    "✨ " + to_small_caps("maintenance has been completed successfully.")
+    "✅ " + to_bold_sans("Bot is live") + "\n\n"
+    + to_small_caps("maintenance is complete — everything's back up and running.")
 )
+
+
+async def _send_typewriter(context: ContextTypes.DEFAULT_TYPE, chat_id: int, text: str):
+    """Reveals the maintenance message progressively, word by word, instead
+    of dumping the full block instantly — so it visibly looks like it's
+    being typed live. Word-chunked (not char-by-char) to stay well clear of
+    Telegram's edit rate limits while still feeling animated."""
+    words = text.split(" ")
+    if len(words) <= 3:
+        try:
+            await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+            await asyncio.sleep(0.6)
+        except Exception:
+            pass
+        return await context.bot.send_message(chat_id=chat_id, text=text)
+
+    try:
+        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+    except Exception:
+        pass
+
+    steps = 10
+    chunk = max(1, -(-len(words) // steps))  # ceil division
+    msg = None
+    for i in range(chunk, len(words) + chunk, chunk):
+        shown = " ".join(words[:i])
+        is_last = i >= len(words)
+        cursor = "" if is_last else " ▌"
+        try:
+            if msg is None:
+                msg = await context.bot.send_message(chat_id=chat_id, text=shown + cursor)
+            else:
+                await msg.edit_text(shown + cursor)
+        except Exception:
+            pass
+        if not is_last:
+            try:
+                await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+            except Exception:
+                pass
+            await asyncio.sleep(0.45)
+    if msg is None:
+        msg = await context.bot.send_message(chat_id=chat_id, text=text)
+    return msg
 
 
 async def send_maintenance_notice(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
     """Show the two-part maintenance notice without stacking duplicates.
 
-    A short "typing…" pause now sits between the two messages instead of
-    firing them back-to-back — feels like a real reply rather than a wall
-    of text dumped at once, and gives a small, deliberate breathing gap."""
+    The main message is typed out live (word by word) instead of appearing
+    instantly, then a short "typing…" pause sits before the follow-up line
+    lands — feels like a real reply, not a wall of text dumped at once."""
     try:
-        first = await render_menu(context, chat_id, "maintenance")
+        menu = BOT_DATA["menus"].get("maintenance", {})
+        if menu.get("image_file_id") or menu.get("buttons"):
+            # admin has attached an image/buttons via the generic Menu & UI
+            # editor — animation doesn't make sense there, send normally.
+            first = await render_menu(context, chat_id, "maintenance")
+        else:
+            text = menu.get("text") or to_small_caps("maintenance is currently active.")
+            first = await _send_typewriter(context, chat_id, text)
 
         # small natural gap + a genuine "typing…" indicator before the
         # follow-up line lands, instead of both messages landing at once.
@@ -4402,11 +4445,7 @@ async def _render_adm_settings(update: Update, context: ContextTypes.DEFAULT_TYP
     kb = InlineKeyboardMarkup(
         [
             [styled_button("🖼 Set Welcome Image", callback_data="adm_menu_img:start"),
-             styled_button(
-                 toggle_label("🔒 Maintenance", s.get('maintenance')),
-                 callback_data="stgl:maintenance:adm_settings",
-             )],
-            [styled_button("✏️ Edit Maintenance Messages", callback_data="adm_menu_edit:maintenance")],
+             styled_button("🔒 Maintenance", callback_data="adm_maintenance")],
             [styled_button(f"⏱ Global Auto-Delete: {s.get('global_auto_delete_seconds', 0)}s", callback_data="adm_set_autodelete"),
              styled_button("💬 Auto-Replies", callback_data="adm_autoreply_list")],
             [styled_button("👤 Manage Admins", callback_data="adm_manage_admins"),
@@ -4428,8 +4467,7 @@ async def _render_adm_settings(update: Update, context: ContextTypes.DEFAULT_TYP
     )
     await query.edit_message_text(
         "⚙️ " + to_small_caps("settings") + "\n"
-        + to_small_caps("configure core bot behaviour below.") + "\n"
-        + to_small_caps("tip: the maintenance-on, waiting and bot-live-again messages are all editable text — tap ✏️ edit maintenance messages, or find them (maintenance / maintenance_followup / bot_live) under 🎨 menu & ui."),
+        + to_small_caps("configure core bot behaviour below."),
         reply_markup=kb,
     )
 
@@ -4437,6 +4475,53 @@ async def _render_adm_settings(update: Update, context: ContextTypes.DEFAULT_TYP
 async def cb_adm_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     await _render_adm_settings(update, context)
+
+
+# ---- Maintenance (single combined screen: status + toggle + set message) ---
+
+def _maintenance_kb(is_on: bool) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [styled_button(toggle_label("Maintenance", is_on), callback_data="stgl:maintenance:adm_maintenance")],
+            [styled_button("✏️ Set New Message", callback_data="adm_maint_setmsg")],
+            back_row("adm_settings"),
+            home_row(),
+        ]
+    )
+
+
+async def _render_adm_maintenance(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    is_on = bool(BOT_DATA["settings"].get("maintenance"))
+    current_text = BOT_DATA["menus"].get("maintenance", {}).get("text", "")
+    preview = (current_text[:250] + "…") if len(current_text) > 250 else current_text
+    status_line = (
+        "🔴 " + to_small_caps("active — only admins can use the bot right now")
+        if is_on else
+        "🟢 " + to_small_caps("off — bot is live and working normally")
+    )
+    body = (
+        "🔒 " + to_small_caps("maintenance") + "\n\n"
+        + status_line + "\n\n"
+        + to_small_caps("current message shown to users") + ":\n"
+        + preview
+    )
+    await query.edit_message_text(body, reply_markup=_maintenance_kb(is_on))
+
+
+async def cb_adm_maintenance(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    await _render_adm_maintenance(update, context)
+
+
+async def cb_adm_maint_setmsg(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    context.user_data["awaiting"] = "maintenance_set_msg"
+    await query.message.reply_text(
+        "✏️ " + to_small_caps("send the new maintenance message now") + "\n"
+        + to_small_caps("this is exactly what users will see while maintenance is on.")
+    )
 
 
 # ---- Owner/Developer credit button (#10) --------------------------------------
@@ -4782,38 +4867,17 @@ async def cb_settings_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE)
     save_data()
 
     if key == "maintenance":
-        # BUGFIX — this confirmation screen was never pushed onto the admin
-        # nav stack, so cb_adm_back's stack.pop() ended up dropping the real
-        # parent (adm_settings) instead, dumping the admin straight onto the
-        # Admin Home panel. Pointing "Back" directly at `return_to` (which is
-        # always "adm_settings" here) fixes that without touching the stack.
+        # Single combined screen now (status + toggle + set-message all in
+        # one place) — toggling just re-renders that same screen instead of
+        # showing a separate bulky "MAINTENANCE ON" / "BOT IS LIVE" card.
         if BOT_DATA["settings"]["maintenance"]:
             await query.answer("🔒 " + to_small_caps("maintenance enabled."), show_alert=False)
-            try:
-                await query.message.edit_text(
-                    "╭━━━━━━━━━━━━━━━━━━╮\n"
-                    "✦ 𝗠𝗔𝗜𝗡𝗧𝗘𝗡𝗔𝗡𝗖𝗘 𝗢𝗡 ✦\n"
-                    "╰━━━━━━━━━━━━━━━━━━╯\n\n"
-                    "⚙️ " + to_small_caps("all user actions are now locked.") + "\n"
-                    + to_small_caps("only admins can use the bot while maintenance is active."),
-                    reply_markup=InlineKeyboardMarkup([back_row(return_to), home_row()]),
-                )
-            except Exception:
-                pass
         else:
-            await query.answer("🚀 " + to_small_caps("bot is live again."), show_alert=False)
-            live_menu = BOT_DATA["menus"].get("bot_live", {})
-            try:
-                await query.message.edit_text(
-                    live_menu.get("text") or _BOT_LIVE_FALLBACK,
-                    parse_mode=live_menu.get("parse_mode"),
-                    reply_markup=InlineKeyboardMarkup([back_row(return_to), home_row()]),
-                )
-            except Exception:
-                pass
+            await query.answer("🟢 " + to_small_caps("bot is live again."), show_alert=False)
             # Tell every user who actually hit the maintenance wall — not
             # just the admin looking at this panel — that the bot is back.
             await broadcast_bot_live(context)
+        await _render_adm_maintenance(update, context)
         return
 
     renderer = SCREEN_RENDERERS.get(return_to)
@@ -5372,7 +5436,24 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
     # refreshed panel view stays in chat, not the raw text the admin typed.
     await delete_incoming(update)
 
-    if awaiting.startswith("menu_text:"):
+    if awaiting == "maintenance_set_msg":
+        context.user_data.pop("awaiting", None)
+        menu = BOT_DATA["menus"]["maintenance"]
+        menu["text"] = text
+        menu["updated_by"] = update.effective_user.id
+        menu["updated_at"] = datetime.utcnow().isoformat()
+        save_data()
+        # Confirmation + the combined status/toggle screen right below it,
+        # so the admin can flip maintenance on/off immediately without
+        # hunting for a separate button.
+        is_on = bool(BOT_DATA["settings"].get("maintenance"))
+        await update.message.reply_text(
+            "✅ " + to_small_caps("maintenance message updated.") + "\n\n"
+            + to_small_caps("preview") + ":\n" + text,
+            reply_markup=_maintenance_kb(is_on),
+        )
+
+    elif awaiting.startswith("menu_text:"):
         menu_id = awaiting.split(":", 1)[1]
         context.user_data.pop("awaiting", None)
         menu = BOT_DATA["menus"][menu_id]
@@ -6230,6 +6311,7 @@ SCREEN_RENDERERS.update(
         "adm_bc_delmenu": _render_adm_bc_delmenu,
         "adm_menu_ui": _render_adm_menu_ui,
         "adm_settings": _render_adm_settings,
+        "adm_maintenance": _render_adm_maintenance,
         "adm_danger": _render_adm_danger,
         "adm_owner_contact": _render_adm_owner_contact,
         "adm_logger_channel": _render_adm_logger_channel,
@@ -6357,6 +6439,8 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(cb_btn_type_pick, pattern="^btntype:"))
 
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_settings")(cb_adm_settings), pattern="^adm_settings$"))
+    app.add_handler(CallbackQueryHandler(nav_tracked("adm_maintenance")(cb_adm_maintenance), pattern="^adm_maintenance$"))
+    app.add_handler(CallbackQueryHandler(cb_adm_maint_setmsg, pattern="^adm_maint_setmsg$"))
     app.add_handler(CallbackQueryHandler(cb_adm_lang_manage, pattern="^adm_lang_manage$"))
     app.add_handler(CallbackQueryHandler(cb_adm_lang_add, pattern="^adm_lang_add$"))
     app.add_handler(CallbackQueryHandler(cb_adm_lang_add_do, pattern="^adm_lang_add_do:"))
