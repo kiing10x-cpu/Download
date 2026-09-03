@@ -2172,6 +2172,16 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if is_blocked(user_obj.id) and not is_admin(user_obj.id):
         return  # silently ignored, per spec
     is_new = touch_user(update)
+    # FIX — this notification used to fire only AFTER the rate-limit /
+    # maintenance / disclaimer+force-join gate checks below all passed. Any
+    # one of those returning early (extremely common: force-join is the
+    # normal setup) meant the "New User Started Bot" detail card never went
+    # out. And because touch_user() already saved the user on this very
+    # first call, is_new would be False on every later /start from that
+    # same person — so admins could end up NEVER being notified about a
+    # new user at all. Fire it here, right where is_new is known, before
+    # anything else has a chance to return early.
+    await notify_admins_new_start(context, update, is_new)
     if not check_rate_limit(user_obj.id):
         await update.message.reply_text("⏳ " + to_small_caps("slow down, too many requests too fast."))
         await delete_incoming(update)
@@ -2187,9 +2197,6 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     BOT_DATA["metrics"]["start_count"] = BOT_DATA["metrics"].get("start_count", 0) + 1
     save_data()
-    # New user, or bot (re)started inside a group — full detail card to
-    # every admin's DM + the logger group (if configured).
-    await notify_admins_new_start(context, update, is_new)
 
     sent = await show_post_onboarding(context, update.effective_chat.id, str(user_obj.id))
     await track_and_refresh_panel(context, update.effective_chat.id, "start", sent)
@@ -2856,9 +2863,19 @@ async def cb_get_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     status_msg = await query.message.reply_text("🎵 " + to_small_caps("extracting audio..."))
 
+    # FIX — "ffmpeg audio extraction failed ... Output file does not
+    # contain any stream": the old selector "best[vcodec!=none][acodec!=
+    # none]/best" falls back to plain "best" whenever Instagram serves this
+    # post as separate video/audio DASH tracks instead of one muxed file.
+    # "best" alone then happily grabs the highest-resolution VIDEO-ONLY
+    # track (exactly the 1440x2560 vp09 stream seen in the error) — which
+    # has no audio at all, so ffmpeg's "-vn" strip has nothing left to
+    # write out. Since this button only ever needs the audio, ask yt-dlp
+    # for an audio-only format first; only fall back toward muxed/video
+    # formats if a post genuinely has no separate audio track.
     def build_source_opts():
         opts = {
-            "format": "best[vcodec!=none][acodec!=none]/best",
+            "format": "bestaudio/best[acodec!=none]/best",
             "outtmpl": os.path.join(DOWNLOAD_DIR, "%(id)s_audiosrc_" + str(int(time.time())) + ".%(ext)s"),
             "quiet": True,
             "no_warnings": True,
@@ -2872,7 +2889,15 @@ async def cb_get_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         info = _ytdlp_extract_with_retry(opts, url, download=True)
         with yt_dlp.YoutubeDL(opts) as ydl:
             fp = ydl.prepare_filename(info)
-        return fp if os.path.exists(fp) else None
+        fp = fp if os.path.exists(fp) else None
+        # yt-dlp's info dict tells us the selected format's codecs without
+        # needing ffprobe. If we somehow still landed on a video-only
+        # format (acodec == "none"), surface that clearly instead of
+        # letting ffmpeg fail later with a cryptic "no stream" error.
+        acodec = (info or {}).get("acodec")
+        if fp and acodec == "none":
+            raise RuntimeError("this post has no separate audio track available to extract.")
+        return fp
 
     def extract_audio_ffmpeg(src_path: str) -> str:
         """Direct ffmpeg call — no ffprobe involved."""
