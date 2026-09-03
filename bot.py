@@ -657,6 +657,15 @@ ERROR_KIND_INFO = {
         "Usually the link was private, deleted, or Instagram briefly "
         "rate-limited the server. Ask the user to retry in a minute.",
     ),
+    "conflict": (
+        "⚔️ Duplicate Bot Instance",
+        "Telegram rejected polling because another process is already "
+        "polling with this same BOT_TOKEN.",
+        "Stop the other running copy of this bot (an old deployment, a "
+        "second terminal, a duplicate server) — only one instance can poll "
+        "at a time. This can't be fixed from inside this process, since "
+        "the conflicting instance is the other one.",
+    ),
     "unhandled": (
         "🐞 Unexpected Error",
         "Something failed outside the usual error handling.",
@@ -671,11 +680,14 @@ def log_error(kind: str, detail: str) -> None:
     Activity Log screen consistent (same field names, always categorized)
     instead of every call site hand-rolling its own dict shape."""
     entries = BOT_DATA.setdefault("error_log", [])
+    next_id = BOT_DATA.get("error_log_next_id", 1)
     entries.append({
+        "id": next_id,
         "time": datetime.utcnow().isoformat(),
         "kind": kind if kind in ERROR_KIND_INFO else "unhandled",
         "detail": str(detail)[:400],
     })
+    BOT_DATA["error_log_next_id"] = next_id + 1
     if len(entries) > 200:
         del entries[: len(entries) - 200]
 
@@ -1281,7 +1293,7 @@ def build_join_details(update: Update, is_new: bool) -> str:
     if chat.type in ("group", "supergroup"):
         lines.append(f"👨‍👩‍👧 Group: {chat.title}")
         lines.append(f"🆔 Group ID: {chat.id}")
-    lines.append(f"🕒 Time (UTC): {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}")
+    lines.append(f"🕒 Time (IST): {now_ist_str()}")
     return "\n".join(lines)
 
 
@@ -1326,7 +1338,7 @@ async def log_user_activity(context: ContextTypes.DEFAULT_TYPE, update: Update, 
         "🕵️ Live Activity\n\n"
         f"👤 {user.full_name} {uname}\n"
         f"🆔 {user.id}\n"
-        f"🕒 {entry['time'][11:19]} UTC\n"
+        f"🕒 {iso_to_ist_str(entry['time'], '%H:%M:%S')} IST\n"
         f"🔗 {url}"
     )
     await dm_all_admins(context, text)
@@ -1357,6 +1369,32 @@ def bump_usage(uid: str):
         u["downloads_month_key"] = month
     u["downloads_today"] += 1
     u["downloads_month"] += 1
+
+
+IST_OFFSET = timedelta(hours=5, minutes=30)
+
+
+def to_ist(dt: datetime) -> datetime:
+    """All timestamps are stored in UTC internally (unchanged, so old data
+    and any external tooling stays correct) — this only converts for
+    on-screen display, since admins kept asking why times looked wrong."""
+    return dt + IST_OFFSET
+
+
+def now_ist_str(fmt: str = "%Y-%m-%d %H:%M:%S") -> str:
+    return to_ist(datetime.utcnow()).strftime(fmt)
+
+
+def iso_to_ist_str(iso_str: str, fmt: str = "%d %b %Y, %H:%M") -> str:
+    """Safely convert a stored UTC ISO timestamp to an IST display string.
+    Falls back to the raw stored value if it can't be parsed, rather than
+    ever raising."""
+    if not iso_str:
+        return "?"
+    try:
+        return to_ist(datetime.fromisoformat(iso_str)).strftime(fmt)
+    except Exception:
+        return str(iso_str)
 
 
 def human_uptime() -> str:
@@ -2140,7 +2178,12 @@ async def cb_bc_start_now(update: Update, context: ContextTypes.DEFAULT_TYPE):
     disclaimer / force-join for us — so if we're here, the user is clear
     to proceed. We deliver the same experience as /start, straight into
     the chat, the instant they tap the button (no separate manual start
-    needed, no URL redirect)."""
+    needed, no URL redirect).
+
+    Also attributes the tap back to the broadcast it came from (via the id
+    baked into callback_data) and live-edits that broadcast's admin report
+    with an updated started-count — so the admin watches it climb in real
+    time instead of only ever seeing a one-time snapshot."""
     query = update.callback_query
     user_obj = update.effective_user
     chat_id = update.effective_chat.id
@@ -2152,6 +2195,31 @@ async def cb_bc_start_now(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     is_new = touch_user(update)
     BOT_DATA["metrics"]["start_count"] = BOT_DATA["metrics"].get("start_count", 0) + 1
+
+    # Attribute this tap to its broadcast, if it carries one.
+    parts = query.data.split(":", 1)
+    if len(parts) == 2:
+        try:
+            broadcast_id = int(parts[1])
+        except ValueError:
+            broadcast_id = None
+        if broadcast_id is not None:
+            entry = next(
+                (e for e in BOT_DATA.get("broadcast_log", []) if e.get("id") == broadcast_id), None
+            )
+            if entry is not None and user_obj.id not in entry.setdefault("start_clicked_users", []):
+                entry["start_clicked_users"].append(user_obj.id)
+                entry["start_clicked"] = entry.get("start_clicked", 0) + 1
+                if entry.get("report_chat_id") and entry.get("report_message_id"):
+                    try:
+                        await context.bot.edit_message_text(
+                            chat_id=entry["report_chat_id"],
+                            message_id=entry["report_message_id"],
+                            text=_broadcast_report_text(entry),
+                        )
+                    except Exception:
+                        pass  # report message may have been deleted/edited elsewhere — clicks are still counted
+
     save_data()
     await notify_admins_new_start(context, update, is_new)
     sent = await show_post_onboarding(context, chat_id, str(user_obj.id))
@@ -2234,6 +2302,14 @@ async def cb_agree_terms(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ----------------------------------------------------------------------------
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # BUGFIX — root cause of the recurring "'NoneType' object has no
+    # attribute 'reply_to_message'" crash in the Activity Log: this handler
+    # is filter-matched against update.effective_message, which is also
+    # populated for edited messages / channel posts — but update.message
+    # itself is None for those. Every line below reads update.message
+    # directly, so without this guard any edited message crashed here.
+    if update.message is None:
+        return
     user_obj = update.effective_user
     if is_blocked(user_obj.id) and not is_admin(user_obj.id):
         return  # silently ignored, per spec
@@ -3664,25 +3740,28 @@ def admin_panel_keyboard():
     # side for a cleaner, more predictable control flow. Grouped by
     # purpose: money & plans, growth & sharing, people-facing ops,
     # communication tools, content/config, then diagnostics.
+    # UPI Settings now lives inside 💎 Premium (it's payment config for
+    # premium plans, so it belongs with them, not as its own top-level
+    # button) and 🕵️ Live User Feed is paired with 👥 Users & Groups since
+    # both are user-monitoring tools — nothing sits alone on its own row.
     return InlineKeyboardMarkup(
         [
             [styled_button("💎 Premium", callback_data="adm_premium"),
-             styled_button("💳 UPI Settings", callback_data="adm_upi")],
-            [styled_button("🏆 Leaderboard", callback_data="adm_leaderboard"),
-             styled_button("📤 Share Settings", callback_data="adm_share")],
+             styled_button("🏆 Leaderboard", callback_data="adm_leaderboard")],
+            [styled_button("📤 Share Settings", callback_data="adm_share"),
+             styled_button("📢 Broadcast", callback_data="adm_broadcast")],
             [styled_button("👨‍💻 Developer Settings", callback_data="adm_devsettings"),
              styled_button("🎧 Support Settings", callback_data="adm_support_settings")],
             [styled_button("🎫 Tickets", callback_data="adm_tickets"),
              styled_button("📊 Bot Stats", callback_data="adm_stats")],
-            [styled_button("📢 Broadcast", callback_data="adm_broadcast"),
-             styled_button("👥 Users & Groups", callback_data="adm_users")],
+            [styled_button("👥 Users & Groups", callback_data="adm_users"),
+             styled_button("🕵️ Live User Feed", callback_data="adm_live")],
             [styled_button("🎨 Menu & UI", callback_data="adm_menu_ui"),
              styled_button("🧪 Test Commands", callback_data="adm_cmdtest")],
             [styled_button("⚙️ Settings", callback_data="adm_settings"),
              styled_button("🛑 Danger Zone", callback_data="adm_danger")],
             [styled_button("📋 Activity Log", callback_data="adm_activity"),
              styled_button("🧪 Self-Test", callback_data="adm_selftest")],
-            [styled_button("🕵️ Live User Feed", callback_data="adm_live")],
         ]
     )
 
@@ -3731,27 +3810,101 @@ async def _render_adm_activity(update: Update, context: ContextTypes.DEFAULT_TYP
         # screen, and each entry explains what happened, why, and how to
         # fix it — not just a raw exception string.
         blocks = []
-        for e in entries:
+        fix_rows = []
+        for n, e in enumerate(entries, 1):
             kind = e.get("kind", "unhandled")
             label, why, fix = ERROR_KIND_INFO.get(kind, ERROR_KIND_INFO["unhandled"])
-            when = (e.get("time") or "?")[:16].replace("T", " ")
+            when = iso_to_ist_str(e.get("time"), "%Y-%m-%d %H:%M")
             detail = e.get("detail") or e.get("error") or ""
             blocks.append(
-                f"{label}  •  {when} UTC\n"
+                f"{n}. {label}  •  {when} IST\n"
                 f"What: {why}\n"
                 f"Fix: {fix}\n"
                 f"Detail: {detail[:180]}"
             )
+            if e.get("id") is not None:
+                fix_rows.append([styled_button(
+                    f"🛠 Fix Now #{n} — {label}", callback_data=f"adm_fix:{e['id']}"
+                )])
         body = (
             "📋 " + to_small_caps("activity log") + f" — {to_small_caps('last')} {len(entries)}\n\n"
             + "\n\n".join(blocks)
         )
-    kb = InlineKeyboardMarkup([
-        [styled_button("🗑 Clear Log", callback_data="adm_clear_activity")],
-        back_row(),
-        home_row(),
-    ])
+    kb_rows = list(fix_rows) if entries else []
+    kb_rows.append([styled_button("🗑 Clear Log", callback_data="adm_clear_activity")])
+    kb_rows.append(back_row())
+    kb_rows.append(home_row())
+    kb = InlineKeyboardMarkup(kb_rows)
     await query.edit_message_text(body, reply_markup=kb)
+
+
+async def cb_adm_fix_now(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """🛠 Fix Now — attempts a real, automatic remediation for the error
+    kinds that actually have one (re-checks force-join channels live,
+    forces a fresh MongoDB reconnect attempt). For kinds that have no code-
+    level fix (a duplicate instance, a one-off download failure, a bug that
+    needs a real code change), it explains exactly why and what a human
+    needs to do instead — it never just claims success."""
+    query = update.callback_query
+    if not is_admin(update.effective_user.id):
+        await query.answer()
+        return
+    try:
+        err_id = int(query.data.split(":", 1)[1])
+    except (IndexError, ValueError):
+        await query.answer("⚠️ " + to_small_caps("bad fix reference."), show_alert=True)
+        return
+    entry = next((e for e in BOT_DATA.get("error_log", []) if e.get("id") == err_id), None)
+    if entry is None:
+        await query.answer("⚠️ " + to_small_caps("that log entry is gone — log was cleared."), show_alert=True)
+        return
+    kind = entry.get("kind", "unhandled")
+    await query.answer("🛠 " + to_small_caps("running fix..."))
+
+    if kind == "force_join":
+        targets = _force_join_targets()
+        if not targets:
+            result = "ℹ️ " + to_small_caps("no force-join channel is configured — nothing to check.")
+        else:
+            lines = ["🔎 " + to_small_caps("re-checking force-join channel(s) now:")]
+            for t in targets:
+                chat_id = t.get("chat_id")
+                if not chat_id:
+                    lines.append(f"• {t.get('link')} — " + to_small_caps("link-only target, can't be auto-verified."))
+                    continue
+                try:
+                    me = await context.bot.get_me()
+                    member = await context.bot.get_chat_member(chat_id=chat_id, user_id=me.id)
+                    if member.status in ("administrator", "creator"):
+                        lines.append(f"• {chat_id} — ✅ " + to_small_caps("bot is admin here, looks correctly configured."))
+                    else:
+                        lines.append(f"• {chat_id} — ⚠️ " + to_small_caps(f"bot can see this chat but is only '{member.status}' — make it admin."))
+                except Exception as e:
+                    lines.append(f"• {chat_id} — ❌ " + to_small_caps(f"still failing: {e}"))
+            result = "\n".join(lines)
+
+    elif kind == "mongo":
+        global _mongo_collection
+        _mongo_collection = None  # force a fresh connection attempt
+        col = get_mongo_collection()
+        if col is not None:
+            result = "✅ " + to_small_caps("reconnected to mongodb successfully.")
+        else:
+            result = "❌ " + to_small_caps(f"still can't connect — {_mongo_last_error or 'unknown error'}")
+
+    elif kind == "conflict":
+        result = (
+            "ℹ️ " + to_small_caps("this can't be fixed from inside this process.") + "\n"
+            + to_small_caps("make sure no other copy of this bot (old deploy, second terminal, another server) is running with the same bot token, then stop it.")
+        )
+
+    else:
+        result = "ℹ️ " + to_small_caps(f"'{kind}' has no automatic fix — see the fix hint above for the manual step.")
+
+    try:
+        await query.message.reply_text(result)
+    except Exception:
+        pass
 
 
 async def cb_adm_activity(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3866,8 +4019,27 @@ async def cb_run_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = query.data.split(":", 1)[1]
     chat_id = update.effective_chat.id
 
+    # Auto-clean the Test Commands screen: delete whatever result the last
+    # tap here left behind before running a new one, so repeatedly tapping
+    # through commands doesn't fill the chat with old test output.
+    for old_mid in context.user_data.get("last_test_msg_ids", []):
+        try:
+            await context.bot.delete_message(chat_id, old_mid)
+        except Exception:
+            pass
+    context.user_data["last_test_msg_ids"] = []
+
     async def send(text, **kwargs):
-        await context.bot.send_message(chat_id, text, **kwargs)
+        sent = await context.bot.send_message(chat_id, text, **kwargs)
+        context.user_data.setdefault("last_test_msg_ids", []).append(sent.message_id)
+        return sent
+
+    async def track(sent_msg):
+        """For calls that send via context.bot directly (documents, etc.)
+        instead of the send() helper above — still gets cleaned up next run."""
+        if sent_msg is not None:
+            context.user_data.setdefault("last_test_msg_ids", []).append(sent_msg.message_id)
+        return sent_msg
 
     try:
         if key == "start":
@@ -3894,25 +4066,20 @@ async def cb_run_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer()
             t0 = time.monotonic()
             msg = await context.bot.send_message(chat_id, "🏓 Pong!")
+            await track(msg)
             ms = int((time.monotonic() - t0) * 1000)
-            await msg.edit_text(f"🏓 Pong! {ms}ms")
+            col = get_mongo_collection()
+            backend = "MongoDB ✅" if col is not None else "Local JSON"
+            await msg.edit_text(
+                f"🏓 Pong! {ms}ms\n\n"
+                f"⏱ Uptime: {human_uptime()}\n"
+                f"🗄 Storage: {backend}\n"
+                f"🕒 Server time: {now_ist_str('%d %b %Y, %H:%M:%S')} IST\n"
+            )
 
         elif key == "health":
             await query.answer()
-            col = get_mongo_collection()
-            backend = "MongoDB ✅" if col is not None else "Local JSON fallback"
-            mem = get_memory_usage_mb()
-            text = (
-                "🩺 Health\n\n"
-                f"⏱ Uptime: {human_uptime()}\n"
-                f"💾 Memory: {mem if mem is not None else 'n/a'} MB\n"
-                f"🗄 Storage: {backend}\n"
-                f"👥 Users: {len(BOT_DATA['users'])}\n"
-                f"📢 Broadcasts: {len(BOT_DATA['broadcast_log'])}\n"
-                f"🔒 Maintenance: {'✅ ON' if BOT_DATA['settings'].get('maintenance') else '❌ OFF'}\n"
-                f"🎛 Rate limit: {BOT_DATA['settings'].get('rate_limit_max')}/{BOT_DATA['settings'].get('rate_limit_window_seconds')}s\n"
-            )
-            await send(text)
+            await send(build_health_text())
 
         elif key == "dbstatus":
             if not is_owner(admin_id):
@@ -3938,7 +4105,8 @@ async def cb_run_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 with open(path, "w", encoding="utf-8") as f:
                     json.dump(BOT_DATA, f, ensure_ascii=False, indent=2)
                 with open(path, "rb") as f:
-                    await context.bot.send_document(chat_id, document=f, filename="bot_data_backup.json")
+                    doc = await context.bot.send_document(chat_id, document=f, filename="bot_data_backup.json")
+                await track(doc)
                 os.remove(path)
 
         elif key == "exportusers":
@@ -3953,7 +4121,8 @@ async def cb_run_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     for uid, info in BOT_DATA["users"].items():
                         writer.writerow([uid, info.get("name"), info.get("username"), info.get("joined"), info.get("last_active")])
                 with open(path, "rb") as f:
-                    await context.bot.send_document(chat_id, document=f, filename="users_export.csv")
+                    doc = await context.bot.send_document(chat_id, document=f, filename="users_export.csv")
+                await track(doc)
                 os.remove(path)
 
         elif key == "export":
@@ -4029,7 +4198,8 @@ async def _render_adm_live(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         for e in entries:
             uname = f"@{e['username']}" if e.get("username") else "(no username)"
-            lines.append(f"• {e.get('time', '?')[11:19]} — {e.get('name')} {uname} [{e.get('user_id')}]\n  ↳ {e.get('url')}")
+            when = iso_to_ist_str(e.get("time"), "%H:%M:%S")
+            lines.append(f"• {when} IST — {e.get('name')} {uname} [{e.get('user_id')}]\n  ↳ {e.get('url')}")
     body = "\n".join(lines)
     s = BOT_DATA["settings"]
     kb = InlineKeyboardMarkup(
@@ -4223,7 +4393,7 @@ async def cb_adm_users_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
 BROADCAST_SEND_DELAY = 0.05  # ~20 msg/sec — safely under Telegram's cap
 
 
-async def _broadcast_start_button_kb(context: ContextTypes.DEFAULT_TYPE):
+async def _broadcast_start_button_kb(context: ContextTypes.DEFAULT_TYPE, broadcast_id=None):
     """Builds the optional single-button keyboard attached to every
     broadcast when 'Attach Start Button' is ON.
 
@@ -4232,8 +4402,49 @@ async def _broadcast_start_button_kb(context: ContextTypes.DEFAULT_TYPE):
     "START" button afterwards, so most people never actually re-engaged.
     It's now a real callback button: tapping it fires cb_bc_start_now
     below, which delivers the full /start experience immediately, right
-    there in the broadcast message's chat — no extra tap needed."""
-    return InlineKeyboardMarkup([[styled_button("🚀 Start Bot", callback_data="bc_start_now")]])
+    there in the broadcast message's chat — no extra tap needed.
+
+    The broadcast_id is baked into callback_data so cb_bc_start_now can
+    attribute each tap back to the exact broadcast it came from, and live-
+    update that broadcast's report with how many people have started."""
+    cb = f"bc_start_now:{broadcast_id}" if broadcast_id is not None else "bc_start_now"
+    return InlineKeyboardMarkup([[styled_button("🚀 Start Bot", callback_data=cb)]])
+
+
+def _broadcast_report_text(entry: dict) -> str:
+    """Builds the broadcast completion report — used both right after a
+    broadcast finishes sending, and again every time cb_bc_start_now edits
+    it live as users tap the 🚀 Start Bot button, so the delivered/blocked/
+    failed/started numbers are always the same text in both places."""
+    total = entry.get("total_targeted", 0)
+    sent = entry.get("recipients", 0)
+    blocked = entry.get("blocked", 0)
+    invalid_chat = entry.get("invalid_chat", 0)
+    other_failed = entry.get("other_failed", 0)
+    recovered = entry.get("recovered", 0)
+    failed_total = blocked + invalid_chat + other_failed
+    start_attached = entry.get("start_attached", False)
+    started = entry.get("start_clicked", 0)
+    report = (
+        "✅ " + to_small_caps("broadcast complete") + "\n\n"
+        + to_small_caps("total targeted") + f": {total}\n"
+        + to_small_caps("delivered successfully") + f": {sent}\n"
+        + to_small_caps("not delivered") + f": {failed_total}\n\n"
+        + to_small_caps("breakdown — why some were not delivered") + "\n"
+        + f"🚫 " + to_small_caps("blocked the bot / account deactivated") + f": {blocked}\n"
+        + f"⚠️ " + to_small_caps("chat unavailable / never started the bot") + f": {invalid_chat}\n"
+        + f"❓ " + to_small_caps("other delivery error") + f": {other_failed}\n"
+        + (f"🔁 " + to_small_caps("recovered after a brief rate-limit pause") + f": {recovered}\n" if recovered else "")
+        + "\n🔐 " + to_small_caps("forward-lock") + f": {'✅ ON' if entry.get('protect') else '❌ OFF'}\n"
+        + "🚀 " + to_small_caps("start button attached") + f": {'YES' if start_attached else 'NO'}"
+    )
+    if start_attached:
+        report += (
+            "\n\n📊 " + to_small_caps("live — start button activity") + "\n"
+            + "👆 " + to_small_caps("clicked start") + f": {started} / {sent}"
+            + (f" ({started * 100 // sent}%)" if sent else "")
+        )
+    return report
 
 
 async def _render_adm_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4293,13 +4504,16 @@ async def cb_adm_bc_log(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         lines = [to_small_caps("📜 last 10 broadcasts") + "\n"]
         for e in entries:
-            when = e.get("at", "?")[:16].replace("T", " ")
-            lines.append(
+            when = iso_to_ist_str(e.get("at"), "%Y-%m-%d %H:%M") + " IST"
+            line = (
                 f"• {when} — "
                 + to_small_caps("delivered") + f" {e.get('recipients', 0)} • "
                 + to_small_caps("blocked") + f" {e.get('blocked', 0)} • "
                 + to_small_caps("failed") + f" {e.get('other_failed', 0)}"
             )
+            if e.get("start_attached"):
+                line += " • " + to_small_caps("started") + f" {e.get('start_clicked', 0)}"
+            lines.append(line)
         text = "\n".join(lines)
     kb = InlineKeyboardMarkup([back_row("adm_broadcast")])
     await query.edit_message_text(text, reply_markup=kb)
@@ -4312,7 +4526,9 @@ async def do_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     s = BOT_DATA["settings"]
     protect = s.get("protect_broadcasts", True) or s.get("lock_all_content", False)
     attach_start = s.get("broadcast_attach_start_button", True)
-    start_kb = await _broadcast_start_button_kb(context) if attach_start else None
+    broadcast_id = BOT_DATA.get("broadcast_next_id", 1)
+    BOT_DATA["broadcast_next_id"] = broadcast_id + 1
+    start_kb = await _broadcast_start_button_kb(context, broadcast_id) if attach_start else None
 
     status_msg = await update.message.reply_text(
         "📢 " + to_small_caps("broadcast in progress...") + " 0%"
@@ -4386,39 +4602,41 @@ async def do_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     failed_total = blocked + invalid_chat + other_failed
     at = datetime.utcnow().isoformat()
-    BOT_DATA["broadcast_log"].append(
-        {
-            "by": update.effective_user.id,
-            "at": at,
-            "recipients": sent,
-            "blocked": blocked,
-            "invalid_chat": invalid_chat,
-            "other_failed": other_failed,
-            "recovered": recovered,
-            "total_targeted": total,
-            "messages": delivered_ids,  # {user_id: message_id} — used by Delete Broadcast
-        }
-    )
+    entry = {
+        "id": broadcast_id,
+        "by": update.effective_user.id,
+        "at": at,
+        "recipients": sent,
+        "blocked": blocked,
+        "invalid_chat": invalid_chat,
+        "other_failed": other_failed,
+        "recovered": recovered,
+        "total_targeted": total,
+        "messages": delivered_ids,  # {user_id: message_id} — used by Delete Broadcast
+        "protect": protect,
+        "start_attached": bool(start_kb),
+        "start_clicked": 0,
+        "start_clicked_users": [],
+        "report_chat_id": None,
+        "report_message_id": None,
+    }
+    BOT_DATA["broadcast_log"].append(entry)
     BOT_DATA["metrics"]["broadcasts_sent"] = BOT_DATA["metrics"].get("broadcasts_sent", 0) + 1
     save_data()
 
-    report = (
-        "✅ " + to_small_caps("broadcast complete") + "\n\n"
-        + to_small_caps("total targeted") + f": {total}\n"
-        + to_small_caps("delivered successfully") + f": {sent}\n"
-        + to_small_caps("not delivered") + f": {failed_total}\n\n"
-        + to_small_caps("breakdown — why some were not delivered") + "\n"
-        + f"🚫 " + to_small_caps("blocked the bot / account deactivated") + f": {blocked}\n"
-        + f"⚠️ " + to_small_caps("chat unavailable / never started the bot") + f": {invalid_chat}\n"
-        + f"❓ " + to_small_caps("other delivery error") + f": {other_failed}\n"
-        + (f"🔁 " + to_small_caps("recovered after a brief rate-limit pause") + f": {recovered}\n" if recovered else "")
-        + "\n🔐 " + to_small_caps("forward-lock") + f": {'✅ ON' if protect else '❌ OFF'}\n"
-        + "🚀 " + to_small_caps("start button attached") + f": {'YES' if start_kb else 'NO'}"
-    )
+    report = _broadcast_report_text(entry)
     try:
         await status_msg.edit_text(report)
+        # Remember where this report lives so cb_bc_start_now can keep it
+        # live-updated as users tap 🚀 Start Bot, instead of the numbers
+        # only ever being a one-time snapshot.
+        entry["report_chat_id"] = status_msg.chat_id
+        entry["report_message_id"] = status_msg.message_id
     except Exception:
-        await update.message.reply_text(report)
+        sent_report = await update.message.reply_text(report)
+        entry["report_chat_id"] = sent_report.chat_id
+        entry["report_message_id"] = sent_report.message_id
+    save_data()
     await log_event(
         context,
         f"📢 Broadcast sent by {update.effective_user.id} — {sent}/{total} delivered "
@@ -5405,6 +5623,7 @@ def _build_adm_premium_view():
         [styled_button("✏️ Set Daily Limit", callback_data="adm_set_dailylimit")],
         [styled_button("👥 See Premium Users", callback_data="adm_premium_users")],
         [styled_button("➕ Add Premium User (by ID)", callback_data="adm_premium_grant")],
+        [styled_button("💳 UPI Settings", callback_data="adm_upi")],
     ]
     if not plans:
         lines.append("No plans yet — tap ➕ Add Plan below.")
@@ -5547,7 +5766,7 @@ def _build_adm_upi_view():
     kb = InlineKeyboardMarkup([
         [styled_button("✏️ Set UPI ID", callback_data="adm_upi_set")],
         [styled_button("❌ Clear", callback_data="adm_upi_clear")],
-        back_row(), home_row(),
+        back_row("adm_premium"), home_row(),
     ])
     return f"💳 UPI Settings\n\nCurrent: {upi or '(not set)'}", kb
 
@@ -6305,24 +6524,55 @@ async def cmd_dbstatus(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text)
 
 
+def build_health_text() -> str:
+    """Single source of truth for /health, used by both the real command
+    and the admin panel's Test Commands screen, so the two never drift out
+    of sync. Covers every subsystem the bot actually depends on, not just
+    a subset — storage, timing, limits, downloads, premium, and every
+    optional dependency that silently degrades instead of crashing."""
+    col = get_mongo_collection()
+    backend = "MongoDB ✅ connected" if col is not None else (
+        f"❌ MongoDB configured but not connected ({_mongo_last_error})" if MONGO_URI
+        else "Local JSON file (no MongoDB configured)"
+    )
+    mem = get_memory_usage_mb()
+    s = BOT_DATA["settings"]
+    premium_count = sum(1 for uid in BOT_DATA["users"] if is_premium_active(uid))
+    recent_errors = [e for e in BOT_DATA.get("error_log", [])
+                     if (datetime.utcnow() - datetime.fromisoformat(e["time"])) < timedelta(hours=24)]
+    lines = [
+        "🩺 " + to_small_caps("health report"),
+        "",
+        "— " + to_small_caps("system") + " —",
+        f"🕒 Server time: {now_ist_str('%d %b %Y, %H:%M:%S')} IST",
+        f"⏱ Uptime: {human_uptime()}",
+        f"💾 Memory: {mem if mem is not None else 'n/a'} MB",
+        f"🐍 python-telegram-bot: {'button-style support ✅' if SUPPORTS_BUTTON_STYLE else 'no button-style support (upgrade to 22.7+)'}",
+        f"🎬 ffmpeg: {'✅ ' + FFMPEG_PATH if FFMPEG_AVAILABLE else '⚠️ not found (no-merge fallback in use)'}",
+        f"🧾 QR generation: {'✅ styled/local' if QRCODE_STYLED_AVAILABLE else ('✅ plain/local' if QRCODE_AVAILABLE else '⚠️ remote fallback (install qrcode[pil])')}",
+        "",
+        "— " + to_small_caps("data") + " —",
+        f"🗄 Storage: {backend}",
+        f"👥 Users: {len(BOT_DATA['users'])} | Groups: {len(BOT_DATA['groups'])} | Admins: {len(BOT_DATA['admins'])}",
+        f"💎 Active premium users: {premium_count}",
+        f"📢 Broadcasts sent (all-time): {len(BOT_DATA['broadcast_log'])}",
+        f"🎫 Open tickets: {sum(1 for t in BOT_DATA.get('tickets', {}).values() if not t.get('closed_at'))}" if isinstance(BOT_DATA.get("tickets"), dict) else "🎫 Open tickets: n/a",
+        "",
+        "— " + to_small_caps("limits & modes") + " —",
+        f"🔒 Maintenance: {'✅ ON' if s.get('maintenance') else '❌ OFF'}",
+        f"🎛 Rate limit: {s.get('rate_limit_max')} msgs / {s.get('rate_limit_window_seconds')}s",
+        f"📅 Daily free-download limit: {s.get('daily_limit', 20)}",
+        "",
+        "— " + to_small_caps("last 24h") + " —",
+        f"🐞 Errors logged: {len(recent_errors)}" + (" — check 📋 Activity Log" if recent_errors else ""),
+    ]
+    return "\n".join(lines)
+
+
 async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         return
-    col = get_mongo_collection()
-    backend = "MongoDB ✅" if col is not None else "Local JSON fallback"
-    mem = get_memory_usage_mb()
-    text = (
-        "🩺 Health\n\n"
-        f"⏱ Uptime: {human_uptime()}\n"
-        f"💾 Memory: {mem if mem is not None else 'n/a'} MB\n"
-        f"🗄 Storage: {backend}\n"
-        f"👥 Users: {len(BOT_DATA['users'])}\n"
-        f"📢 Broadcasts: {len(BOT_DATA['broadcast_log'])}\n"
-        f"🔒 Maintenance: {'✅ ON' if BOT_DATA['settings'].get('maintenance') else '❌ OFF'}\n"
-        f"🎛 Rate limit: {BOT_DATA['settings'].get('rate_limit_max')}/{BOT_DATA['settings'].get('rate_limit_window_seconds')}s\n"
-        f"🔘 Button style support: {'yes' if SUPPORTS_BUTTON_STYLE else 'no (upgrade python-telegram-bot to 22.7+)'}\n"
-    )
-    await update.message.reply_text(text)
+    await update.message.reply_text(build_health_text())
 
 
 async def cmd_database(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -6352,11 +6602,24 @@ async def cmd_exportusers(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """v2 §12 — latency check, available to everyone."""
+    """v2 §12 — latency check, available to everyone. Admins get the full
+    picture (uptime, storage, server time in IST); regular users just get
+    the plain pong, since the extra detail isn't meant for them."""
     t0 = time.monotonic()
     msg = await update.message.reply_text("🏓 Pong!")
     ms = int((time.monotonic() - t0) * 1000)
-    await msg.edit_text(f"🏓 Pong! {ms}ms")
+    if is_admin(update.effective_user.id):
+        col = get_mongo_collection()
+        backend = "MongoDB ✅" if col is not None else "Local JSON"
+        text = (
+            f"🏓 Pong! {ms}ms\n\n"
+            f"⏱ Uptime: {human_uptime()}\n"
+            f"🗄 Storage: {backend}\n"
+            f"🕒 Server time: {now_ist_str('%d %b %Y, %H:%M:%S')} IST\n"
+        )
+        await msg.edit_text(text)
+    else:
+        await msg.edit_text(f"🏓 Pong! {ms}ms")
 
 
 EXPORT_MAX_BYTES = 49 * 1024 * 1024  # stay under Telegram's ~50MB bot upload cap
@@ -6634,7 +6897,12 @@ async def global_error_handler(update: object, context: ContextTypes.DEFAULT_TYP
     every failure is visible from the admin 'Recent Errors' screen / logger channel."""
     log.exception("Unhandled error", exc_info=context.error)
     update_type = type(update).__name__ if update else "unknown"
-    log_error("unhandled", f"[{update_type}] {context.error}")
+    err_text = str(context.error)
+    # A duplicate-instance getUpdates conflict is common and has a very
+    # different (and non-code) fix from a generic bug, so it gets its own
+    # Activity Log category instead of being lumped under "unhandled".
+    kind = "conflict" if "Conflict" in err_text and "getUpdates" in err_text else "unhandled"
+    log_error(kind, f"[{update_type}] {err_text}")
     save_data()
     try:
         await log_event(context, f"🐞 Error: {str(context.error)[:300]}")
@@ -6747,6 +7015,7 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(cb_adm_home, pattern="^adm_home$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_activity")(cb_adm_activity), pattern="^adm_activity$"))
     app.add_handler(CallbackQueryHandler(cb_adm_clear_activity, pattern="^adm_clear_activity$"))
+    app.add_handler(CallbackQueryHandler(cb_adm_fix_now, pattern="^adm_fix:"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_selftest")(cb_adm_selftest), pattern="^adm_selftest$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_cmdtest")(cb_adm_cmdtest), pattern="^adm_cmdtest$"))
     app.add_handler(CallbackQueryHandler(cb_run_cmd, pattern="^run_cmd:"))
@@ -6778,7 +7047,7 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(cb_adm_menu_trans, pattern="^adm_menu_trans:"))
     app.add_handler(CallbackQueryHandler(cb_adm_menu_trans_edit, pattern="^adm_menu_trans_edit:"))
     app.add_handler(CallbackQueryHandler(cb_setlang, pattern="^setlang:"))
-    app.add_handler(CallbackQueryHandler(cb_bc_start_now, pattern="^bc_start_now$"))
+    app.add_handler(CallbackQueryHandler(cb_bc_start_now, pattern="^bc_start_now"))
     app.add_handler(CallbackQueryHandler(cb_maint_notify_me, pattern="^maint_notify_me$"))
     app.add_handler(CallbackQueryHandler(cb_maint_notify_me_done, pattern="^maint_notify_me_done$"))
     app.add_handler(CallbackQueryHandler(cb_adm_btn_add, pattern="^adm_btn_add:"))
