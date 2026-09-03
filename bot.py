@@ -720,16 +720,10 @@ DEFAULT_MENUS = {
             "<blockquote>"
             + f"『 {to_small_caps('welcome')}, {{first_name}} 』\n\n"
             + f"{to_small_caps('welcome to')} {{bot_link}}\n\n"
-            + f"{to_small_caps('your personal instagram reel downloader — fast, clean and premium.')}"
+            + f"{to_small_caps('send any instagram reel link and get your video back in high quality, quickly and effortlessly.')}\n\n"
+            + "✦ " + to_small_caps("fast • simple • high quality") + " ✦"
             + "</blockquote>\n\n"
-            + f"{to_small_caps('what i can do for you')}\n"
-            + "✅ " + to_small_caps("download any instagram reel in hd, no watermark") + "\n"
-            + "✅ " + to_small_caps("original caption attached automatically") + "\n"
-            + "✅ " + to_small_caps("extract audio from any reel in one tap") + "\n"
-            + "✅ " + to_small_caps("works with private links too") + "\n"
-            + "✅ " + to_small_caps("blazing fast, secure & unlimited with premium") + "\n\n"
-            + f"{to_small_caps('just paste any instagram reel link below to get started.')}\n\n"
-            + "✦ " + to_small_caps("fast • simple • premium quality") + " ✦"
+            f"{to_small_caps('use the buttons below to get started, explore the bot, and discover more features.')}"
         ),
         "parse_mode": "HTML",
         "image_file_id": None,
@@ -743,8 +737,8 @@ DEFAULT_MENUS = {
         "text": (
             f"{to_deco(to_small_caps('guide'))}\n\n"
             f"① {to_small_caps('send a reel link')}\n"
-            f"② {to_small_caps('get it in best quality, caption included')}\n"
-            f"③ {to_small_caps('tap 🎵 audio to grab just the sound')}"
+            f"② {to_small_caps('get it in best quality')}\n"
+            f"③ {to_small_caps('tap get caption for a short quote')}"
         ),
         "parse_mode": None,
         "image_file_id": None,
@@ -759,8 +753,8 @@ DEFAULT_MENUS = {
         "parse_mode": "HTML",
         "image_file_id": None,
         "buttons": [
+            {"label": to_small_caps("📝 caption"), "type": "callback", "value": "get_caption", "row": 1, "style": "primary"},
             {"label": to_small_caps("🎵 audio"), "type": "callback", "value": "get_audio", "row": 1, "style": "primary"},
-            {"label": "✖", "type": "callback", "value": "dismiss_reel_buttons", "row": 1, "style": "danger"},
         ],
         "auto_delete_seconds": None,
         "updated_by": None,
@@ -913,10 +907,6 @@ DEFAULT_DATA = {
     "tickets": {},               # v2 §6 — ticket_id(str) -> {...}
     "ticket_msg_map": {},        # v2 §6 — admin_group_message_id(str) -> ticket_id
     "support_msg_map": {},       # one-shot support admin-message-id(str) -> user_id(str)
-    "support_conv_msg_map": {},  # message-id in the USER's chat(str) -> support request id(str) —
-                                  # lets the user reply/"tag" any message from this request
-                                  # (the confirmation, or any admin reply copied to them) to
-                                  # keep the conversation going until it's resolved.
     "support_requests": {},      # request_id(str) -> {user_id, chat_id, confirm_chat_id,
                                   #   confirm_message_id, admin_message_ids: [...], status, text, created_at}
     "support_admin_msg_map": {}, # one-shot support admin-message-id(str) -> request_id(str)
@@ -1146,16 +1136,13 @@ def _force_join_targets():
     """Return normalized multi-force-join targets, while migrating legacy data.
 
     BUGFIX — the #1 cause of "bot works for admin only, nobody else can ever
-    get past the join screen": whenever an admin configured a force-join
-    target using ONLY a public https://t.me/<username> link (no chat_id),
-    is_force_join_ok() below had no chat_id to call getChatMember() with, so
-    it unconditionally returned False for every non-admin, forever — even
-    for users who genuinely joined and tapped "I've joined". We now extract
-    the @username straight out of a public t.me link right here, so it
-    becomes a normal, properly-checkable chat_id target. (Private
-    https://t.me/+xxxx / joinchat invite links can never be resolved to a
-    chat_id by the Bot API this way — those still fall back to trust-on-tap,
-    handled in cb_check_force_join.)
+    get past the join screen": when a force-join target was configured with
+    ONLY a public https://t.me/<username> link (no chat_id), is_force_join_ok
+    below had no chat_id to call getChatMember() with, so it unconditionally
+    returned False for every non-admin, forever — even users who genuinely
+    joined and tapped "I've joined". We now extract the @username straight
+    out of a public t.me link here, turning it into a normal, properly
+    checkable chat_id target.
     """
     settings = BOT_DATA["settings"]
     targets = settings.get("force_join_channels") or []
@@ -1193,7 +1180,7 @@ async def is_force_join_ok(context: ContextTypes.DEFAULT_TYPE, user_id: int) -> 
     verified for that target, so they can start using the bot without waiting
     for a manual re-check. Private invite-link-only targets that can't be
     queried at all are handled by trust-on-tap in cb_check_force_join, which
-    adds them to the same verified list before this function ever sees them.
+    adds them to this same verified list before this function ever sees them.
     """
     targets = _force_join_targets()
     if not targets or is_admin(user_id):
@@ -1295,18 +1282,18 @@ def check_rate_limit(user_id: int) -> bool:
     return True
 
 
-async def log_event(context: ContextTypes.DEFAULT_TYPE, text: str, parse_mode: str = None):
+async def log_event(context: ContextTypes.DEFAULT_TYPE, text: str):
     """#14 — send a short line to the admin-configured logger channel, if any."""
     settings = BOT_DATA.get("settings", {})
     if not settings.get("logger_enabled") or not settings.get("logger_channel_id"):
         return
     try:
-        await context.bot.send_message(chat_id=settings["logger_channel_id"], text=text, parse_mode=parse_mode)
+        await context.bot.send_message(chat_id=settings["logger_channel_id"], text=text)
     except Exception:
         log.exception("Failed to send to logger channel")
 
 
-async def dm_all_admins(context: ContextTypes.DEFAULT_TYPE, text: str, reply_markup=None, parse_mode: str = None):
+async def dm_all_admins(context: ContextTypes.DEFAULT_TYPE, text: str, reply_markup=None):
     """Send a message to every admin's private chat (owner + BOT_DATA['admins']).
     One admin having blocked the bot / never opened a DM must never stop the
     others from getting it, so each send is isolated."""
@@ -1315,7 +1302,7 @@ async def dm_all_admins(context: ContextTypes.DEFAULT_TYPE, text: str, reply_mar
         targets.add(OWNER_ID)
     for admin_id in targets:
         try:
-            await context.bot.send_message(chat_id=admin_id, text=text, reply_markup=reply_markup, parse_mode=parse_mode)
+            await context.bot.send_message(chat_id=admin_id, text=text, reply_markup=reply_markup)
         except Exception:
             log.warning("Could not DM admin %s (bot blocked / never started a DM)", admin_id)
 
@@ -1334,29 +1321,23 @@ def clickable_user(user_obj) -> str:
 
 def build_join_details(update: Update, is_new: bool) -> str:
     """Full detail card for a /start — new user OR bot started inside a
-    group — so admins get the complete picture in one glance. Bold-sans is
-    used ONLY on the header title (per spec — "info sab normal rahega");
-    every field label/value below stays plain, and the user's name is a
-    real clickable link to their Telegram profile (clickable_user()),
-    consistent everywhere admins see a user's name."""
+    group — so admins get the complete picture in one glance."""
     user = update.effective_user
     chat = update.effective_chat
-    header = to_bold_sans("New User Started Bot" if is_new else "Bot Started In Group")
     lines = [
-        f"🆕 {header}",
+        "🆕 " + ("New User Started Bot" if is_new else "Bot Started In Group") + "",
         "",
-        f"👤 Name — {clickable_user(user)}",
-        f"🔗 Username — @{user.username}" if user.username else "🔗 Username — (none)",
-        f"🆔 User ID — {user.id}",
-        f"🌐 Language — {user.language_code or 'unknown'}",
-        f"⭐ Telegram Premium — {'Yes' if getattr(user, 'is_premium', False) else 'No'}",
-        f"💬 Chat type — {chat.type}",
+        f"👤 Name: {user.full_name}",
+        f"🔗 Username: @{user.username}" if user.username else "🔗 Username: (none)",
+        f"🆔 User ID: {user.id}",
+        f"🌐 Language: {user.language_code or 'unknown'}",
+        f"⭐ Telegram Premium: {'Yes' if getattr(user, 'is_premium', False) else 'No'}",
+        f"💬 Chat type: {chat.type}",
     ]
     if chat.type in ("group", "supergroup"):
-        lines.append(f"👨‍👩‍👧 Group — {html.escape(chat.title or '')}")
-        lines.append(f"🆔 Group ID — {chat.id}")
-    lines.append("")
-    lines.append(f"🕒 Time (IST) — {now_ist_str()}")
+        lines.append(f"👨‍👩‍👧 Group: {chat.title}")
+        lines.append(f"🆔 Group ID: {chat.id}")
+    lines.append(f"🕒 Time (IST): {now_ist_str()}")
     return "\n".join(lines)
 
 
@@ -1370,8 +1351,8 @@ async def notify_admins_new_start(context: ContextTypes.DEFAULT_TYPE, update: Up
     if not (is_new or is_group):
         return
     text = build_join_details(update, is_new)
-    await dm_all_admins(context, text, parse_mode="HTML")
-    await log_event(context, text, parse_mode="HTML")
+    await dm_all_admins(context, text)
+    await log_event(context, text)
 
 
 async def log_user_activity(context: ContextTypes.DEFAULT_TYPE, update: Update, url: str):
@@ -1396,22 +1377,16 @@ async def log_user_activity(context: ContextTypes.DEFAULT_TYPE, update: Update, 
 
     if not BOT_DATA["settings"].get("user_activity_dm", True):
         return
-    # Bold-sans is used ONLY on the "LIVE ACTIVITY" header (per spec —
-    # "info sab normal rahega"); every field label + value below stays
-    # plain text. The name itself is a real clickable link to the user's
-    # Telegram profile via clickable_user(), and the card is HTML-parsed
-    # so that link actually renders as tappable.
-    header = to_bold_sans("LIVE ACTIVITY")
-    name_link = clickable_user(user)
+    uname = f"@{user.username}" if user.username else "(no username)"
     text = (
-        f"🕵️ {header}\n\n"
-        f"👤 Username — {name_link}\n"
-        f"🆔 ID — {user.id}\n"
-        f"🕒 Time — {iso_to_ist_str(entry['time'], '%H:%M:%S')} IST\n"
-        f"🔗 Link — {html.escape(url)}"
+        "🕵️ Live Activity\n\n"
+        f"👤 {user.full_name} {uname}\n"
+        f"🆔 {user.id}\n"
+        f"🕒 {iso_to_ist_str(entry['time'], '%H:%M:%S')} IST\n"
+        f"🔗 {url}"
     )
-    await dm_all_admins(context, text, parse_mode="HTML")
-    await log_event(context, text, parse_mode="HTML")
+    await dm_all_admins(context, text)
+    await log_event(context, text)
 
 
 def track_sent_message(chat_id: int, message_id: int):
@@ -1603,25 +1578,19 @@ async def render_menu(context: ContextTypes.DEFAULT_TYPE, chat_id: int, menu_id:
             text = text.replace("{first_name}", name_link)
         if "{bot_link}" in text:
             bot_name = "our bot"
-            bot_username = None
             try:
                 me = await _cached_get_me(context)
                 bot_name = html.escape(me.first_name or "our bot")
-                bot_username = me.username
             except Exception as e:
                 # Previously silent — a transient get_me() failure meant the
                 # welcome message's bot-name link just quietly stayed as
                 # plain "our bot" text with no trace of why. Now it's
                 # visible in the admin Activity Log too.
                 log_error("bot_link_resolve", f"render_menu couldn't resolve bot name: {e}")
-            # Fix — the bot's own name is now a real clickable link to the
-            # bot itself (https://t.me/<bot_username>), same as every other
-            # name shown in the bot being tappable. Falls back to plain bold
-            # text only if the username couldn't be resolved for some reason.
-            if bot_username:
-                text = text.replace("{bot_link}", f'<a href="https://t.me/{bot_username}"><b>{bot_name}</b></a>')
-            else:
-                text = text.replace("{bot_link}", f"<b>{bot_name}</b>")
+            # Point 1 — the bot's OWN name must stay plain bold text, never
+            # styled/rendered as a link: it used to look tappable but had
+            # nothing to open, which was confusing.
+            text = text.replace("{bot_link}", f"<b>{bot_name}</b>")
 
     # #10 — owner/developer credit button, injected at render time (not part
     # of the admin-editable button list) so it can't be accidentally deleted
@@ -1645,15 +1614,6 @@ async def render_menu(context: ContextTypes.DEFAULT_TYPE, chat_id: int, menu_id:
                 url = f"https://t.me/{owner_id_str.lstrip('@')}"
             owner_row = [styled_button(label, url=url)]
             kb = InlineKeyboardMarkup((kb.inline_keyboard if kb else []) + [owner_row])
-
-    # Fix — "Main button permanent rakho, all menu me buttons gayab ho jaate
-    # hain": every inline menu (except Start itself, which IS the main
-    # screen) now always keeps a "🏠 Main Menu" row at the bottom, injected
-    # here at render time so it can never be lost by editing a menu's admin-
-    # configurable button list.
-    if menu_id != "start":
-        main_row = [styled_button("🏠 " + to_small_caps("main menu"), callback_data="menu_go_start")]
-        kb = InlineKeyboardMarkup((kb.inline_keyboard if kb else []) + [main_row])
 
     # #4 — global forwarding/sharing lock applies to every menu the bot sends.
     protect = bool(BOT_DATA["settings"].get("lock_all_content", False))
@@ -2439,60 +2399,18 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.reply_to_message and is_admin(user_obj.id):
         support_uid = BOT_DATA.get("support_msg_map", {}).get(str(update.message.reply_to_message.message_id))
         if support_uid:
-            rid = BOT_DATA.get("support_admin_msg_map", {}).get(str(update.message.reply_to_message.message_id))
             try:
-                copied = await context.bot.copy_message(
+                await context.bot.copy_message(
                     chat_id=int(support_uid),
                     from_chat_id=update.effective_chat.id,
                     message_id=update.message.message_id,
                 )
-                # Livegram-style two-way tagging: map the message we just
-                # sent the user back to this request, so if THEY tag/reply
-                # to it, that reply is recognized below and routed straight
-                # back here too — the conversation keeps going, no plain
-                # unrelated DM, until the request is marked resolved.
-                if rid:
-                    BOT_DATA.setdefault("support_msg_map", {})[str(copied.message_id)] = support_uid
-                    BOT_DATA.setdefault("support_admin_msg_map", {})[str(copied.message_id)] = rid
-                    BOT_DATA.setdefault("support_conv_msg_map", {})[str(copied.message_id)] = rid
-                    save_data()
             except Exception:
                 pass
             return
         tid = BOT_DATA["ticket_msg_map"].get(str(update.message.reply_to_message.message_id))
         if tid:
             await handle_admin_ticket_reply(update, context, tid)
-            return
-
-    # Livegram-style two-way tagging, the other direction: the USER replies
-    # (tags) the confirmation message or any admin reply copied to them —
-    # that keeps the same conversation going straight to the admin(s),
-    # instead of them having to start over or getting a disconnected DM.
-    # Works only while the request is still pending; once an admin marks it
-    # resolved this stops (per spec — conversation ends at "resolved").
-    if update.message.reply_to_message and not is_admin(user_obj.id):
-        rid = BOT_DATA.get("support_conv_msg_map", {}).get(str(update.message.reply_to_message.message_id))
-        if rid:
-            req = BOT_DATA["support_requests"].get(rid)
-            if req and req["status"] == "pending":
-                support_chat_id = BOT_DATA["settings"].get("support_chat_id")
-                targets = [support_chat_id] if support_chat_id else BOT_DATA.get("admins", [])
-                for target in targets:
-                    if not target:
-                        continue
-                    try:
-                        copied = await context.bot.copy_message(
-                            chat_id=target,
-                            from_chat_id=update.effective_chat.id,
-                            message_id=update.message.message_id,
-                        )
-                        # Admin can tag THIS copied message straight back too,
-                        # without hunting for the original card.
-                        BOT_DATA.setdefault("support_msg_map", {})[str(copied.message_id)] = str(user_obj.id)
-                        BOT_DATA.setdefault("support_admin_msg_map", {})[str(copied.message_id)] = rid
-                    except Exception:
-                        pass
-                save_data()
             return
 
     touch_user(update)
@@ -2721,14 +2639,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not fp.endswith(".mp4") and os.path.exists(fp.rsplit(".", 1)[0] + ".mp4"):
                 fp = fp.rsplit(".", 1)[0] + ".mp4"
             ig_caption = (info.get("description") or "").strip()
-            # Separate the two — "uploader" is the actual @username (needed
-            # to build a working instagram.com/<username> profile link for
-            # the Author-credit button below), "uploader_id" is a numeric
-            # IG id that can't be turned into a public profile URL and is
-            # only kept as a display-only fallback.
-            uploader_username = (info.get("uploader") or "").strip().lstrip("@")
-            uploader_id = str(info.get("uploader_id") or "").strip()
-            return fp, ig_caption, uploader_username, uploader_id
+            uploader = (info.get("uploader") or info.get("uploader_id") or "").strip()
+            return fp, ig_caption, uploader
 
     file_path = None
     try:
@@ -2737,13 +2649,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # was being awaited directly, which froze the whole bot's event
             # loop (all users) during every single download. Runs in a
             # thread now so the loop — and the animation above — keep going.
-            file_path, ig_caption, ig_uploader, ig_uploader_id = await asyncio.to_thread(run_download, FFMPEG_AVAILABLE)
+            file_path, ig_caption, ig_uploader = await asyncio.to_thread(run_download, FFMPEG_AVAILABLE)
         except Exception as e:
             # Self-heal: if a merge was attempted and ffmpeg turned out to be
             # the problem, retry once with a no-merge (progressive) format.
             if "ffmpeg" in str(e).lower():
                 log.warning("Merge failed (ffmpeg issue), retrying with progressive format.")
-                file_path, ig_caption, ig_uploader, ig_uploader_id = await asyncio.to_thread(run_download, False)
+                file_path, ig_caption, ig_uploader = await asyncio.to_thread(run_download, False)
             else:
                 raise
 
@@ -2771,29 +2683,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         kb = build_keyboard_from_buttons(buttons, "reel_result")
         parse_mode = menu.get("parse_mode") or None
 
-        # v6 — the reel's own caption now sits in a plain expandable
-        # blockquote with no "Caption:"/"Uploader:" labels, so it reads like
-        # a genuine repost instead of a bot-generated info card. Credit for
-        # the original creator now lives in the "👤 Author" button below
-        # instead of a text line, which also keeps the message clean and
-        # easy to save/forward.
-        import html as _html
-        if parse_mode == "HTML" and ig_caption:
-            preview = ig_caption[:400] + ("…" if len(ig_caption) > 400 else "")
-            bq = f"<blockquote expandable>{_html.escape(preview)}</blockquote>"
-            result_caption = f"{base_caption}\n\n{bq}" if base_caption else bq
+        # v2 §9 — native Telegram blockquote with extra reel info, HTML only.
+        if parse_mode == "HTML":
+            import html as _html
+            preview = ig_caption[:300] + ("…" if len(ig_caption) > 300 else "")
+            bq = (
+                "<blockquote expandable>"
+                f"📋 Caption: {_html.escape(preview) or '(none)'}\n"
+                f"👤 Uploader: {_html.escape(ig_uploader) or 'n/a'}"
+                "</blockquote>"
+            )
+            result_caption = f"{base_caption}\n\n{bq}"
         else:
             result_caption = base_caption
-
-        # Author-credit button — appended at send time (like the owner-credit
-        # row in render_menu) rather than stored in the admin-editable button
-        # list, so it always reflects the ACTUAL uploader of this specific
-        # reel and can't be broken by editing the reel_result menu. Only
-        # added when we actually have a usable @username to link to.
-        if ig_uploader:
-            author_url = f"https://www.instagram.com/{ig_uploader}/"
-            existing_rows = list(kb.inline_keyboard) if kb else []
-            kb = InlineKeyboardMarkup(existing_rows + [[styled_button("👤 Author", url=author_url)]])
 
         anim_task.cancel()
         protect = bool(BOT_DATA["settings"].get("lock_all_content", False))
@@ -2876,34 +2778,6 @@ async def cb_get_caption(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text(caption[i:i + 4000])
 
 
-async def cb_menu_go_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """🏠 Main Menu row injected into every non-start menu — always takes
-    the user back to Start in place (edits the same message)."""
-    query = update.callback_query
-    await query.answer()
-    await render_menu(context, query.message.chat_id, "start", existing_message=query.message)
-
-
-async def cb_dismiss_reel_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """✖ next to 🎵 Audio — lets the user clear the button row under a
-    delivered reel so the message looks like a plain, clean video (nothing
-    to tap left behind). The injected "👤 Author" credit row (if present)
-    is deliberately kept — dismissing playback controls shouldn't also wipe
-    the original creator's credit."""
-    query = update.callback_query
-    await query.answer()
-    kb = query.message.reply_markup
-    rows = list(kb.inline_keyboard) if kb else []
-    kept_rows = [
-        row for row in rows
-        if not any(getattr(btn, "callback_data", None) in ("get_audio", "dismiss_reel_buttons") for btn in row)
-    ]
-    try:
-        await query.edit_message_reply_markup(InlineKeyboardMarkup(kept_rows) if kept_rows else None)
-    except Exception:
-        pass
-
-
 async def cb_get_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """v5 — 🎵 Audio button under a delivered reel. The video file is
     already deleted by the time this is tapped (cleaned up right after
@@ -2943,25 +2817,7 @@ async def cb_get_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
             fp = ydl.prepare_filename(info)
             base, _ = os.path.splitext(fp)
             mp3_path = base + ".mp3"
-            mp3_path = mp3_path if os.path.exists(mp3_path) else fp
-
-            # Point 5 — the file used to keep yt-dlp's raw "<id>_audio.mp3"
-            # name, so it showed up in Telegram/downloads with no readable
-            # title at all. Rename on disk to the reel's actual title (or
-            # uploader, as a fallback) before sending, and also pass
-            # title/performer tags on the upload itself below.
-            uploader = (info.get("uploader") or "").strip()
-            raw_title = (info.get("title") or info.get("description") or uploader or "instagram_audio").strip()
-            raw_title = raw_title.splitlines()[0][:60].strip()
-            safe_title = re.sub(r'[\\/*?:"<>|]', "", raw_title).strip() or "instagram_audio"
-            final_path = os.path.join(DOWNLOAD_DIR, f"{safe_title}.mp3")
-            if os.path.exists(final_path) and os.path.abspath(final_path) != os.path.abspath(mp3_path):
-                final_path = os.path.join(DOWNLOAD_DIR, f"{safe_title}_{int(time.time())}.mp3")
-            try:
-                os.replace(mp3_path, final_path)
-            except OSError:
-                final_path = mp3_path
-            return final_path, safe_title, uploader
+            return mp3_path if os.path.exists(mp3_path) else fp
 
     audio_path = None
     try:
@@ -2972,18 +2828,13 @@ async def cb_get_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "❌ " + to_small_caps("audio extraction needs ffmpeg, which isn't available on this server.")
             )
             return
-        audio_path, audio_title, audio_uploader = await asyncio.to_thread(run_audio_download)
+        audio_path = await asyncio.to_thread(run_audio_download)
         if not audio_path or not os.path.exists(audio_path):
             await status_msg.edit_text("❌ " + to_small_caps("couldn't extract audio from this post."))
             return
         protect = bool(BOT_DATA["settings"].get("lock_all_content", False))
         with open(audio_path, "rb") as aud:
-            await query.message.reply_audio(
-                audio=aud,
-                title=audio_title,
-                performer=audio_uploader or None,
-                protect_content=protect,
-            )
+            await query.message.reply_audio(audio=aud, protect_content=protect)
         await status_msg.delete()
     except Exception as e:
         import html as _html
@@ -3007,14 +2858,10 @@ async def cb_check_force_join(update: Update, context: ContextTypes.DEFAULT_TYPE
     query = update.callback_query
     user_id = update.effective_user.id
     # BUGFIX — private https://t.me/+xxxx invite-link-only targets can never
-    # be confirmed via getChatMember (the Bot API has no way to check an
-    # arbitrary user's membership without a real chat_id). Before this fix,
-    # tapping "I've joined" against such a target called is_force_join_ok(),
-    # which had no way to ever say yes — so the button did literally nothing,
-    # for anyone, forever, no matter what they did. We now trust an explicit
-    # tap of this button as verification for exactly those unresolvable
-    # targets (public @username/chat_id targets are still verified for real
-    # via the API below, so those still correctly block non-members).
+    # be confirmed via getChatMember (no way to check an arbitrary user's
+    # membership without a real chat_id). Trust an explicit tap of this
+    # button as verification for exactly those unresolvable targets; public
+    # @username/chat_id targets are still verified for real via the API.
     unresolved = [t for t in _force_join_targets() if not t.get("chat_id")]
     if unresolved:
         verified_map = BOT_DATA["settings"].setdefault("force_join_request_verified", {})
@@ -3187,25 +3034,23 @@ async def cb_ticket_reopen(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def _build_support_admin_card(rid: str) -> tuple:
-    """Admin-facing 'NEW SUPPORT REQUEST' card — bold-sans is used ONLY on
-    the header title (per spec — "info sab normal rahega"); every field
-    label/value below stays plain text, with blank-line spacing between
-    groups for readability. Reused both when the request first comes in
-    and when an admin marks it resolved, so the card always reflects the
-    live status."""
+    """Admin-facing 'NEW SUPPORT REQUEST' card — labels in Mathematical
+    Sans-Serif Bold, all real values (name link aside) left as normal text.
+    Reused both when the request first comes in and when an admin marks it
+    resolved, so the card always reflects the live status."""
     req = BOT_DATA["support_requests"][rid]
-    header = to_bold_sans("NEW SUPPORT REQUEST")
+    lbl = to_bold_sans
     is_open = req["status"] == "pending"
     status_word = "Pending" if is_open else "Resolved"
     payload = (
-        f"{header}\n\n"
-        f"User — {req['user_mention']}\n"
-        f"User ID — {req['user_id']}\n"
-        f"Username — {req['username_display']}\n\n"
-        f"Request ID — #{rid}\n"
-        f"Status — {status_word}\n\n"
-        f"Message\n{html.escape(req['text'])}\n\n"
-        f"Received — {iso_to_ist_str(req['created_at'], '%d %b %Y, %H:%M')} IST"
+        f"{lbl('NEW SUPPORT REQUEST')}\n\n"
+        f"{lbl('User')} — {req['user_mention']}\n"
+        f"{lbl('User ID')} — {req['user_id']}\n"
+        f"{lbl('Username')} — {req['username_display']}\n\n"
+        f"{lbl('Request ID')} — #{rid}\n"
+        f"{lbl('Status')} — {status_word}\n\n"
+        f"{lbl('Message')}\n{html.escape(req['text'])}\n\n"
+        f"{lbl('Received')} — {iso_to_ist_str(req['created_at'], '%d %b %Y, %H:%M')} IST"
     )
     kb = None
     if is_open:
@@ -3216,29 +3061,24 @@ def _build_support_admin_card(rid: str) -> tuple:
 
 
 def _build_support_user_confirmation(rid: str) -> str:
-    """User-facing confirmation — bold-sans on the status header only, the
-    rest left as plain, properly spaced text (not the whole message in
-    heavy bold like before)."""
+    """User-facing confirmation — the exact styled copy from spec, with the
+    live status swapped between PENDING and SOLVED."""
     req = BOT_DATA["support_requests"][rid]
     if req["status"] == "pending":
-        header = to_bold_sans("Request Submitted")
-        body = (
-            f"{header} ✅\n\n"
+        plain = (
+            "Your request has been submitted successfully. ✅\n"
             "We'll let you know here once your issue has been resolved.\n\n"
-            f"Request ID — #{rid}\n"
-            "Status — Pending\n\n"
+            f"REQUEST ID — #{rid}   STATUS — PENDING\n\n"
             "You can also track your request from the Support menu."
         )
     else:
-        header = to_bold_sans("Request Resolved")
-        body = (
-            f"{header} ✅\n\n"
+        plain = (
+            "Your support request has been resolved. ✅\n"
             "Thanks for your patience — reach out again anytime you need help.\n\n"
-            f"Request ID — #{rid}\n"
-            "Status — Solved\n\n"
+            f"REQUEST ID — #{rid}   STATUS — SOLVED\n\n"
             "You can also track your request from the Support menu."
         )
-    return body
+    return to_bold_sans(plain)
 
 
 async def cb_support_resolve(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3989,9 +3829,6 @@ async def handle_user_awaiting_input(update: Update, context: ContextTypes.DEFAU
         if confirm_msg:
             req["confirm_message_id"] = confirm_msg.message_id
             req["confirm_chat_id"] = confirm_msg.chat_id
-            # So the user can reply/"tag" their own confirmation message to
-            # keep talking to support without waiting for an admin reply first.
-            BOT_DATA.setdefault("support_conv_msg_map", {})[str(confirm_msg.message_id)] = rid
             save_data()
 
     elif awaiting == "ticket_new":
@@ -7494,8 +7331,6 @@ def build_app() -> Application:
 
     app.add_handler(CallbackQueryHandler(cb_get_caption, pattern="^get_caption$"))
     app.add_handler(CallbackQueryHandler(cb_get_audio, pattern="^get_audio$"))
-    app.add_handler(CallbackQueryHandler(cb_dismiss_reel_buttons, pattern="^dismiss_reel_buttons$"))
-    app.add_handler(CallbackQueryHandler(cb_menu_go_start, pattern="^menu_go_start$"))
     app.add_handler(CallbackQueryHandler(cb_download_another, pattern="^download_another$"))
     app.add_handler(CallbackQueryHandler(cb_check_force_join, pattern="^check_force_join$"))
     app.add_handler(ChatMemberHandler(cm_track_groups, ChatMemberHandler.MY_CHAT_MEMBER))
