@@ -26,6 +26,7 @@ import json
 import csv
 import time
 import shutil
+import subprocess
 import asyncio
 import logging
 import tempfile
@@ -85,6 +86,7 @@ os.makedirs(PLUGIN_DIR, exist_ok=True)
 # binary from the `imageio-ffmpeg` package) and gracefully fall back to a
 # no-merge format if neither is available.
 FFMPEG_PATH = shutil.which("ffmpeg")
+FFPROBE_PATH = shutil.which("ffprobe")
 if not FFMPEG_PATH:
     try:
         import imageio_ffmpeg
@@ -93,6 +95,53 @@ if not FFMPEG_PATH:
     except Exception:
         FFMPEG_PATH = None
 FFMPEG_AVAILABLE = bool(FFMPEG_PATH)
+# FIX — "audio extraction failed... unable to obtain file audio codec with
+# ffprobe": the imageio-ffmpeg package (our fallback when no system ffmpeg
+# is installed) ships ONLY an ffmpeg binary — no ffprobe. yt-dlp's
+# FFmpegExtractAudio postprocessor was pointed at that binary's folder via
+# ffmpeg_location and silently assumed ffprobe lived right next to it, so
+# every audio extraction on a server without a real system install failed
+# with exactly that ffprobe error. We now track ffprobe's availability
+# separately and do audio extraction ourselves via a direct ffmpeg call
+# (see cb_get_audio) instead of relying on yt-dlp's postprocessor, so a
+# missing ffprobe no longer breaks the Audio button.
+FFPROBE_AVAILABLE = bool(FFPROBE_PATH)
+
+
+def _ytdlp_extract_with_retry(opts: dict, url: str, download: bool = True):
+    """Run yt-dlp's extract_info with one automatic retry.
+
+    FIX — "No video formats found!" / "Unable to extract ..." errors from
+    the Instagram extractor are very often caused by yt-dlp's own on-disk
+    extractor cache holding a stale response from before Instagram changed
+    something on their end — the exact same symptom yt-dlp's own docs tell
+    users to fix with `yt-dlp --rm-cache-dir`. Previously a transient hit
+    like this permanently failed the download with no retry. Now: on the
+    known-transient error signatures, the cache is cleared once and the
+    extraction is retried before giving up for real. This does NOT paper
+    over a genuinely private/deleted/invalid link — those still fail
+    immediately, since retrying can't help those.
+    """
+    transient_markers = (
+        "no video formats found",
+        "requested format is not available",
+        "unable to extract",
+    )
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        try:
+            return ydl.extract_info(url, download=download)
+        except Exception as e:
+            msg = str(e).lower()
+            if not any(m in msg for m in transient_markers):
+                raise
+            log.warning("yt-dlp extraction hit a possibly-stale-cache error, clearing cache and retrying once: %s", e)
+            try:
+                ydl.cache.remove()
+            except Exception:
+                pass
+    # Retry with a fresh YoutubeDL instance so the cleared cache actually takes effect.
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        return ydl.extract_info(url, download=download)
 
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
@@ -2440,8 +2489,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text(reply)
                 return
         await update.message.reply_text(
-            to_small_caps("that doesn't look like a valid instagram reel link. please send a valid link, e.g.:") + "\n"
-            "https://www.instagram.com/reel/XXXXXXXX/"
+            "<blockquote>"
+            + to_small_caps("that doesn't look like a valid instagram reel link. please send a valid link, e.g.:")
+            + "\n<code>https://www.instagram.com/reel/XXXXXXXX/</code>"
+            "</blockquote>",
+            parse_mode="HTML",
         )
         return
 
@@ -2539,14 +2591,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     def run_download(use_merge: bool):
         opts = build_ydl_opts(use_merge)
+        info = _ytdlp_extract_with_retry(opts, url, download=True)
         with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=True)
             fp = ydl.prepare_filename(info)
-            if not fp.endswith(".mp4") and os.path.exists(fp.rsplit(".", 1)[0] + ".mp4"):
-                fp = fp.rsplit(".", 1)[0] + ".mp4"
-            ig_caption = (info.get("description") or "").strip()
-            uploader = (info.get("uploader") or info.get("uploader_id") or "").strip()
-            return fp, ig_caption, uploader
+        if not fp.endswith(".mp4") and os.path.exists(fp.rsplit(".", 1)[0] + ".mp4"):
+            fp = fp.rsplit(".", 1)[0] + ".mp4"
+        ig_caption = (info.get("description") or "").strip()
+        uploader = (info.get("uploader") or info.get("uploader_id") or "").strip()
+        return fp, ig_caption, uploader
 
     file_path = None
     try:
@@ -2680,6 +2732,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # frozen "processing..." message forever with no visible error.
         import html as _html
         safe_err = _html.escape(str(e))[:500]
+        # "No video formats found" surviving the cache-clear retry (see
+        # _ytdlp_extract_with_retry) almost always means yt-dlp itself is
+        # out of date for Instagram's current site — Instagram changes
+        # things often enough that this needs periodic `pip install -U
+        # yt-dlp`. Surface that to the admin so it doesn't look like an
+        # unexplained one-off failure every time it happens.
+        if "no video formats found" in str(e).lower():
+            log_error("ytdlp_no_formats", f"url={url} err={e} — yt-dlp may need updating (pip install -U yt-dlp)")
         try:
             await status_msg.edit_text(
                 "❌ " + to_small_caps("download failed. the link may be private, deleted, or instagram rate-limited us.")
@@ -2741,10 +2801,21 @@ async def cb_remove_reel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cb_get_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """v5 — 🎵 Audio button under a delivered reel. The video file is
+    """v6 — 🎵 Audio button under a delivered reel. The video file is
     already deleted by the time this is tapped (cleaned up right after
-    sending), so this re-runs yt-dlp against the cached source URL with an
-    audio-only format and sends back just the audio track."""
+    sending), so this re-downloads the source via yt-dlp and then extracts
+    just the audio track.
+
+    FIX — this used to hand the download straight to yt-dlp's
+    FFmpegExtractAudio postprocessor, which needs `ffprobe` (not just
+    `ffmpeg`) to inspect the file first. On a server that only has the
+    portable `imageio-ffmpeg` binary (ffmpeg only, no ffprobe) that always
+    failed with "unable to obtain file audio codec with ffprobe" — even
+    though ffmpeg itself was perfectly available and capable of the job.
+    We now download the plain video (same as the reel download, no
+    postprocessor) and run ffmpeg directly to strip out the audio track,
+    which never touches ffprobe at all.
+    """
     query = update.callback_query
     await query.answer()
     key = (query.message.chat_id, query.message.message_id)
@@ -2756,31 +2827,38 @@ async def cb_get_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     status_msg = await query.message.reply_text("🎵 " + to_small_caps("extracting audio..."))
 
-    def build_audio_opts():
+    def build_source_opts():
         opts = {
-            "format": "bestaudio/best",
-            "outtmpl": os.path.join(DOWNLOAD_DIR, "%(id)s_audio.%(ext)s"),
+            "format": "best[vcodec!=none][acodec!=none]/best",
+            "outtmpl": os.path.join(DOWNLOAD_DIR, "%(id)s_audiosrc_" + str(int(time.time())) + ".%(ext)s"),
             "quiet": True,
             "no_warnings": True,
-            "postprocessors": [{
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "mp3",
-                "preferredquality": "192",
-            }],
         }
         if FFMPEG_PATH:
             opts["ffmpeg_location"] = FFMPEG_PATH
         return opts
 
-    def run_audio_download():
-        opts = build_audio_opts()
+    def run_source_download():
+        opts = build_source_opts()
+        info = _ytdlp_extract_with_retry(opts, url, download=True)
         with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=True)
             fp = ydl.prepare_filename(info)
-            base, _ = os.path.splitext(fp)
-            mp3_path = base + ".mp3"
-            return mp3_path if os.path.exists(mp3_path) else fp
+        return fp if os.path.exists(fp) else None
 
+    def extract_audio_ffmpeg(src_path: str) -> str:
+        """Direct ffmpeg call — no ffprobe involved."""
+        mp3_path = os.path.splitext(src_path)[0] + ".mp3"
+        cmd = [
+            FFMPEG_PATH, "-y", "-i", src_path,
+            "-vn", "-acodec", "libmp3lame", "-q:a", "2",
+            mp3_path,
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+        if result.returncode != 0 or not os.path.exists(mp3_path):
+            raise RuntimeError(f"ffmpeg audio extraction failed: {result.stderr[-500:]}")
+        return mp3_path
+
+    source_path = None
     audio_path = None
     try:
         if not FFMPEG_AVAILABLE:
@@ -2790,7 +2868,11 @@ async def cb_get_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "❌ " + to_small_caps("audio extraction needs ffmpeg, which isn't available on this server.")
             )
             return
-        audio_path = await asyncio.to_thread(run_audio_download)
+        source_path = await asyncio.to_thread(run_source_download)
+        if not source_path:
+            await status_msg.edit_text("❌ " + to_small_caps("couldn't download this post for audio extraction."))
+            return
+        audio_path = await asyncio.to_thread(extract_audio_ffmpeg, source_path)
         if not audio_path or not os.path.exists(audio_path):
             await status_msg.edit_text("❌ " + to_small_caps("couldn't extract audio from this post."))
             return
@@ -2809,11 +2891,12 @@ async def cb_get_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             await status_msg.edit_text("❌ " + to_small_caps("audio extraction failed."))
     finally:
-        if audio_path and os.path.exists(audio_path):
-            try:
-                os.remove(audio_path)
-            except OSError:
-                pass
+        for p in (source_path, audio_path):
+            if p and os.path.exists(p):
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
 
 
 async def cb_check_force_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4113,6 +4196,7 @@ async def _render_adm_selftest(update: Update, context: ContextTypes.DEFAULT_TYP
     except Exception as e:
         results.append(("Telegram API", f"❌ {e}"))
     results.append(("ffmpeg", "✅ found" if FFMPEG_AVAILABLE else "⚠️ not found (merge downloads may fail)"))
+    results.append(("ffprobe", "✅ found" if FFPROBE_AVAILABLE else "ℹ️ not found (not needed — audio uses direct ffmpeg)"))
     try:
         import yt_dlp as _yd
         results.append(("yt-dlp", f"✅ v{_yd.version.__version__}"))
