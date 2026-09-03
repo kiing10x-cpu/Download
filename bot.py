@@ -7094,7 +7094,6 @@ SCREEN_RENDERERS.update(
         "adm_cmdtest": _render_adm_cmdtest,
         "adm_activity": _render_adm_activity,
         "adm_selftest": _render_adm_selftest,
-        "adm_plugins": _render_adm_plugins,
     }
 )
 
@@ -7209,6 +7208,13 @@ async def cb_adm_plugins(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update.effective_user.id):
         return
     await _render_adm_plugins(update, context)
+
+
+# BUGFIX — this must be registered here, AFTER _render_adm_plugins is
+# defined, not inside the big SCREEN_RENDERERS.update({...}) block far
+# above (which runs at module import time, before this function existed
+# yet) — that ordering caused a hard NameError crash on every startup.
+SCREEN_RENDERERS["adm_plugins"] = _render_adm_plugins
 
 
 def build_app() -> Application:
