@@ -1535,36 +1535,25 @@ async def render_menu(context: ContextTypes.DEFAULT_TYPE, chat_id: int, menu_id:
     # text doesn't need to worry about stray curly braces breaking anything.
     if menu_id == "start" and ("{first_name}" in text or "{bot_link}" in text):
         if "{first_name}" in text:
-            user_rec = BOT_DATA["users"].get(str(chat_id), {})
-            stored_name = user_rec.get("name") or ""
+            stored_name = BOT_DATA["users"].get(str(chat_id), {}).get("name") or ""
             first_name = stored_name.split(" ")[0] if stored_name else "there"
-            first_name_safe = html.escape(first_name)
-            # Point 1 — the person's name in the welcome message must be a
-            # clickable link to their own Telegram profile, same pattern as
-            # everywhere else (Support, Live Activity, admin DMs). In a
-            # private chat the chat_id IS the user's id, so this works even
-            # if we somehow have no username on file.
-            username = user_rec.get("username")
-            if username:
-                name_link = f'<a href="https://t.me/{username}">{first_name_safe}</a>'
-            else:
-                name_link = f'<a href="tg://user?id={chat_id}">{first_name_safe}</a>'
-            text = text.replace("{first_name}", name_link)
+            text = text.replace("{first_name}", html.escape(first_name))
         if "{bot_link}" in text:
-            bot_name = "our bot"
+            bot_link = "our bot"
             try:
                 me = await _cached_get_me(context)
-                bot_name = html.escape(me.first_name or "our bot")
+                display_name = html.escape(me.first_name or "our bot")
+                if me.username:
+                    bot_link = f'<a href="https://t.me/{me.username}">{display_name}</a>'
+                else:
+                    bot_link = display_name
             except Exception as e:
                 # Previously silent — a transient get_me() failure meant the
                 # welcome message's bot-name link just quietly stayed as
-                # plain "our bot" text with no trace of why. Now it's
-                # visible in the admin Activity Log too.
-                log_error("bot_link_resolve", f"render_menu couldn't resolve bot name: {e}")
-            # Point 1 — the bot's OWN name must stay plain bold text, never
-            # styled/rendered as a link: it used to look tappable but had
-            # nothing to open, which was confusing.
-            text = text.replace("{bot_link}", f"<b>{bot_name}</b>")
+                # plain "our bot" text with no clickable link and no trace
+                # of why. Now it's visible in the admin Activity Log too.
+                log_error("bot_link_resolve", f"render_menu couldn't resolve bot link: {e}")
+            text = text.replace("{bot_link}", bot_link)
 
     # #10 — owner/developer credit button, injected at render time (not part
     # of the admin-editable button list) so it can't be accidentally deleted
@@ -2113,21 +2102,7 @@ async def show_post_onboarding(context: ContextTypes.DEFAULT_TYPE, chat_id: int,
     sent = await render_menu(context, chat_id, "start")
     if not BOT_DATA["users"].get(uid, {}).get("reply_kb_sent"):
         try:
-            # BUGFIX — a persistent ReplyKeyboardMarkup can only be attached
-            # by sending SOME message with it (Telegram has no "attach
-            # keyboard silently" call), but the old "⌨️" text used for this
-            # stayed visible in the chat and looked like a stray, confusing
-            # message. We still send a throwaway message to attach the
-            # keyboard, but with invisible text, then delete it immediately
-            # — the reply keyboard stays attached (it's chat-wide, not tied
-            # to any one message) while nothing visible is left behind.
-            kb_msg = await context.bot.send_message(
-                chat_id, "\u2063", reply_markup=main_reply_keyboard(is_admin(int(uid)))
-            )
-            try:
-                await kb_msg.delete()
-            except Exception:
-                pass
+            await context.bot.send_message(chat_id, "⌨️", reply_markup=main_reply_keyboard(is_admin(int(uid))))
         except Exception:
             pass
         BOT_DATA["users"].setdefault(uid, {})["reply_kb_sent"] = True
