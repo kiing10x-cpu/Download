@@ -40,6 +40,7 @@ from telegram import (
     ReplyKeyboardMarkup,
     KeyboardButton,
     LabeledPrice,
+    CopyTextButton,
 )
 from telegram.ext import (
     Application,
@@ -753,7 +754,6 @@ DEFAULT_MENUS = {
         "parse_mode": "HTML",
         "image_file_id": None,
         "buttons": [
-            {"label": to_small_caps("📝 caption"), "type": "callback", "value": "get_caption", "row": 1, "style": "primary"},
             {"label": to_small_caps("🎵 audio"), "type": "callback", "value": "get_audio", "row": 1, "style": "primary"},
         ],
         "auto_delete_seconds": None,
@@ -2627,6 +2627,25 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         kb = build_keyboard_from_buttons(buttons, "reel_result")
         parse_mode = menu.get("parse_mode") or None
 
+        # Extra reel-specific action buttons, always appended after whatever
+        # admin-configured buttons the reel_result menu has (e.g. Audio):
+        # a native one-tap Copy Caption (Telegram's own clipboard-copy
+        # control, capped at 256 chars) with a safe fallback for longer
+        # captions, plus a Remove button to delete the delivered reel.
+        extra_rows = []
+        if ig_caption:
+            if len(ig_caption) <= 256:
+                copy_btn = InlineKeyboardButton(
+                    "📋 Copy Caption",
+                    copy_text=CopyTextButton(text=ig_caption),
+                )
+            else:
+                copy_btn = styled_button("📋 Copy Caption", callback_data="copy_caption", style="primary")
+            extra_rows.append([copy_btn])
+        extra_rows.append([styled_button("❌ Remove", callback_data="remove_reel", style="danger")])
+        existing_rows = list(kb.inline_keyboard) if kb else []
+        kb = InlineKeyboardMarkup(existing_rows + extra_rows)
+
         # v2 §9 — native Telegram blockquote with extra reel info, HTML only.
         if parse_mode == "HTML":
             import html as _html
@@ -2720,6 +2739,34 @@ async def cb_get_caption(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Telegram message limit is 4096 chars — split if needed.
     for i in range(0, len(caption), 4000):
         await query.message.reply_text(caption[i:i + 4000])
+
+
+async def cb_copy_caption(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Fallback for captions longer than Telegram's 256-char native
+    CopyTextButton limit. Sends the complete caption so the user can use
+    Telegram's normal copy action without truncation."""
+    query = update.callback_query
+    await query.answer()
+    key = (query.message.chat_id, query.message.message_id)
+    entry = _caption_cache.get(key)
+    caption = entry.get("caption") if entry else None
+    if not caption:
+        await query.message.reply_text("ℹ️ " + to_small_caps("caption cache expired."))
+        return
+    for i in range(0, len(caption), 4000):
+        await query.message.reply_text(caption[i:i + 4000])
+
+
+async def cb_remove_reel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Delete the delivered reel and its cached metadata."""
+    query = update.callback_query
+    await query.answer("Removed")
+    key = (query.message.chat_id, query.message.message_id)
+    _caption_cache.pop(key, None)
+    try:
+        await query.message.delete()
+    except Exception:
+        pass
 
 
 async def cb_get_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4624,6 +4671,7 @@ async def _render_adm_broadcast(update: Update, context: ContextTypes.DEFAULT_TY
                 callback_data="stgl:broadcast_attach_start_button:adm_broadcast",
             )],
             [styled_button("🗑 Delete Broadcast", callback_data="adm_bc_delmenu")],
+            [styled_button("🚀 /start Broadcast", callback_data="adm_start_broadcast")],
             back_row(),
             home_row(),
         ]
@@ -4633,7 +4681,8 @@ async def _render_adm_broadcast(update: Update, context: ContextTypes.DEFAULT_TY
         to_small_caps("📢 broadcast centre") + "\n"
         + to_small_caps("send an announcement to every registered user") + "\n\n"
         + to_small_caps("total reachable users") + f": {total_users}\n\n"
-        + to_small_caps("start button attaches a tap-to-start link so users can open the bot directly")
+        + to_small_caps("start button attaches a tap-to-start link so users can open the bot directly") + "\n"
+        + to_small_caps("/start broadcast sends the normal bot welcome message as an alive/working notification")
     )
     await query.edit_message_text(body, reply_markup=kb)
 
@@ -4641,6 +4690,75 @@ async def _render_adm_broadcast(update: Update, context: ContextTypes.DEFAULT_TY
 async def cb_adm_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     await _render_adm_broadcast(update, context)
+
+
+async def cb_adm_start_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show confirmation before sending the bot's normal /start experience to everyone."""
+    query = update.callback_query
+    await query.answer()
+    if not is_admin(update.effective_user.id):
+        return
+    kb = InlineKeyboardMarkup([
+        [styled_button("✅ Confirm /start Broadcast", callback_data="adm_start_broadcast_confirm", style="primary")],
+        [styled_button("❌ Cancel", callback_data="adm_broadcast")]
+    ])
+    await query.edit_message_text(
+        "⚠️ " + to_small_caps("confirm /start broadcast") + "\n\n"
+        + to_small_caps("this will send the bot's normal /start welcome message to every registered user, plus this admin chat.") + "\n"
+        + to_small_caps("no custom broadcast content will be used."),
+        reply_markup=kb,
+    )
+
+
+async def cb_adm_start_broadcast_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Send the normal /start experience as a simple alive/working notification."""
+    query = update.callback_query
+    await query.answer()
+    if not is_admin(update.effective_user.id):
+        return
+
+    status = await query.message.reply_text("🚀 " + to_small_caps("/start broadcast in progress..."))
+    targets = set(BOT_DATA["users"].keys())
+    targets.add(str(update.effective_user.id))
+    sent = 0
+    failed = 0
+
+    for uid in targets:
+        try:
+            await context.bot.send_message(chat_id=int(uid), text="/start")
+            sent += 1
+        except RetryAfter as e:
+            await asyncio.sleep(e.retry_after + 0.5)
+            try:
+                await context.bot.send_message(chat_id=int(uid), text="/start")
+                sent += 1
+            except Exception:
+                failed += 1
+        except Exception:
+            failed += 1
+        await asyncio.sleep(BROADCAST_SEND_DELAY)
+
+    try:
+        await status.edit_text(
+            "✅ " + to_small_caps("/start broadcast complete") + "\n\n"
+            + to_small_caps("delivered") + f": {sent}\n"
+            + to_small_caps("failed") + f": {failed}"
+        )
+    except Exception:
+        pass
+    await log_event(context, f"🚀 /start broadcast by {update.effective_user.id} — {sent} delivered, {failed} failed")
+
+
+async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin command equivalent of the Broadcast Centre's New Broadcast button."""
+    if not is_admin(update.effective_user.id):
+        return
+    context.user_data["awaiting"] = "broadcast_content"
+    await update.message.reply_text(
+        to_small_caps("📢 send your broadcast now") + "\n"
+        + to_small_caps("text, photo or video — one single message") + "\n\n"
+        + to_small_caps("it will be delivered to every registered user and this admin chat, respecting your forward-lock setting")
+    )
 
 
 async def cb_adm_bc_new(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4701,6 +4819,11 @@ async def do_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     recovered = 0        # succeeded only after a flood-control retry
 
     user_ids = list(BOT_DATA["users"].keys())
+    # The sending admin also receives a copy, so the broadcast is visible in
+    # the admin chat exactly like it is for users.
+    admin_uid = str(update.effective_user.id)
+    if admin_uid not in user_ids:
+        user_ids.append(admin_uid)
     total = len(user_ids)
     for i, uid in enumerate(user_ids):
         try:
@@ -7238,6 +7361,7 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("block", cmd_block))
     app.add_handler(CommandHandler("unblock", cmd_unblock))
     app.add_handler(CommandHandler("cancel", cmd_cancel))
+    app.add_handler(CommandHandler("broadcast", cmd_broadcast))
     app.add_handler(MessageHandler(filters.COMMAND, cmd_unknown))
 
     app.add_handler(CallbackQueryHandler(cb_agree_terms, pattern="^agree_terms$"))
@@ -7261,6 +7385,8 @@ def build_app() -> Application:
 
     app.add_handler(CallbackQueryHandler(cb_get_caption, pattern="^get_caption$"))
     app.add_handler(CallbackQueryHandler(cb_get_audio, pattern="^get_audio$"))
+    app.add_handler(CallbackQueryHandler(cb_copy_caption, pattern="^copy_caption$"))
+    app.add_handler(CallbackQueryHandler(cb_remove_reel, pattern="^remove_reel$"))
     app.add_handler(CallbackQueryHandler(cb_download_another, pattern="^download_another$"))
     app.add_handler(CallbackQueryHandler(cb_check_force_join, pattern="^check_force_join$"))
     app.add_handler(ChatMemberHandler(cm_track_groups, ChatMemberHandler.MY_CHAT_MEMBER))
@@ -7308,6 +7434,8 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_live")(cb_adm_live), pattern="^adm_live$"))
     app.add_handler(CallbackQueryHandler(cb_adm_quickban, pattern="^adm_quickban$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_broadcast")(cb_adm_broadcast), pattern="^adm_broadcast$"))
+    app.add_handler(CallbackQueryHandler(cb_adm_start_broadcast, pattern="^adm_start_broadcast$"))
+    app.add_handler(CallbackQueryHandler(cb_adm_start_broadcast_confirm, pattern="^adm_start_broadcast_confirm$"))
     app.add_handler(CallbackQueryHandler(cb_adm_bc_new, pattern="^adm_bc_new$"))
     app.add_handler(CallbackQueryHandler(cb_adm_bc_log, pattern="^adm_bc_log$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_bc_delmenu")(cb_adm_bc_delmenu), pattern="^adm_bc_delmenu$"))
