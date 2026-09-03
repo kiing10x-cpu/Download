@@ -1139,8 +1139,24 @@ async def cm_track_groups(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_data()
 
 
+_PUBLIC_TME_LINK_RE = re.compile(r"^https?://t\.me/([A-Za-z0-9_]{4,32})/?$")
+
+
 def _force_join_targets():
-    """Return normalized multi-force-join targets, while migrating legacy data."""
+    """Return normalized multi-force-join targets, while migrating legacy data.
+
+    BUGFIX — the #1 cause of "bot works for admin only, nobody else can ever
+    get past the join screen": whenever an admin configured a force-join
+    target using ONLY a public https://t.me/<username> link (no chat_id),
+    is_force_join_ok() below had no chat_id to call getChatMember() with, so
+    it unconditionally returned False for every non-admin, forever — even
+    for users who genuinely joined and tapped "I've joined". We now extract
+    the @username straight out of a public t.me link right here, so it
+    becomes a normal, properly-checkable chat_id target. (Private
+    https://t.me/+xxxx / joinchat invite links can never be resolved to a
+    chat_id by the Bot API this way — those still fall back to trust-on-tap,
+    handled in cb_check_force_join.)
+    """
     settings = BOT_DATA["settings"]
     targets = settings.get("force_join_channels") or []
     if not targets and settings.get("force_join_channel"):
@@ -1149,12 +1165,23 @@ def _force_join_targets():
                     "link": legacy if str(legacy).startswith("http") else None}]
         settings["force_join_channels"] = targets
     normalized = []
+    changed = False
     for item in targets:
         if isinstance(item, str):
             item = {"chat_id": item if not item.startswith("http") else None,
                     "link": item if item.startswith("http") else None}
-        if isinstance(item, dict) and (item.get("chat_id") or item.get("link")):
+        if not isinstance(item, dict):
+            continue
+        if not item.get("chat_id") and item.get("link"):
+            m = _PUBLIC_TME_LINK_RE.match(item["link"].strip())
+            if m and m.group(1).lower() != "joinchat":
+                item["chat_id"] = "@" + m.group(1)
+                changed = True
+        if item.get("chat_id") or item.get("link"):
             normalized.append(item)
+    if changed:
+        settings["force_join_channels"] = normalized
+        save_data()
     return normalized
 
 
@@ -1164,7 +1191,9 @@ async def is_force_join_ok(context: ContextTypes.DEFAULT_TYPE, user_id: int) -> 
     Join requests are also accepted: when Telegram sends the bot a
     ChatJoinRequest update, that user is temporarily/explicitly marked as
     verified for that target, so they can start using the bot without waiting
-    for a manual re-check.
+    for a manual re-check. Private invite-link-only targets that can't be
+    queried at all are handled by trust-on-tap in cb_check_force_join, which
+    adds them to the same verified list before this function ever sees them.
     """
     targets = _force_join_targets()
     if not targets or is_admin(user_id):
@@ -1176,8 +1205,8 @@ async def is_force_join_ok(context: ContextTypes.DEFAULT_TYPE, user_id: int) -> 
         if key in verified:
             continue
         if not chat_id:
-            # Link-only targets cannot be queried by getChatMember. They can
-            # still be verified through a join-request update.
+            # Genuinely unresolvable (private invite-link-only) target and
+            # the user hasn't been trust-verified for it yet.
             return False
         try:
             member = await context.bot.get_chat_member(chat_id=chat_id, user_id=user_id)
@@ -2976,6 +3005,24 @@ async def cb_get_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cb_check_force_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+    user_id = update.effective_user.id
+    # BUGFIX — private https://t.me/+xxxx invite-link-only targets can never
+    # be confirmed via getChatMember (the Bot API has no way to check an
+    # arbitrary user's membership without a real chat_id). Before this fix,
+    # tapping "I've joined" against such a target called is_force_join_ok(),
+    # which had no way to ever say yes — so the button did literally nothing,
+    # for anyone, forever, no matter what they did. We now trust an explicit
+    # tap of this button as verification for exactly those unresolvable
+    # targets (public @username/chat_id targets are still verified for real
+    # via the API below, so those still correctly block non-members).
+    unresolved = [t for t in _force_join_targets() if not t.get("chat_id")]
+    if unresolved:
+        verified_map = BOT_DATA["settings"].setdefault("force_join_request_verified", {})
+        keys = set(verified_map.get(str(user_id), []))
+        for t in unresolved:
+            keys.add(str(t.get("link")))
+        verified_map[str(user_id)] = list(keys)
+        save_data()
     ok = await is_force_join_ok(context, update.effective_user.id)
     if ok:
         await query.answer(to_small_caps("✅ verified!"), show_alert=True)
