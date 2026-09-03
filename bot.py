@@ -2873,10 +2873,29 @@ async def cb_get_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # write out. Since this button only ever needs the audio, ask yt-dlp
     # for an audio-only format first; only fall back toward muxed/video
     # formats if a post genuinely has no separate audio track.
-    def build_source_opts():
+    # FIX v2 — the acodec-metadata check added after the last fix was
+    # itself wrong: Instagram's yt-dlp extractor frequently reports
+    # acodec == "none" on formats that DO contain audio (it can't always
+    # read real codec info from Instagram's API), so trusting that field
+    # produced false "no audio track" errors on posts that were fine.
+    # Metadata here just isn't trustworthy either way — so instead of
+    # guessing from it, we download a candidate format and ask ffmpeg
+    # itself (ground truth, no ffprobe needed) whether the actual file has
+    # an audio stream. If not, we try the next candidate format instead of
+    # giving up on the first guess.
+    def probe_has_audio(path: str) -> bool:
+        try:
+            result = subprocess.run(
+                [FFMPEG_PATH, "-i", path], capture_output=True, text=True, timeout=30
+            )
+            return bool(re.search(r"Stream #\d+:\d+.*Audio:", result.stderr))
+        except Exception:
+            return False
+
+    def build_source_opts(fmt: str):
         opts = {
-            "format": "bestaudio/best[acodec!=none]/best",
-            "outtmpl": os.path.join(DOWNLOAD_DIR, "%(id)s_audiosrc_" + str(int(time.time())) + ".%(ext)s"),
+            "format": fmt,
+            "outtmpl": os.path.join(DOWNLOAD_DIR, "%(id)s_audiosrc_" + str(int(time.time())) + "_%(format_id)s.%(ext)s"),
             "quiet": True,
             "no_warnings": True,
         }
@@ -2884,20 +2903,47 @@ async def cb_get_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
             opts["ffmpeg_location"] = FFMPEG_PATH
         return opts
 
-    def run_source_download():
-        opts = build_source_opts()
+    def download_format(fmt: str):
+        opts = build_source_opts(fmt)
         info = _ytdlp_extract_with_retry(opts, url, download=True)
         with yt_dlp.YoutubeDL(opts) as ydl:
             fp = ydl.prepare_filename(info)
-        fp = fp if os.path.exists(fp) else None
-        # yt-dlp's info dict tells us the selected format's codecs without
-        # needing ffprobe. If we somehow still landed on a video-only
-        # format (acodec == "none"), surface that clearly instead of
-        # letting ffmpeg fail later with a cryptic "no stream" error.
-        acodec = (info or {}).get("acodec")
-        if fp and acodec == "none":
-            raise RuntimeError("this post has no separate audio track available to extract.")
-        return fp
+        return fp if os.path.exists(fp) else None
+
+    def run_source_download():
+        # Try, in order: a dedicated audio-only stream; the best muxed
+        # (video+audio) stream; then whatever "best" resolves to as a last
+        # resort. Each candidate is verified against the real file, not
+        # metadata, before we commit to it — failed candidates are cleaned
+        # up immediately so we don't leave stray video-only files behind.
+        candidates = ["bestaudio", "best[acodec!=none][vcodec!=none]", "best"]
+        tried_paths = []
+        for fmt in candidates:
+            try:
+                fp = download_format(fmt)
+            except Exception as e:
+                log.warning("audio-source download failed for format %r: %s", fmt, e)
+                continue
+            if not fp:
+                continue
+            tried_paths.append(fp)
+            if probe_has_audio(fp):
+                # Clean up any earlier failed attempts before returning.
+                for p in tried_paths[:-1]:
+                    try:
+                        os.remove(p)
+                    except OSError:
+                        pass
+                return fp
+        # Nothing worked — clean up every attempt and report clearly.
+        for p in tried_paths:
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+        if tried_paths:
+            raise RuntimeError("this post doesn't seem to have an audio track (checked multiple formats).")
+        return None
 
     def extract_audio_ffmpeg(src_path: str) -> str:
         """Direct ffmpeg call — no ffprobe involved."""
