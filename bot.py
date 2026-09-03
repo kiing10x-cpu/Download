@@ -2660,26 +2660,34 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             result_caption = base_caption
 
-        # Action row: Audio replaces the old Caption button; Remove takes
-        # the old Audio button's position.  Copy Caption is a native Telegram
-        # copy control when possible, with a safe long-caption fallback.
+        # Compact reel controls: Caption + Audio stay together on the first
+        # row, while the full-width Remove Buttons control sits underneath.
+        # Labels use the bot's small-caps font so the controls match the rest
+        # of the user-facing UI.
         if ig_caption:
             if len(ig_caption) <= 256:
                 copy_btn = InlineKeyboardButton(
-                    "📋 Copy Caption",
+                    to_small_caps("📋 Caption"),
                     copy_text=CopyTextButton(text=ig_caption),
                 )
             else:
-                copy_btn = styled_button("📋 Copy Caption", callback_data="copy_caption", style="primary")
+                copy_btn = styled_button(
+                    to_small_caps("📋 Caption"),
+                    callback_data="copy_caption", style="primary"
+                )
         else:
             copy_btn = None
-        action_row = [
-            styled_button("🎵 Audio", callback_data="get_audio", style="primary"),
-            styled_button("❌ Remove", callback_data="remove_reel", style="danger"),
-        ]
-        kb_rows = [action_row]
+
+        top_row = []
         if copy_btn is not None:
-            kb_rows.insert(0, [copy_btn])
+            top_row.append(copy_btn)
+        top_row.append(styled_button(
+            to_small_caps("🎵 Audio"), callback_data="get_audio", style="primary"
+        ))
+        kb_rows = [top_row, [styled_button(
+            to_small_caps("❌ Remove Buttons"),
+            callback_data="remove_reel", style="danger"
+        )]]
         kb = InlineKeyboardMarkup(kb_rows)
 
         anim_task.cancel()
@@ -2688,6 +2696,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # the 50MB cap (documents preserve quality better near the limit).
         threshold = BOT_DATA["settings"].get("document_mode_threshold_mb", 45) * 1024 * 1024
         as_document = BOT_DATA["settings"].get("send_as_document", False) or file_size > threshold
+        # Tell the user the reel is ready immediately before delivering the
+        # actual media. Keep this as a separate, clean message.
+        try:
+            await status_msg.edit_text(to_small_caps("Your reel is ready"))
+        except Exception:
+            pass
+
         with open(file_path, "rb") as vid:
             if as_document:
                 sent = await update.message.reply_document(
@@ -2697,6 +2712,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 sent = await update.message.reply_video(
                     video=vid, caption=result_caption, parse_mode=parse_mode, reply_markup=kb, protect_content=protect
                 )
+
+        # The original Instagram link is only needed during processing. Once
+        # the reel has been delivered successfully, remove that incoming link
+        # from the user's chat, matching the chat-cleanup behavior used by
+        # the admin input flows.
+        await delete_incoming(update)
 
         # Cache the real Instagram caption + source URL so the Copy Caption
         # fallback, Audio button, and Remove button under THIS specific video
@@ -2789,13 +2810,21 @@ async def cb_copy_caption(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cb_remove_reel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Delete the delivered reel and its cached metadata."""
+    """Remove only the caption and buttons; never delete the reel itself."""
     query = update.callback_query
-    await query.answer("Removed")
+    await query.answer(to_small_caps("Removed"))
     key = (query.message.chat_id, query.message.message_id)
     _caption_cache.pop(key, None)
+
+    # The media message must remain untouched. Telegram lets us edit the
+    # caption/reply markup of the delivered media message independently.
     try:
-        await query.message.delete()
+        await query.message.edit_caption(caption=None, reply_markup=None)
+        return
+    except Exception:
+        pass
+    try:
+        await query.message.edit_reply_markup(reply_markup=None)
     except Exception:
         pass
 
@@ -6929,11 +6958,51 @@ def _build_export_zip(src_dir: str) -> str:
     return zip_path
 
 
+def _scan_export_code_stats(src_dir: str):
+    """Walk the same file set /export zips (source .py files only, same
+    excludes) and return light stats about the codebase: how many files,
+    total lines, a rough function/handler count, and the most recent
+    modification time across those files (used as the "code last updated"
+    timestamp — more meaningful than the export zip's own mtime, which is
+    always "just now" since it's freshly built on every run)."""
+    total_files = 0
+    total_lines = 0
+    total_funcs = 0
+    latest_mtime = 0.0
+    for root, dirs, files in os.walk(src_dir):
+        dirs[:] = [d for d in dirs if d not in EXPORT_EXCLUDE_DIRS and not d.startswith(".")]
+        for fname in files:
+            if not fname.endswith(".py"):
+                continue
+            full = os.path.join(root, fname)
+            try:
+                mtime = os.path.getmtime(full)
+                latest_mtime = max(latest_mtime, mtime)
+                with open(full, "r", encoding="utf-8", errors="ignore") as fh:
+                    lines = fh.readlines()
+                total_files += 1
+                total_lines += len(lines)
+                total_funcs += sum(1 for ln in lines if re.match(r"\s*(async\s+)?def\s+\w+\(", ln))
+            except Exception:
+                continue
+    return {
+        "files": total_files,
+        "lines": total_lines,
+        "funcs": total_funcs,
+        "last_updated": to_ist(datetime.utcfromtimestamp(latest_mtime)).strftime("%d %b %Y, %H:%M") if latest_mtime else "?",
+    }
+
+
 async def cmd_export(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Owner-only — zips the bot's source code (never user downloads,
     backups, or the live data file) and DMs it to the owner. Wrapped
     end-to-end in error handling so a failure always tells the admin what
-    went wrong instead of silently doing nothing."""
+    went wrong instead of silently doing nothing.
+
+    After the zip is sent, a small follow-up message is also sent with
+    when the code was last modified (based on source file mtimes, not the
+    zip's own build time) plus a light summary of the codebase (file/line/
+    function counts, export size)."""
     if not is_owner(update.effective_user.id):
         await update.message.reply_text("🚫 " + to_small_caps("owner only."))
         return
@@ -6957,6 +7026,22 @@ async def cmd_export(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
         if update.effective_chat.id != update.effective_user.id:
             await update.message.reply_text("✅ " + to_small_caps("sent to your dm."))
+        # Follow-up: last-updated timestamp + light code details, sent as a
+        # separate message right under the exported file.
+        try:
+            stats = _scan_export_code_stats(src_dir)
+            details_text = (
+                "🗂 " + to_small_caps("code details") + "\n"
+                f"🕒 " + to_small_caps("last updated") + f": {stats['last_updated']} IST\n"
+                f"📄 " + to_small_caps("files") + f": {stats['files']}\n"
+                f"📃 " + to_small_caps("total lines") + f": {stats['lines']}\n"
+                f"⚙️ " + to_small_caps("functions") + f": {stats['funcs']}\n"
+                f"📦 " + to_small_caps("export size") + f": {size / 1024:.0f} kb"
+            )
+            await context.bot.send_message(chat_id=update.effective_user.id, text=details_text)
+        except Exception:
+            # Purely informational — never let this break the actual export.
+            log.warning("Could not send export code-details follow-up message", exc_info=True)
     except Forbidden:
         await status.edit_text(
             "⚠️ " + to_small_caps("couldn't dm you the export — start a private chat with the bot first, then try again.")
@@ -7625,4 +7710,9 @@ if __name__ == "__main__":
 #    error (common in URLs) broke Telegram's parser and could leave the
 #    user staring at a frozen "processing..." message. Now escaped, with
 #    a plain-text fallback if the edit still somehow fails.
+# 8. /export now sends a follow-up message right after the zip: when the
+#    code was last modified (latest .py file mtime, not the zip's own
+#    build time) plus a light summary — file count, total lines, function
+#    count, export size. Purely informational; wrapped so a failure here
+#    can never break the actual export.
 # ------------------------------------------------------------------------
