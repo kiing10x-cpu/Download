@@ -70,10 +70,12 @@ BACKUP_INTERVAL_HOURS = int(os.environ.get("BACKUP_INTERVAL_HOURS", "12"))
 DATA_FILE = "bot_data.json"
 BACKUP_DIR = "backups"
 DOWNLOAD_DIR = "downloads"
+PLUGIN_DIR = "plugins"
 MAX_LOCAL_BACKUPS = 10
 
 os.makedirs(BACKUP_DIR, exist_ok=True)
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+os.makedirs(PLUGIN_DIR, exist_ok=True)
 
 # ffmpeg is only needed when yt-dlp has to MERGE separate video+audio streams.
 # Most Instagram reels are already a single muxed file, so we don't strictly
@@ -905,6 +907,10 @@ DEFAULT_DATA = {
     "tickets": {},               # v2 §6 — ticket_id(str) -> {...}
     "ticket_msg_map": {},        # v2 §6 — admin_group_message_id(str) -> ticket_id
     "support_msg_map": {},       # one-shot support admin-message-id(str) -> user_id(str)
+    "support_requests": {},      # request_id(str) -> {user_id, chat_id, confirm_chat_id,
+                                  #   confirm_message_id, admin_message_ids: [...], status, text, created_at}
+    "support_admin_msg_map": {}, # one-shot support admin-message-id(str) -> request_id(str)
+    "next_support_id": 100000,   # 6-digit request IDs, e.g. #100000, #100001, ...
     "next_ticket_id": 1,
     "panel_msg": {},              # v2 §11 — chat_id(str) -> last panel message_id
     "gift_orders": {},            # v2 §4 — order_id(str) -> {...} (UPI pending payments)
@@ -1273,6 +1279,18 @@ async def dm_all_admins(context: ContextTypes.DEFAULT_TYPE, text: str, reply_mar
             await context.bot.send_message(chat_id=admin_id, text=text, reply_markup=reply_markup)
         except Exception:
             log.warning("Could not DM admin %s (bot blocked / never started a DM)", admin_id)
+
+
+def clickable_user(user_obj) -> str:
+    """HTML mention link to a user's Telegram profile — same pattern used by
+    the Support flow, reused everywhere a user's name is shown to an admin
+    (Live Activity, admin DMs, Support tickets, join alerts, etc.). Falls
+    back to a plain @username link when a username exists (works even if
+    the user has since blocked the bot), tg://user?id otherwise."""
+    name = html.escape(user_obj.full_name or str(user_obj.id))
+    if getattr(user_obj, "username", None):
+        return f'<a href="https://t.me/{user_obj.username}">{name}</a>'
+    return f'<a href="tg://user?id={user_obj.id}">{name}</a>'
 
 
 def build_join_details(update: Update, is_new: bool) -> str:
@@ -2384,6 +2402,16 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # behaviour but no code actually deleted the tapped message, so old
         # button-tap messages from the user kept piling up in the chat.
         await delete_incoming(update)
+        # BUGFIX — tapping any bottom-keyboard button must cancel whatever
+        # text-collection state was pending (e.g. Support's "awaiting":
+        # "support_message"). Without this, closing Support and tapping a
+        # different button (How To Use, My Usage, ...) left "awaiting"
+        # stuck at "support_message", so the NEXT plain text the user typed
+        # — completely unrelated to Support — silently got sent to Support
+        # instead of being treated normally. Branches below that need their
+        # own awaiting state (Support) set it again right after this, so
+        # this is always safe.
+        context.user_data.pop("awaiting", None)
     if text == RKB_DOWNLOAD:
         await _replace_rkb_screen(
             context, update.effective_chat.id, "download",
@@ -2861,21 +2889,27 @@ async def handle_admin_ticket_reply(update: Update, context: ContextTypes.DEFAUL
         pass
 
 
+SUPPORT_PROMPT_TEXT = to_bold_sans(
+    "Describe any issue, suggestion, or feedback\n"
+    "you want to share about the bot.\n"
+    "Please provide a clear description so we can understand and assist you properly."
+)
+
+
 async def support_button_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """One-shot support flow: user gets exactly one message to submit.
     The admin receives a mention and can reply directly to that single support
-    message; there is no lingering open-ticket state."""
+    message; there is no lingering open-ticket state.
+
+    NOTE — this prompt is intentionally the ONLY thing sent through
+    _replace_rkb_screen (the shared "rkb_latest" panel slot). The
+    confirmation sent after submission is sent separately (see
+    handle_user_awaiting_input) and is never tracked under that slot, so
+    switching to another bottom-keyboard button later can never delete the
+    user's submission confirmation."""
     chat_id = update.effective_chat.id
     context.user_data["awaiting"] = "support_message"
-    await _replace_rkb_screen(
-        context, chat_id, "support",
-        "╭━━━━━━━━━━━━━━━━━━╮\n"
-        "✦ 𝗦𝗨𝗣𝗣𝗢𝗥𝗧 ✦\n"
-        "╰━━━━━━━━━━━━━━━━━━╯\n\n"
-        "💬 Send your issue in one message.\n"
-        "🛠 An admin will try to resolve it.\n\n"
-        "↳ Send the issue in one text message only.",
-    )
+    await _replace_rkb_screen(context, chat_id, "support", SUPPORT_PROMPT_TEXT)
 
 
 async def cb_ticket_close(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2927,6 +2961,106 @@ async def cb_ticket_reopen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         pass
     await log_event(context, f"🎫 Ticket #{tid} reopened by {update.effective_user.id}")
+
+
+def _build_support_admin_card(rid: str) -> tuple:
+    """Admin-facing 'NEW SUPPORT REQUEST' card — labels in Mathematical
+    Sans-Serif Bold, all real values (name link aside) left as normal text.
+    Reused both when the request first comes in and when an admin marks it
+    resolved, so the card always reflects the live status."""
+    req = BOT_DATA["support_requests"][rid]
+    lbl = to_bold_sans
+    is_open = req["status"] == "pending"
+    status_word = "Pending" if is_open else "Resolved"
+    payload = (
+        f"{lbl('NEW SUPPORT REQUEST')}\n\n"
+        f"{lbl('User')} — {req['user_mention']}\n"
+        f"{lbl('User ID')} — {req['user_id']}\n"
+        f"{lbl('Username')} — {req['username_display']}\n\n"
+        f"{lbl('Request ID')} — #{rid}\n"
+        f"{lbl('Status')} — {status_word}\n\n"
+        f"{lbl('Message')}\n{html.escape(req['text'])}\n\n"
+        f"{lbl('Received')} — {iso_to_ist_str(req['created_at'], '%d %b %Y, %H:%M')} IST"
+    )
+    kb = None
+    if is_open:
+        kb = InlineKeyboardMarkup([[
+            styled_button("✅ Mark Resolved", callback_data=f"sup_resolve:{rid}", style="success"),
+        ]])
+    return payload, kb
+
+
+def _build_support_user_confirmation(rid: str) -> str:
+    """User-facing confirmation — the exact styled copy from spec, with the
+    live status swapped between PENDING and SOLVED."""
+    req = BOT_DATA["support_requests"][rid]
+    if req["status"] == "pending":
+        plain = (
+            "Your request has been submitted successfully. ✅\n"
+            "We'll let you know here once your issue has been resolved.\n\n"
+            f"REQUEST ID — #{rid}   STATUS — PENDING\n\n"
+            "You can also track your request from the Support menu."
+        )
+    else:
+        plain = (
+            "Your support request has been resolved. ✅\n"
+            "Thanks for your patience — reach out again anytime you need help.\n\n"
+            f"REQUEST ID — #{rid}   STATUS — SOLVED\n\n"
+            "You can also track your request from the Support menu."
+        )
+    return to_bold_sans(plain)
+
+
+async def cb_support_resolve(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin taps '✅ Mark Resolved' on a support card. This is what makes
+    the user-facing status live instead of frozen on PENDING forever — we
+    edit the SAME confirmation message in the user's chat in place, and
+    edit this same admin card too, rather than sending fresh clutter."""
+    query = update.callback_query
+    if not is_admin(update.effective_user.id):
+        await query.answer()
+        return
+    rid = query.data.split(":", 1)[1]
+    req = BOT_DATA["support_requests"].get(rid)
+    if not req:
+        await query.answer("Request not found.", show_alert=True)
+        return
+    if req["status"] != "pending":
+        await query.answer("Already resolved.")
+        return
+
+    req["status"] = "resolved"
+    req["resolved_at"] = datetime.utcnow().isoformat()
+    req["resolved_by"] = update.effective_user.id
+    save_data()
+
+    # Live-update the user's own confirmation message: PENDING -> SOLVED.
+    try:
+        await context.bot.edit_message_text(
+            chat_id=req["confirm_chat_id"],
+            message_id=req["confirm_message_id"],
+            text=_build_support_user_confirmation(rid),
+        )
+    except Exception:
+        # Message may have been deleted by the user / too old to edit —
+        # fall back to a fresh "resolved" message in the same style.
+        try:
+            msg = await context.bot.send_message(chat_id=req["confirm_chat_id"], text=_build_support_user_confirmation(rid))
+            req["confirm_chat_id"] = msg.chat_id
+            req["confirm_message_id"] = msg.message_id
+            save_data()
+        except Exception:
+            pass
+
+    # Live-update this admin card too (Pending -> Resolved, button removed).
+    card_text, card_kb = _build_support_admin_card(rid)
+    try:
+        await query.edit_message_text(card_text, parse_mode="HTML", reply_markup=card_kb)
+    except Exception:
+        pass
+
+    await query.answer("✅ Marked resolved.")
+    await log_event(context, f"🎧 Support request #{rid} resolved by {update.effective_user.id}")
 
 
 # ----------------------------------------------------------------------------
@@ -3560,7 +3694,7 @@ async def cb_support_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     context.user_data["awaiting"] = "support_message"
-    await query.message.reply_text("🆘 " + to_small_caps("support") + "\n\n" + to_small_caps("describe your issue and we'll forward it to the team."))
+    await query.message.reply_text(SUPPORT_PROMPT_TEXT)
 
 
 async def handle_user_awaiting_input(update: Update, context: ContextTypes.DEFAULT_TYPE, awaiting: str):
@@ -3568,21 +3702,31 @@ async def handle_user_awaiting_input(update: Update, context: ContextTypes.DEFAU
     user_obj = update.effective_user
 
     if awaiting == "support_message":
+        # NOTE — pop "awaiting" first thing, unconditionally, so a support
+        # request can never accidentally re-trigger on a later message even
+        # if something below raises.
         context.user_data.pop("awaiting", None)
-        mention = f'<a href="tg://user?id={user_obj.id}">{html.escape(user_obj.full_name)}</a>'
-        username_line = f"@{user_obj.username}" if user_obj.username else to_small_caps("no username")
-        sent_at = datetime.utcnow().strftime("%d %b %Y, %H:%M UTC")
-        payload = (
-            "╭━━━━━━━━━━━━━━━━━━╮\n"
-            "✦ 𝗡𝗘𝗪 𝗦𝗨𝗣𝗣𝗢𝗥𝗧 𝗠𝗘𝗦𝗦𝗔𝗚𝗘 ✦\n"
-            "╰━━━━━━━━━━━━━━━━━━╯\n\n"
-            f"👤 {mention} · {username_line}\n"
-            f"🆔 <code>{user_obj.id}</code>\n"
-            f"🕒 {sent_at}\n\n"
-            f"💬 {html.escape(text)}\n\n"
-            "↩️ Reply to this message to contact the user directly.\n"
-            "🛠 An admin will try to resolve the issue as soon as possible."
-        )
+
+        rid = str(BOT_DATA["next_support_id"])
+        BOT_DATA["next_support_id"] += 1
+        created_at = datetime.utcnow().isoformat()
+        req = {
+            "user_id": user_obj.id,
+            "user_mention": clickable_user(user_obj),
+            "username_display": f"@{user_obj.username}" if user_obj.username else "No Username",
+            "text": text,
+            "status": "pending",
+            "created_at": created_at,
+            "resolved_at": None,
+            "resolved_by": None,
+            "confirm_chat_id": update.effective_chat.id,
+            "confirm_message_id": None,
+            "admin_message_ids": [],
+        }
+        BOT_DATA["support_requests"][rid] = req
+
+        # Notify admins / the configured support chat with the live card.
+        card_text, card_kb = _build_support_admin_card(rid)
         support_chat_id = BOT_DATA["settings"].get("support_chat_id")
         targets = [support_chat_id] if support_chat_id else BOT_DATA.get("admins", [])
         for target in targets:
@@ -3590,18 +3734,32 @@ async def handle_user_awaiting_input(update: Update, context: ContextTypes.DEFAU
                 continue
             try:
                 sent = await context.bot.send_message(
-                    chat_id=target, text=payload, parse_mode="HTML"
+                    chat_id=target, text=card_text, parse_mode="HTML", reply_markup=card_kb
                 )
-                # Replying to this one message routes the admin's response
-                # directly to the user; no permanent open-ticket state needed.
+                # Replying to this message still routes an admin's reply
+                # straight to the user (unchanged), AND it's linked back to
+                # this request for the live-status "Mark Resolved" button.
                 BOT_DATA.setdefault("support_msg_map", {})[str(sent.message_id)] = str(user_obj.id)
+                BOT_DATA.setdefault("support_admin_msg_map", {})[str(sent.message_id)] = rid
+                req["admin_message_ids"].append(sent.message_id)
             except Exception:
                 pass
         save_data()
-        await log_event(context, f"🆘 One-shot support message from {user_obj.id}")
-        await update.message.reply_text(
-            "✅ " + to_small_caps("your message has been sent to support. an admin will try to resolve it.")
+        await log_event(context, f"🆘 Support request #{rid} from {user_obj.id}")
+
+        # Short typing/loading animation before the confirmation — the exact
+        # same reveal helper used for the Maintenance Mode message.
+        # IMPORTANT — sent as a brand-new, untracked message (never routed
+        # through _replace_rkb_screen / the shared "rkb_latest" panel slot),
+        # so switching to any other bottom-keyboard screen afterwards can
+        # never delete this confirmation as a side effect.
+        confirm_msg = await _send_typewriter(
+            context, update.effective_chat.id, _build_support_user_confirmation(rid)
         )
+        if confirm_msg:
+            req["confirm_message_id"] = confirm_msg.message_id
+            req["confirm_chat_id"] = confirm_msg.chat_id
+            save_data()
 
     elif awaiting == "ticket_new":
         context.user_data.pop("awaiting", None)
@@ -3762,6 +3920,7 @@ def admin_panel_keyboard():
              styled_button("🛑 Danger Zone", callback_data="adm_danger")],
             [styled_button("📋 Activity Log", callback_data="adm_activity"),
              styled_button("🧪 Self-Test", callback_data="adm_selftest")],
+            [styled_button("🧩 Feature Plugins", callback_data="adm_plugins")],
         ]
     )
 
@@ -6935,8 +7094,121 @@ SCREEN_RENDERERS.update(
         "adm_cmdtest": _render_adm_cmdtest,
         "adm_activity": _render_adm_activity,
         "adm_selftest": _render_adm_selftest,
+        "adm_plugins": _render_adm_plugins,
     }
 )
+
+
+# ----------------------------------------------------------------------------
+# 🧩 Feature Plugins — drop a .py file into plugins/ and its features load
+# straight into the bot, without editing bot.py at all.
+#
+# HOW TO WRITE A PLUGIN (share this with whoever is building the feature):
+#   1. Create a new file, e.g. plugins/my_feature.py
+#   2. It must define one function: `def register(app):`
+#   3. Inside register(), add handlers exactly like in bot.py, e.g.:
+#
+#        from __main__ import (
+#            styled_button, is_premium_active, is_admin, to_small_caps,
+#            require_premium, BOT_DATA, log_error,
+#        )
+#        from telegram.ext import CommandHandler
+#
+#        async def my_cool_feature(update, context):
+#            await update.message.reply_text("Hello from a plugin!")
+#
+#        def register(app):
+#            app.add_handler(CommandHandler("mycommand", my_cool_feature))
+#
+#   4. To make a feature Premium-only, wrap the handler with the
+#      require_premium() decorator (see below) — it automatically blocks
+#      non-premium users and shows them the upgrade menu, same as every
+#      built-in premium feature.
+#   5. Save the file into the bot's plugins/ folder and RESTART the bot —
+#      plugin files are only scanned once, at startup, so a running bot
+#      won't pick up a newly uploaded file until it's restarted.
+#
+# A broken plugin (syntax error, missing register(), exception while
+# loading) is skipped and logged to the Activity Log — it can never crash
+# the rest of the bot or stop other plugins from loading.
+# ----------------------------------------------------------------------------
+
+def require_premium(handler):
+    """Decorator for plugin (or future core) handlers that should only run
+    for active premium users. Non-premium users get the same 🎁 upgrade
+    prompt used everywhere else in the bot, instead of the feature silently
+    doing nothing or erroring."""
+    async def wrapped(update: Update, context: ContextTypes.DEFAULT_TYPE, *a, **kw):
+        uid = str(update.effective_user.id)
+        if is_premium_active(uid) or is_admin(update.effective_user.id):
+            return await handler(update, context, *a, **kw)
+        text = "💎 " + to_small_caps("this feature is for premium users only.")
+        kb = InlineKeyboardMarkup([[styled_button("🎁 Upgrade to Premium", callback_data="gift_menu")]])
+        if update.callback_query:
+            await update.callback_query.answer()
+            await update.callback_query.message.reply_text(text, reply_markup=kb)
+        elif update.message:
+            await update.message.reply_text(text, reply_markup=kb)
+    return wrapped
+
+
+_LOADED_PLUGINS = []   # [{"file": name, "ok": bool, "error": str|None}]
+
+
+def load_plugins(app: Application) -> None:
+    """Scans plugins/ once at startup and registers every valid plugin
+    found. Never lets one bad file take down the others or the bot."""
+    global _LOADED_PLUGINS
+    _LOADED_PLUGINS = []
+    if not os.path.isdir(PLUGIN_DIR):
+        return
+    import importlib.util
+    for fname in sorted(os.listdir(PLUGIN_DIR)):
+        if not fname.endswith(".py") or fname.startswith("_"):
+            continue
+        path = os.path.join(PLUGIN_DIR, fname)
+        try:
+            spec = importlib.util.spec_from_file_location(f"plugins.{fname[:-3]}", path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            if not hasattr(module, "register"):
+                raise AttributeError("plugin file has no register(app) function")
+            module.register(app)
+            _LOADED_PLUGINS.append({"file": fname, "ok": True, "error": None})
+            log.info("Loaded plugin: %s", fname)
+        except Exception as e:
+            log.exception("Failed to load plugin %s", fname)
+            log_error("plugin", f"{fname}: {e}")
+            _LOADED_PLUGINS.append({"file": fname, "ok": False, "error": str(e)[:200]})
+
+
+async def _render_adm_plugins(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not _LOADED_PLUGINS:
+        body = (
+            "🧩 " + to_small_caps("feature plugins") + "\n\n"
+            + to_small_caps(f"no plugin files found in '{PLUGIN_DIR}/'.") + "\n\n"
+            + to_small_caps("to add a feature: drop a .py file into that folder (with a register(app) function) and restart the bot.")
+        )
+    else:
+        lines = ["🧩 " + to_small_caps("feature plugins") + "\n"]
+        for p in _LOADED_PLUGINS:
+            if p["ok"]:
+                lines.append(f"✅ {p['file']}")
+            else:
+                lines.append(f"❌ {p['file']} — {p['error']}")
+        lines.append("")
+        lines.append(to_small_caps("uploaded a new file? restart the bot to load it — plugins are only scanned at startup."))
+        body = "\n".join(lines)
+    kb = InlineKeyboardMarkup([back_row(), home_row()])
+    await query.edit_message_text(body, reply_markup=kb)
+
+
+async def cb_adm_plugins(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    if not is_admin(update.effective_user.id):
+        return
+    await _render_adm_plugins(update, context)
 
 
 def build_app() -> Application:
@@ -6990,6 +7262,7 @@ def build_app() -> Application:
 
     app.add_handler(CallbackQueryHandler(cb_ticket_close, pattern="^tk_close:"))
     app.add_handler(CallbackQueryHandler(cb_ticket_reopen, pattern="^tk_reopen:"))
+    app.add_handler(CallbackQueryHandler(cb_support_resolve, pattern="^sup_resolve:"))
 
     app.add_handler(CallbackQueryHandler(cb_gift_menu, pattern="^gift_menu$"))
     app.add_handler(CallbackQueryHandler(cb_gift_plan, pattern="^gift_plan:"))
@@ -7017,6 +7290,7 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(cb_adm_clear_activity, pattern="^adm_clear_activity$"))
     app.add_handler(CallbackQueryHandler(cb_adm_fix_now, pattern="^adm_fix:"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_selftest")(cb_adm_selftest), pattern="^adm_selftest$"))
+    app.add_handler(CallbackQueryHandler(nav_tracked("adm_plugins")(cb_adm_plugins), pattern="^adm_plugins$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_cmdtest")(cb_adm_cmdtest), pattern="^adm_cmdtest$"))
     app.add_handler(CallbackQueryHandler(cb_run_cmd, pattern="^run_cmd:"))
     app.add_handler(CallbackQueryHandler(cb_adm_back, pattern="^adm_back$"))
@@ -7124,6 +7398,11 @@ def build_app() -> Application:
                 first=timedelta(hours=BACKUP_INTERVAL_HOURS),
             )
         app.job_queue.run_repeating(inactive_reengage_job, interval=timedelta(hours=24), first=timedelta(hours=24))
+
+    # Load any drop-in feature files from plugins/ LAST, so a plugin can
+    # never conflict with or shadow a built-in command/callback pattern
+    # registered above.
+    load_plugins(app)
 
     return app
 
