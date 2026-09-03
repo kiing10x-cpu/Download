@@ -720,10 +720,16 @@ DEFAULT_MENUS = {
             "<blockquote>"
             + f"『 {to_small_caps('welcome')}, {{first_name}} 』\n\n"
             + f"{to_small_caps('welcome to')} {{bot_link}}\n\n"
-            + f"{to_small_caps('send any instagram reel link and get your video back in high quality, quickly and effortlessly.')}\n\n"
-            + "✦ " + to_small_caps("fast • simple • high quality") + " ✦"
+            + f"{to_small_caps('your personal instagram reel downloader — fast, clean and premium.')}"
             + "</blockquote>\n\n"
-            f"{to_small_caps('use the buttons below to get started, explore the bot, and discover more features.')}"
+            + f"{to_small_caps('what i can do for you')}\n"
+            + "✅ " + to_small_caps("download any instagram reel in hd, no watermark") + "\n"
+            + "✅ " + to_small_caps("original caption attached automatically") + "\n"
+            + "✅ " + to_small_caps("extract audio from any reel in one tap") + "\n"
+            + "✅ " + to_small_caps("works with private links too") + "\n"
+            + "✅ " + to_small_caps("blazing fast, secure & unlimited with premium") + "\n\n"
+            + f"{to_small_caps('just paste any instagram reel link below to get started.')}\n\n"
+            + "✦ " + to_small_caps("fast • simple • premium quality") + " ✦"
         ),
         "parse_mode": "HTML",
         "image_file_id": None,
@@ -737,8 +743,8 @@ DEFAULT_MENUS = {
         "text": (
             f"{to_deco(to_small_caps('guide'))}\n\n"
             f"① {to_small_caps('send a reel link')}\n"
-            f"② {to_small_caps('get it in best quality')}\n"
-            f"③ {to_small_caps('tap get caption for a short quote')}"
+            f"② {to_small_caps('get it in best quality, caption included')}\n"
+            f"③ {to_small_caps('tap 🎵 audio to grab just the sound')}"
         ),
         "parse_mode": None,
         "image_file_id": None,
@@ -753,8 +759,8 @@ DEFAULT_MENUS = {
         "parse_mode": "HTML",
         "image_file_id": None,
         "buttons": [
-            {"label": to_small_caps("📝 caption"), "type": "callback", "value": "get_caption", "row": 1, "style": "primary"},
             {"label": to_small_caps("🎵 audio"), "type": "callback", "value": "get_audio", "row": 1, "style": "primary"},
+            {"label": "✖", "type": "callback", "value": "dismiss_reel_buttons", "row": 1, "style": "danger"},
         ],
         "auto_delete_seconds": None,
         "updated_by": None,
@@ -1256,18 +1262,18 @@ def check_rate_limit(user_id: int) -> bool:
     return True
 
 
-async def log_event(context: ContextTypes.DEFAULT_TYPE, text: str):
+async def log_event(context: ContextTypes.DEFAULT_TYPE, text: str, parse_mode: str = None):
     """#14 — send a short line to the admin-configured logger channel, if any."""
     settings = BOT_DATA.get("settings", {})
     if not settings.get("logger_enabled") or not settings.get("logger_channel_id"):
         return
     try:
-        await context.bot.send_message(chat_id=settings["logger_channel_id"], text=text)
+        await context.bot.send_message(chat_id=settings["logger_channel_id"], text=text, parse_mode=parse_mode)
     except Exception:
         log.exception("Failed to send to logger channel")
 
 
-async def dm_all_admins(context: ContextTypes.DEFAULT_TYPE, text: str, reply_markup=None):
+async def dm_all_admins(context: ContextTypes.DEFAULT_TYPE, text: str, reply_markup=None, parse_mode: str = None):
     """Send a message to every admin's private chat (owner + BOT_DATA['admins']).
     One admin having blocked the bot / never opened a DM must never stop the
     others from getting it, so each send is isolated."""
@@ -1276,7 +1282,7 @@ async def dm_all_admins(context: ContextTypes.DEFAULT_TYPE, text: str, reply_mar
         targets.add(OWNER_ID)
     for admin_id in targets:
         try:
-            await context.bot.send_message(chat_id=admin_id, text=text, reply_markup=reply_markup)
+            await context.bot.send_message(chat_id=admin_id, text=text, reply_markup=reply_markup, parse_mode=parse_mode)
         except Exception:
             log.warning("Could not DM admin %s (bot blocked / never started a DM)", admin_id)
 
@@ -1295,23 +1301,27 @@ def clickable_user(user_obj) -> str:
 
 def build_join_details(update: Update, is_new: bool) -> str:
     """Full detail card for a /start — new user OR bot started inside a
-    group — so admins get the complete picture in one glance."""
+    group — so admins get the complete picture in one glance. Point 6 —
+    same treatment as Live Activity/Support: bold-sans labels, and the
+    user's name is a real clickable link to their Telegram profile
+    (clickable_user()), consistent everywhere admins see a user's name."""
     user = update.effective_user
     chat = update.effective_chat
+    lbl = to_bold_sans
     lines = [
-        "🆕 " + ("New User Started Bot" if is_new else "Bot Started In Group") + "",
+        "🆕 " + lbl("New User Started Bot" if is_new else "Bot Started In Group"),
         "",
-        f"👤 Name: {user.full_name}",
-        f"🔗 Username: @{user.username}" if user.username else "🔗 Username: (none)",
-        f"🆔 User ID: {user.id}",
-        f"🌐 Language: {user.language_code or 'unknown'}",
-        f"⭐ Telegram Premium: {'Yes' if getattr(user, 'is_premium', False) else 'No'}",
-        f"💬 Chat type: {chat.type}",
+        f"👤 {lbl('Name')} — {clickable_user(user)}",
+        f"🔗 {lbl('Username')} — @{user.username}" if user.username else f"🔗 {lbl('Username')} — (none)",
+        f"🆔 {lbl('User ID')} — {user.id}",
+        f"🌐 {lbl('Language')} — {user.language_code or 'unknown'}",
+        f"⭐ {lbl('Telegram Premium')} — {'Yes' if getattr(user, 'is_premium', False) else 'No'}",
+        f"💬 {lbl('Chat type')} — {chat.type}",
     ]
     if chat.type in ("group", "supergroup"):
-        lines.append(f"👨‍👩‍👧 Group: {chat.title}")
-        lines.append(f"🆔 Group ID: {chat.id}")
-    lines.append(f"🕒 Time (IST): {now_ist_str()}")
+        lines.append(f"👨‍👩‍👧 {lbl('Group')} — {html.escape(chat.title or '')}")
+        lines.append(f"🆔 {lbl('Group ID')} — {chat.id}")
+    lines.append(f"🕒 {lbl('Time (IST)')} — {now_ist_str()}")
     return "\n".join(lines)
 
 
@@ -1325,8 +1335,8 @@ async def notify_admins_new_start(context: ContextTypes.DEFAULT_TYPE, update: Up
     if not (is_new or is_group):
         return
     text = build_join_details(update, is_new)
-    await dm_all_admins(context, text)
-    await log_event(context, text)
+    await dm_all_admins(context, text, parse_mode="HTML")
+    await log_event(context, text, parse_mode="HTML")
 
 
 async def log_user_activity(context: ContextTypes.DEFAULT_TYPE, update: Update, url: str):
@@ -1351,16 +1361,22 @@ async def log_user_activity(context: ContextTypes.DEFAULT_TYPE, update: Update, 
 
     if not BOT_DATA["settings"].get("user_activity_dm", True):
         return
-    uname = f"@{user.username}" if user.username else "(no username)"
+    # Point 6 — labels in Mathematical Sans-Serif Bold (same treatment as
+    # the Support cards), the name itself is a real clickable link to the
+    # user's Telegram profile via clickable_user() (same helper used
+    # everywhere else a name is shown to an admin), and the whole card is
+    # HTML-parsed so the link actually renders as tappable.
+    lbl = to_bold_sans
+    name_link = clickable_user(user)
     text = (
-        "🕵️ Live Activity\n\n"
-        f"👤 {user.full_name} {uname}\n"
-        f"🆔 {user.id}\n"
-        f"🕒 {iso_to_ist_str(entry['time'], '%H:%M:%S')} IST\n"
-        f"🔗 {url}"
+        f"🕵️ {lbl('LIVE ACTIVITY')}\n\n"
+        f"👤 {lbl('Username')} — {name_link}\n"
+        f"🆔 {lbl('ID')} — {user.id}\n"
+        f"🕒 {lbl('Time')} — {iso_to_ist_str(entry['time'], '%H:%M:%S')} IST\n"
+        f"🔗 {lbl('Link')} — {html.escape(url)}"
     )
-    await dm_all_admins(context, text)
-    await log_event(context, text)
+    await dm_all_admins(context, text, parse_mode="HTML")
+    await log_event(context, text, parse_mode="HTML")
 
 
 def track_sent_message(chat_id: int, message_id: int):
@@ -1535,25 +1551,36 @@ async def render_menu(context: ContextTypes.DEFAULT_TYPE, chat_id: int, menu_id:
     # text doesn't need to worry about stray curly braces breaking anything.
     if menu_id == "start" and ("{first_name}" in text or "{bot_link}" in text):
         if "{first_name}" in text:
-            stored_name = BOT_DATA["users"].get(str(chat_id), {}).get("name") or ""
+            user_rec = BOT_DATA["users"].get(str(chat_id), {})
+            stored_name = user_rec.get("name") or ""
             first_name = stored_name.split(" ")[0] if stored_name else "there"
-            text = text.replace("{first_name}", html.escape(first_name))
+            first_name_safe = html.escape(first_name)
+            # Point 1 — the person's name in the welcome message must be a
+            # clickable link to their own Telegram profile, same pattern as
+            # everywhere else (Support, Live Activity, admin DMs). In a
+            # private chat the chat_id IS the user's id, so this works even
+            # if we somehow have no username on file.
+            username = user_rec.get("username")
+            if username:
+                name_link = f'<a href="https://t.me/{username}">{first_name_safe}</a>'
+            else:
+                name_link = f'<a href="tg://user?id={chat_id}">{first_name_safe}</a>'
+            text = text.replace("{first_name}", name_link)
         if "{bot_link}" in text:
-            bot_link = "our bot"
+            bot_name = "our bot"
             try:
                 me = await _cached_get_me(context)
-                display_name = html.escape(me.first_name or "our bot")
-                if me.username:
-                    bot_link = f'<a href="https://t.me/{me.username}">{display_name}</a>'
-                else:
-                    bot_link = display_name
+                bot_name = html.escape(me.first_name or "our bot")
             except Exception as e:
                 # Previously silent — a transient get_me() failure meant the
                 # welcome message's bot-name link just quietly stayed as
-                # plain "our bot" text with no clickable link and no trace
-                # of why. Now it's visible in the admin Activity Log too.
-                log_error("bot_link_resolve", f"render_menu couldn't resolve bot link: {e}")
-            text = text.replace("{bot_link}", bot_link)
+                # plain "our bot" text with no trace of why. Now it's
+                # visible in the admin Activity Log too.
+                log_error("bot_link_resolve", f"render_menu couldn't resolve bot name: {e}")
+            # Point 1 — the bot's OWN name must stay plain bold text, never
+            # styled/rendered as a link: it used to look tappable but had
+            # nothing to open, which was confusing.
+            text = text.replace("{bot_link}", f"<b>{bot_name}</b>")
 
     # #10 — owner/developer credit button, injected at render time (not part
     # of the admin-editable button list) so it can't be accidentally deleted
@@ -2102,7 +2129,21 @@ async def show_post_onboarding(context: ContextTypes.DEFAULT_TYPE, chat_id: int,
     sent = await render_menu(context, chat_id, "start")
     if not BOT_DATA["users"].get(uid, {}).get("reply_kb_sent"):
         try:
-            await context.bot.send_message(chat_id, "⌨️", reply_markup=main_reply_keyboard(is_admin(int(uid))))
+            # BUGFIX — a persistent ReplyKeyboardMarkup can only be attached
+            # by sending SOME message with it (Telegram has no "attach
+            # keyboard silently" call), but the old "⌨️" text used for this
+            # stayed visible in the chat and looked like a stray, confusing
+            # message. We still send a throwaway message to attach the
+            # keyboard, but with invisible text, then delete it immediately
+            # — the reply keyboard stays attached (it's chat-wide, not tied
+            # to any one message) while nothing visible is left behind.
+            kb_msg = await context.bot.send_message(
+                chat_id, "\u2063", reply_markup=main_reply_keyboard(is_admin(int(uid)))
+            )
+            try:
+                await kb_msg.delete()
+            except Exception:
+                pass
         except Exception:
             pass
         BOT_DATA["users"].setdefault(uid, {})["reply_kb_sent"] = True
@@ -2583,8 +2624,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not fp.endswith(".mp4") and os.path.exists(fp.rsplit(".", 1)[0] + ".mp4"):
                 fp = fp.rsplit(".", 1)[0] + ".mp4"
             ig_caption = (info.get("description") or "").strip()
-            uploader = (info.get("uploader") or info.get("uploader_id") or "").strip()
-            return fp, ig_caption, uploader
+            # Separate the two — "uploader" is the actual @username (needed
+            # to build a working instagram.com/<username> profile link for
+            # the Author-credit button below), "uploader_id" is a numeric
+            # IG id that can't be turned into a public profile URL and is
+            # only kept as a display-only fallback.
+            uploader_username = (info.get("uploader") or "").strip().lstrip("@")
+            uploader_id = str(info.get("uploader_id") or "").strip()
+            return fp, ig_caption, uploader_username, uploader_id
 
     file_path = None
     try:
@@ -2593,13 +2640,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # was being awaited directly, which froze the whole bot's event
             # loop (all users) during every single download. Runs in a
             # thread now so the loop — and the animation above — keep going.
-            file_path, ig_caption, ig_uploader = await asyncio.to_thread(run_download, FFMPEG_AVAILABLE)
+            file_path, ig_caption, ig_uploader, ig_uploader_id = await asyncio.to_thread(run_download, FFMPEG_AVAILABLE)
         except Exception as e:
             # Self-heal: if a merge was attempted and ffmpeg turned out to be
             # the problem, retry once with a no-merge (progressive) format.
             if "ffmpeg" in str(e).lower():
                 log.warning("Merge failed (ffmpeg issue), retrying with progressive format.")
-                file_path, ig_caption, ig_uploader = await asyncio.to_thread(run_download, False)
+                file_path, ig_caption, ig_uploader, ig_uploader_id = await asyncio.to_thread(run_download, False)
             else:
                 raise
 
@@ -2627,19 +2674,29 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         kb = build_keyboard_from_buttons(buttons, "reel_result")
         parse_mode = menu.get("parse_mode") or None
 
-        # v2 §9 — native Telegram blockquote with extra reel info, HTML only.
-        if parse_mode == "HTML":
-            import html as _html
-            preview = ig_caption[:300] + ("…" if len(ig_caption) > 300 else "")
-            bq = (
-                "<blockquote expandable>"
-                f"📋 Caption: {_html.escape(preview) or '(none)'}\n"
-                f"👤 Uploader: {_html.escape(ig_uploader) or 'n/a'}"
-                "</blockquote>"
-            )
-            result_caption = f"{base_caption}\n\n{bq}"
+        # v6 — the reel's own caption now sits in a plain expandable
+        # blockquote with no "Caption:"/"Uploader:" labels, so it reads like
+        # a genuine repost instead of a bot-generated info card. Credit for
+        # the original creator now lives in the "👤 Author" button below
+        # instead of a text line, which also keeps the message clean and
+        # easy to save/forward.
+        import html as _html
+        if parse_mode == "HTML" and ig_caption:
+            preview = ig_caption[:400] + ("…" if len(ig_caption) > 400 else "")
+            bq = f"<blockquote expandable>{_html.escape(preview)}</blockquote>"
+            result_caption = f"{base_caption}\n\n{bq}" if base_caption else bq
         else:
             result_caption = base_caption
+
+        # Author-credit button — appended at send time (like the owner-credit
+        # row in render_menu) rather than stored in the admin-editable button
+        # list, so it always reflects the ACTUAL uploader of this specific
+        # reel and can't be broken by editing the reel_result menu. Only
+        # added when we actually have a usable @username to link to.
+        if ig_uploader:
+            author_url = f"https://www.instagram.com/{ig_uploader}/"
+            existing_rows = list(kb.inline_keyboard) if kb else []
+            kb = InlineKeyboardMarkup(existing_rows + [[styled_button("👤 Author", url=author_url)]])
 
         anim_task.cancel()
         protect = bool(BOT_DATA["settings"].get("lock_all_content", False))
@@ -2722,6 +2779,26 @@ async def cb_get_caption(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text(caption[i:i + 4000])
 
 
+async def cb_dismiss_reel_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """✖ next to 🎵 Audio — lets the user clear the button row under a
+    delivered reel so the message looks like a plain, clean video (nothing
+    to tap left behind). The injected "👤 Author" credit row (if present)
+    is deliberately kept — dismissing playback controls shouldn't also wipe
+    the original creator's credit."""
+    query = update.callback_query
+    await query.answer()
+    kb = query.message.reply_markup
+    rows = list(kb.inline_keyboard) if kb else []
+    kept_rows = [
+        row for row in rows
+        if not any(getattr(btn, "callback_data", None) in ("get_audio", "dismiss_reel_buttons") for btn in row)
+    ]
+    try:
+        await query.edit_message_reply_markup(InlineKeyboardMarkup(kept_rows) if kept_rows else None)
+    except Exception:
+        pass
+
+
 async def cb_get_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """v5 — 🎵 Audio button under a delivered reel. The video file is
     already deleted by the time this is tapped (cleaned up right after
@@ -2761,7 +2838,25 @@ async def cb_get_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
             fp = ydl.prepare_filename(info)
             base, _ = os.path.splitext(fp)
             mp3_path = base + ".mp3"
-            return mp3_path if os.path.exists(mp3_path) else fp
+            mp3_path = mp3_path if os.path.exists(mp3_path) else fp
+
+            # Point 5 — the file used to keep yt-dlp's raw "<id>_audio.mp3"
+            # name, so it showed up in Telegram/downloads with no readable
+            # title at all. Rename on disk to the reel's actual title (or
+            # uploader, as a fallback) before sending, and also pass
+            # title/performer tags on the upload itself below.
+            uploader = (info.get("uploader") or "").strip()
+            raw_title = (info.get("title") or info.get("description") or uploader or "instagram_audio").strip()
+            raw_title = raw_title.splitlines()[0][:60].strip()
+            safe_title = re.sub(r'[\\/*?:"<>|]', "", raw_title).strip() or "instagram_audio"
+            final_path = os.path.join(DOWNLOAD_DIR, f"{safe_title}.mp3")
+            if os.path.exists(final_path) and os.path.abspath(final_path) != os.path.abspath(mp3_path):
+                final_path = os.path.join(DOWNLOAD_DIR, f"{safe_title}_{int(time.time())}.mp3")
+            try:
+                os.replace(mp3_path, final_path)
+            except OSError:
+                final_path = mp3_path
+            return final_path, safe_title, uploader
 
     audio_path = None
     try:
@@ -2772,13 +2867,18 @@ async def cb_get_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "❌ " + to_small_caps("audio extraction needs ffmpeg, which isn't available on this server.")
             )
             return
-        audio_path = await asyncio.to_thread(run_audio_download)
+        audio_path, audio_title, audio_uploader = await asyncio.to_thread(run_audio_download)
         if not audio_path or not os.path.exists(audio_path):
             await status_msg.edit_text("❌ " + to_small_caps("couldn't extract audio from this post."))
             return
         protect = bool(BOT_DATA["settings"].get("lock_all_content", False))
         with open(audio_path, "rb") as aud:
-            await query.message.reply_audio(audio=aud, protect_content=protect)
+            await query.message.reply_audio(
+                audio=aud,
+                title=audio_title,
+                performer=audio_uploader or None,
+                protect_content=protect,
+            )
         await status_msg.delete()
     except Exception as e:
         import html as _html
@@ -7261,6 +7361,7 @@ def build_app() -> Application:
 
     app.add_handler(CallbackQueryHandler(cb_get_caption, pattern="^get_caption$"))
     app.add_handler(CallbackQueryHandler(cb_get_audio, pattern="^get_audio$"))
+    app.add_handler(CallbackQueryHandler(cb_dismiss_reel_buttons, pattern="^dismiss_reel_buttons$"))
     app.add_handler(CallbackQueryHandler(cb_download_another, pattern="^download_another$"))
     app.add_handler(CallbackQueryHandler(cb_check_force_join, pattern="^check_force_join$"))
     app.add_handler(ChatMemberHandler(cm_track_groups, ChatMemberHandler.MY_CHAT_MEMBER))
