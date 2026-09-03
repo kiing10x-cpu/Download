@@ -782,14 +782,16 @@ DEFAULT_MENUS = {
     },
     "maintenance": {
         "text": (
-            "🔧 " + to_bold_sans("Maintenance") + "\n\n"
-            + to_small_caps("the bot is briefly offline for scheduled upgrades.") + "\n"
-            + to_small_caps("we're working to bring you a smoother experience.") + "\n\n"
-            + "⏳ " + to_small_caps("we'll be back shortly — thanks for your patience.")
+            "ᴛʜᴇ ʙᴏᴛ ɪꜱ ᴛᴇᴍᴘᴏʀᴀʀɪʟʏ ᴏꜰꜰʟɪɴᴇ ꜰᴏʀ ꜱᴄʜᴇᴅᴜʟᴇᴅ ᴜᴘɢʀᴀᴅᴇꜱ ᴀɴᴅ ɪᴍᴘʀᴏᴠᴇᴍᴇɴᴛꜱ.\n"
+            "ᴡᴇ'ʀᴇ ᴡᴏʀᴋɪɴɢ ᴛᴏ ᴍᴀᴋᴇ ᴛʜᴇ ʙᴏᴛ ꜰᴀꜱᴛᴇʀ, ꜱᴍᴏᴏᴛʜᴇʀ ᴀɴᴅ ʙᴇᴛᴛᴇʀ ꜰᴏʀ ᴇᴠᴇʀʏᴏɴᴇ.\n"
+            "⏳ ᴡᴇ'ʟʟ ʙᴇ ʙᴀᴄᴋ ꜱʜᴏʀᴛʟʏ.\n"
+            "ᴛʜᴀɴᴋ ʏᴏᴜ ꜰᴏʀ ʏᴏᴜʀ ᴘᴀᴛɪᴇɴᴄᴇ & ꜱᴜᴘᴘᴏʀᴛ."
         ),
         "parse_mode": None,
         "image_file_id": None,
-        "buttons": [],
+        "buttons": [
+            {"label": "🔔 " + to_small_caps("notify me"), "type": "callback", "value": "maint_notify_me", "row": 1, "style": "primary"}
+        ],
         "auto_delete_seconds": None,
         "updated_by": None,
         "updated_at": None,
@@ -810,9 +812,11 @@ DEFAULT_MENUS = {
     },
     "bot_live": {
         "text": (
-            "✅ " + to_bold_sans("Bot is live") + "\n\n"
-            + to_small_caps("maintenance is complete — everything's back up and running.") + "\n"
-            + to_small_caps("thanks for your patience, and enjoy the improvements.")
+            "✅ 𝐁𝐎𝐓 𝐈𝐒 𝐋𝐈𝐕𝐄\n\n"
+            "ᴍᴀɪɴᴛᴇɴᴀɴᴄᴇ ɪꜱ ᴄᴏᴍᴘʟᴇᴛᴇ — ᴛʜᴇ ʙᴏᴛ ɪꜱ ʙᴀᴄᴋ ᴜᴘ ᴀɴᴅ ʀᴜɴɴɪɴɢ ɴᴏʀᴍᴀʟʟʏ.\n\n"
+            "🚀 ᴇᴠᴇʀʏᴛʜɪɴɢ ɪꜱ ʙᴀᴄᴋ ᴏɴʟɪɴᴇ ᴀɴᴅ ʀᴇᴀᴅʏ ᴛᴏ ᴜꜱᴇ.\n\n"
+            "ᴛʜᴀɴᴋ ʏᴏᴜ ꜰᴏʀ ᴡᴀɪᴛɪɴɢ.\n\n"
+            "ᴇɴᴊᴏʏ ᴛʜᴇ ɪᴍᴘʀᴏᴠᴇᴍᴇɴᴛꜱ. ✨"
         ),
         "parse_mode": None,
         "image_file_id": None,
@@ -1783,8 +1787,8 @@ _MAINTENANCE_FOLLOWUP_FALLBACK = (
     + to_small_caps("thanks for sticking with us.")
 )
 _BOT_LIVE_FALLBACK = (
-    "✅ " + to_bold_sans("Bot is live") + "\n\n"
-    + to_small_caps("maintenance is complete — everything's back up and running.")
+    "✅ 𝐁𝐎𝐓 𝐈𝐒 𝐋𝐈𝐕𝐄\n\n"
+    "ᴍᴀɪɴᴛᴇɴᴀɴᴄᴇ ɪꜱ ᴄᴏᴍᴘʟᴇᴛᴇ — ᴛʜᴇ ʙᴏᴛ ɪꜱ ʙᴀᴄᴋ ᴜᴘ ᴀɴᴅ ʀᴜɴɴɪɴɢ ɴᴏʀᴍᴀʟʟʏ."
 )
 
 
@@ -1832,21 +1836,69 @@ async def _send_typewriter(context: ContextTypes.DEFAULT_TYPE, chat_id: int, tex
     return msg
 
 
+async def _send_typewriter(context: ContextTypes.DEFAULT_TYPE, chat_id: int, text: str, reply_markup=None):
+    """Reveals the maintenance message progressively, word by word, instead
+    of dumping the full block instantly — a light, quick animation (a few
+    short steps) just enough for a premium 'being typed' feel without
+    dragging the user's wait time out. The button (if any) only appears on
+    the final, complete message."""
+    words = text.split(" ")
+    if len(words) <= 4:
+        try:
+            await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+            await asyncio.sleep(0.5)
+        except Exception:
+            pass
+        return await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
+
+    try:
+        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+    except Exception:
+        pass
+
+    steps = 5  # short and snappy — just enough to feel alive, not slow
+    chunk = max(1, -(-len(words) // steps))  # ceil division
+    msg = None
+    for i in range(chunk, len(words) + chunk, chunk):
+        shown = " ".join(words[:i])
+        is_last = i >= len(words)
+        cursor = "" if is_last else " ▌"
+        try:
+            if msg is None:
+                msg = await context.bot.send_message(chat_id=chat_id, text=shown + cursor)
+            else:
+                await msg.edit_text(shown + cursor, reply_markup=reply_markup if is_last else None)
+        except Exception:
+            pass
+        if not is_last:
+            try:
+                await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+            except Exception:
+                pass
+            await asyncio.sleep(0.25)
+    if msg is None:
+        msg = await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
+    return msg
+
+
 async def send_maintenance_notice(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
     """Show the two-part maintenance notice without stacking duplicates.
 
-    The main message is typed out live (word by word) instead of appearing
-    instantly, then a short "typing…" pause sits before the follow-up line
-    lands — feels like a real reply, not a wall of text dumped at once."""
+    The main message is typed out live (word by word, quick) instead of
+    appearing instantly, then a short "typing…" pause sits before the
+    follow-up line lands — feels like a real reply, not a wall of text
+    dumped at once."""
     try:
         menu = BOT_DATA["menus"].get("maintenance", {})
-        if menu.get("image_file_id") or menu.get("buttons"):
-            # admin has attached an image/buttons via the generic Menu & UI
-            # editor — animation doesn't make sense there, send normally.
+        if menu.get("image_file_id"):
+            # admin has attached an image via the generic Menu & UI editor —
+            # animation doesn't apply there, send normally.
             first = await render_menu(context, chat_id, "maintenance")
         else:
             text = menu.get("text") or to_small_caps("maintenance is currently active.")
-            first = await _send_typewriter(context, chat_id, text)
+            buttons = menu.get("buttons") or []
+            kb = build_keyboard_from_buttons(buttons, "maintenance") if buttons else None
+            first = await _send_typewriter(context, chat_id, text, reply_markup=kb)
 
         # small natural gap + a genuine "typing…" indicator before the
         # follow-up line lands, instead of both messages landing at once.
@@ -1854,7 +1906,7 @@ async def send_maintenance_notice(context: ContextTypes.DEFAULT_TYPE, chat_id: i
             await context.bot.send_chat_action(chat_id=chat_id, action="typing")
         except Exception:
             pass
-        await asyncio.sleep(1.4)
+        await asyncio.sleep(0.8)
 
         follow_key = f"maintenance_followup:{chat_id}"
         previous = BOT_DATA.get("panel_msg", {}).get(follow_key)
@@ -1932,6 +1984,11 @@ async def cb_global_button_gate(update: Update, context: ContextTypes.DEFAULT_TY
     if not query:
         return
     data = query.data or ""
+    if data == "maint_notify_me":
+        # This IS the maintenance screen's own button — it must always work
+        # while maintenance is on, or tapping it would just re-trigger the
+        # maintenance notice instead of confirming the opt-in.
+        return
     if BOT_DATA["settings"].get("maintenance") and not is_admin(update.effective_user.id):
         await send_maintenance_notice(context, update.effective_chat.id)
         try:
@@ -2018,6 +2075,24 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sent = await show_post_onboarding(context, update.effective_chat.id, str(user_obj.id))
     await track_and_refresh_panel(context, update.effective_chat.id, "start", sent)
     await delete_incoming(update)
+
+
+async def cb_maint_notify_me(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Small opt-in button under the maintenance message. The user is
+    already auto-added to the notify list the moment they see the notice
+    (send_maintenance_notice does this for everyone), so this is really a
+    reassurance tap — but it also covers the edge case where the same
+    message is forwarded/reopened, by re-confirming the chat_id is tracked."""
+    query = update.callback_query
+    chat_id = update.effective_chat.id
+    notified = BOT_DATA.setdefault("maintenance_notified", [])
+    if chat_id not in notified:
+        notified.append(chat_id)
+        save_data()
+    try:
+        await query.answer("🔔 " + to_small_caps("you'll be notified when we're back."), show_alert=True)
+    except Exception:
+        pass
 
 
 async def cb_bc_start_now(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -6433,6 +6508,7 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(cb_adm_menu_trans_edit, pattern="^adm_menu_trans_edit:"))
     app.add_handler(CallbackQueryHandler(cb_setlang, pattern="^setlang:"))
     app.add_handler(CallbackQueryHandler(cb_bc_start_now, pattern="^bc_start_now$"))
+    app.add_handler(CallbackQueryHandler(cb_maint_notify_me, pattern="^maint_notify_me$"))
     app.add_handler(CallbackQueryHandler(cb_adm_btn_add, pattern="^adm_btn_add:"))
     app.add_handler(CallbackQueryHandler(cb_adm_btn_del, pattern="^adm_btn_del:"))
     app.add_handler(CallbackQueryHandler(cb_adm_btn_style, pattern="^adm_btn_style:"))
