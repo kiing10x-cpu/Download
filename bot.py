@@ -632,9 +632,11 @@ def to_bold_italic_sans(text: str) -> str:
 # in the server/admin logs only. Users should always receive short, clean
 # messages in the same typography as the rest of the bot UI.
 USER_ERR_WRONG_FORMAT = (
-    "❌ " + to_bold_sans("Wrong format") + "\n\n"
-    + to_small_caps("Please send a valid Instagram Reel link.") + "\n"
-    + to_small_caps("If you need help, contact support.")
+    "❌ I" + to_small_caps("nvalid ") + "L" + to_small_caps("ink") + "\n\n"
+    + "T" + to_small_caps("he link you sent is not a valid ")
+    + "I" + to_small_caps("nstagram ") + "R" + to_small_caps("eel link.") + "\n\n"
+    + "P" + to_small_caps("lease send a valid reel link to continue.") + "\n"
+    + "F" + to_small_caps("or help, contact ") + "S" + to_small_caps("upport.")
 )
 
 USER_ERR_NOT_AVAILABLE = (
@@ -644,9 +646,9 @@ USER_ERR_NOT_AVAILABLE = (
 )
 
 USER_ERR_AUDIO_NOT_AVAILABLE = (
-    "❌ " + to_bold_sans("Not available") + "\n\n"
-    + to_small_caps("Audio is not available for this reel right now.") + "\n"
-    + to_small_caps("Please try again later or contact support.")
+    "❌ A" + to_small_caps("udio ") + "N" + to_small_caps("ot ") + "A" + to_small_caps("vailable") + "\n\n"
+    + "T" + to_small_caps("his reel doesn't have its own audio track to extract.") + "\n"
+    + "P" + to_small_caps("lease try again later or contact ") + "S" + to_small_caps("upport.")
 )
 
 USER_ERR_GENERIC = (
@@ -891,6 +893,11 @@ DEFAULT_MENUS = {
             "third-party rights arising from your use of this service. Files "
             "are delivered directly to you and are not permanently stored on "
             "the bot's servers.\n\n"
+            "This service is provided \"as is\", without warranty of any kind, "
+            "and may be modified, suspended, or discontinued at any time "
+            "without prior notice. Continued use of this bot after any "
+            "changes to these terms constitutes acceptance of the updated "
+            "terms.\n\n"
             "Tap <b>I Agree &amp; Continue</b> to confirm you have read and "
             "accepted these terms."
             "</blockquote>"
@@ -1777,7 +1784,11 @@ async def render_menu(context: ContextTypes.DEFAULT_TYPE, chat_id: int, menu_id:
                 me = await _cached_get_me(context)
                 display_name = html.escape(me.first_name or "our bot")
                 bot_name = display_name
-                bot_link = f'<a href="https://t.me/{me.username}">{display_name}</a>' if me.username else display_name
+                # tg://user?id=<id> (not an https://t.me/<username> link) —
+                # same trick already used above for {username}. A t.me/
+                # link jumps straight into the chat; this ID-based deep
+                # link opens the bot's profile card first instead.
+                bot_link = f'<a href="tg://user?id={me.id}">{display_name}</a>'
             except Exception as e:
                 log_error("bot_link_resolve", f"render_menu couldn't resolve bot name/link: {e}")
             text = text.replace("{bot_name}", bot_name)
@@ -2350,7 +2361,7 @@ async def show_post_onboarding(context: ContextTypes.DEFAULT_TYPE, chat_id: int,
     sent = await render_menu(context, chat_id, "start")
     if not BOT_DATA["users"].get(uid, {}).get("reply_kb_sent"):
         try:
-            await context.bot.send_message(chat_id, "⌨️", reply_markup=main_reply_keyboard(is_admin(int(uid))))
+            await context.bot.send_message(chat_id, "⠀", reply_markup=main_reply_keyboard(is_admin(int(uid))))
         except Exception:
             pass
         BOT_DATA["users"].setdefault(uid, {})["reply_kb_sent"] = True
@@ -3150,11 +3161,11 @@ async def cb_get_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         source_path = await asyncio.to_thread(run_source_download)
         if not source_path:
-            await status_msg.edit_text("❌ " + to_small_caps("couldn't download this post for audio extraction."))
+            await status_msg.edit_text(USER_ERR_AUDIO_NOT_AVAILABLE)
             return
         audio_path = await asyncio.to_thread(extract_audio_ffmpeg, source_path)
         if not audio_path or not os.path.exists(audio_path):
-            await status_msg.edit_text("❌ " + to_small_caps("couldn't extract audio from this post."))
+            await status_msg.edit_text(USER_ERR_AUDIO_NOT_AVAILABLE)
             return
         protect = bool(BOT_DATA["settings"].get("lock_all_content", False))
         with open(audio_path, "rb") as aud:
@@ -4306,7 +4317,7 @@ async def cb_adm_block_domain(update: Update, context: ContextTypes.DEFAULT_TYPE
 # content menu, since these are actions, not editable copy)
 # ----------------------------------------------------------------------------
 
-ADMIN_PANEL_TITLE = to_deco(to_title_small_caps("Control Center"))
+ADMIN_PANEL_TITLE = f"│ {to_title_small_caps('Admin Dashboard')} │"
 
 
 def admin_panel_keyboard():
@@ -4320,40 +4331,43 @@ def admin_panel_keyboard():
     # premium plans, so it belongs with them, not as its own top-level
     # button) and 🕵️ Live User Feed is paired with 👥 Users & Groups since
     # both are user-monitoring tools — nothing sits alone on its own row.
-    # v7 — emoji stripped from every button label except ⚙️ Settings, per
-    # request; the clean text still gets the same premium typography via
-    # styled_button().
+    # v9 — every top-level button now carries one distinct, category-fitting
+    # emoji (no repeats across the panel) instead of plain text, and every
+    # button shares the same "primary" color styling as the rest of the
+    # bot's UI (Danger Zone stays "danger" red) so this screen matches the
+    # colored-button look used everywhere else instead of looking flat/grey.
     return InlineKeyboardMarkup(
         [
-            [styled_button("Premium", callback_data="adm_premium"),
-             styled_button("Leaderboard", callback_data="adm_leaderboard")],
-            [styled_button("Share Settings", callback_data="adm_share"),
-             styled_button("Broadcast", callback_data="adm_broadcast")],
-            [styled_button("Developer Settings", callback_data="adm_devsettings"),
-             styled_button("Support Settings", callback_data="adm_support_settings")],
-            [styled_button("Tickets", callback_data="adm_tickets"),
-             styled_button("Bot Stats", callback_data="adm_stats")],
-            [styled_button("Users & Groups", callback_data="adm_users"),
-             styled_button("Live User Feed", callback_data="adm_live")],
-            [styled_button("Menu & UI", callback_data="adm_menu_ui"),
-             styled_button("Test Commands", callback_data="adm_cmdtest")],
-            [styled_button("⚙️ Settings", callback_data="adm_settings"),
-             styled_button("Danger Zone", callback_data="adm_danger")],
-            [styled_button("Activity Log", callback_data="adm_activity"),
-             styled_button("Self-Test", callback_data="adm_selftest")],
-            [styled_button("Feature Plugins", callback_data="adm_plugins")],
+            [styled_button("💎 Premium", callback_data="adm_premium", style="primary"),
+             styled_button("🏆 Leaderboard", callback_data="adm_leaderboard", style="primary")],
+            [styled_button("📤 Share Settings", callback_data="adm_share", style="primary"),
+             styled_button("📢 Broadcast", callback_data="adm_broadcast", style="primary")],
+            [styled_button("👨‍💻 Developer Settings", callback_data="adm_devsettings", style="primary"),
+             styled_button("🎧 Support Settings", callback_data="adm_support_settings", style="primary")],
+            [styled_button("🎫 Tickets", callback_data="adm_tickets", style="primary"),
+             styled_button("📊 Statistics", callback_data="adm_stats", style="primary")],
+            [styled_button("👥 Users & Groups", callback_data="adm_users", style="primary"),
+             styled_button("🕵️ Live User Feed", callback_data="adm_live", style="primary")],
+            [styled_button("🎨 Menu & UI", callback_data="adm_menu_ui", style="primary"),
+             styled_button("🧪 Test Commands", callback_data="adm_cmdtest", style="primary")],
+            [styled_button("🔔 Notifications", callback_data="adm_notifications", style="primary"),
+             styled_button("📜 Activity Log", callback_data="adm_activity", style="primary")],
+            [styled_button("🩺 Self-Test", callback_data="adm_selftest", style="primary"),
+             styled_button("🧩 Feature Plugins", callback_data="adm_plugins", style="primary")],
+            [styled_button("⚙️ Settings", callback_data="adm_settings", style="primary"),
+             styled_button("☠️ Danger Zone", callback_data="adm_danger", style="danger")],
         ]
     )
 
 
-def back_row(cb="adm_back", label="Back"):
-    return [styled_button(label, callback_data=cb)]
+def back_row(cb="adm_back", label="🔙 Back"):
+    return [styled_button(label, callback_data=cb, style="primary")]
 
 
 def home_row():
     """#3 — extra row shown only on top-level category screens, alongside
     the regular (stack-aware) 🔙 Back row."""
-    return [styled_button("Admin Home", callback_data="adm_home")]
+    return [styled_button("🏠 Admin Home", callback_data="adm_home", style="primary")]
 
 
 async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4887,6 +4901,104 @@ async def _render_adm_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cb_adm_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     await _render_adm_stats(update, context)
+
+
+# ---- 🔔 Notification Center ---------------------------------------------------
+# A single live "what's going on" dashboard so the admin doesn't have to open
+# Tickets, Activity Log, Users & Groups, and Settings separately just to see
+# whether anything needs attention right now.
+
+async def _render_adm_notifications(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    now = datetime.utcnow()
+    day_ago = now - timedelta(hours=24)
+
+    def _parse(ts):
+        try:
+            return datetime.fromisoformat(ts)
+        except Exception:
+            return None
+
+    # New users / groups in the last 24h.
+    new_users_24h = sum(
+        1 for u in BOT_DATA["users"].values()
+        if (dt := _parse(u.get("joined"))) and dt >= day_ago
+    )
+    new_groups_24h = sum(
+        1 for g in BOT_DATA["groups"].values()
+        if (dt := _parse(g.get("added_at"))) and dt >= day_ago
+    )
+
+    # Tickets / support requests still waiting on a reply.
+    open_tickets = sum(1 for t in BOT_DATA.get("tickets", {}).values() if t.get("status") == "open")
+    pending_support = sum(
+        1 for r in BOT_DATA.get("support_requests", {}).values() if r.get("status") != "resolved"
+    )
+
+    # Errors logged in the last 24h, most recent first.
+    recent_errors = [
+        e for e in BOT_DATA.get("error_log", [])
+        if (dt := _parse(e.get("time"))) and dt >= day_ago
+    ]
+    recent_errors.sort(key=lambda e: e.get("time") or "", reverse=True)
+    last_error = recent_errors[0] if recent_errors else None
+
+    maintenance_on = bool(BOT_DATA["settings"].get("maintenance"))
+    blocked_count = len(BOT_DATA.get("blocked", []))
+
+    lines = ["🔔 " + to_title_small_caps("Notification Center"), ""]
+
+    # Needs-attention section first, so the admin sees anything urgent
+    # without scrolling.
+    alerts = []
+    if maintenance_on:
+        alerts.append("🔒 " + to_small_caps("maintenance mode is currently ON — users can't use the bot."))
+    if open_tickets:
+        alerts.append(f"🎫 {open_tickets} " + to_small_caps("open ticket(s) waiting for a reply."))
+    if pending_support:
+        alerts.append(f"🆘 {pending_support} " + to_small_caps("support request(s) still pending."))
+    if recent_errors:
+        alerts.append(f"⚠️ {len(recent_errors)} " + to_small_caps("error(s) logged in the last 24h."))
+    if not alerts:
+        alerts.append("✅ " + to_small_caps("all clear — nothing needs attention right now."))
+    lines.extend(alerts)
+    lines.append("")
+
+    # Live activity snapshot.
+    lines.append("📈 " + to_small_caps("last 24 hours"))
+    lines.append(f"👤 " + to_small_caps("new users: ") + str(new_users_24h))
+    lines.append(f"👨‍👩‍👧 " + to_small_caps("new groups: ") + str(new_groups_24h))
+    lines.append("")
+
+    if last_error:
+        kind = last_error.get("kind", "unhandled")
+        label, _why, _fix = ERROR_KIND_INFO.get(kind, ERROR_KIND_INFO["unhandled"])
+        when = iso_to_ist_str(last_error.get("time"), "%Y-%m-%d %H:%M")
+        lines.append("🐞 " + to_small_caps("most recent error"))
+        lines.append(f"{label} — {when} IST")
+        lines.append("")
+
+    lines.append("📊 " + to_small_caps("current totals"))
+    lines.append(f"👥 " + to_small_caps("users: ") + str(len(BOT_DATA["users"])))
+    lines.append(f"🚫 " + to_small_caps("blocked: ") + str(blocked_count))
+    lines.append(f"⏱ " + to_small_caps("uptime: ") + human_uptime())
+
+    text = "\n".join(lines)
+    kb = InlineKeyboardMarkup(
+        [
+            [styled_button("🎫 Tickets", callback_data="adm_tickets", style="primary"),
+             styled_button("📜 Activity Log", callback_data="adm_activity", style="primary")],
+            [styled_button("🔄 Refresh", callback_data="adm_notifications", style="primary")],
+            back_row(),
+            home_row(),
+        ]
+    )
+    await query.edit_message_text(text, reply_markup=kb)
+
+
+async def cb_adm_notifications(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    await _render_adm_notifications(update, context)
 
 
 # ---- Users & Groups ----------------------------------------------------------
@@ -5473,7 +5585,7 @@ async def _render_adm_menu_ui(update: Update, context: ContextTypes.DEFAULT_TYPE
     rows = []
     for i in range(0, len(menu_ids), 2):
         pair = menu_ids[i:i + 2]
-        rows.append([styled_button(_label(mid), callback_data=f"adm_menu_edit:{mid}") for mid in pair])
+        rows.append([styled_button(_label(mid), callback_data=f"adm_menu_edit:{mid}", style="primary") for mid in pair])
     rows.append(back_row())
     rows.append(home_row())
     text = (
@@ -5502,23 +5614,23 @@ def _build_menu_edit_screen(menu_id: str):
     image_btn_label = ("🖼️ Change Image" if has_image else "🖼️ Set Image")
 
     rows = [
-        [styled_button("✏️ Edit Text", callback_data=f"adm_menu_txt:{menu_id}"),
-         styled_button("🅰️ Style Text", callback_data=f"adm_menu_style:{menu_id}")],
-        [styled_button(f"🔤 Parse Mode: {parse_mode_label}", callback_data=f"adm_menu_parsemode:{menu_id}"),
-         styled_button("🔘 Manage Buttons", callback_data=f"adm_menu_btns:{menu_id}")],
+        [styled_button("✏️ Edit Text", callback_data=f"adm_menu_txt:{menu_id}", style="primary"),
+         styled_button("🅰️ Style Text", callback_data=f"adm_menu_style:{menu_id}", style="primary")],
+        [styled_button(f"🔤 Parse Mode: {parse_mode_label}", callback_data=f"adm_menu_parsemode:{menu_id}", style="primary"),
+         styled_button("🔘 Manage Buttons", callback_data=f"adm_menu_btns:{menu_id}", style="primary")],
     ]
     if has_image:
         rows.append([
-            styled_button(image_btn_label, callback_data=f"adm_menu_img:{menu_id}"),
-            styled_button("🗑️ Remove Image", callback_data=f"adm_menu_rmimg:{menu_id}"),
+            styled_button(image_btn_label, callback_data=f"adm_menu_img:{menu_id}", style="primary"),
+            styled_button("🗑️ Remove Image", callback_data=f"adm_menu_rmimg:{menu_id}", style="danger"),
         ])
     else:
-        rows.append([styled_button(image_btn_label, callback_data=f"adm_menu_img:{menu_id}")])
+        rows.append([styled_button(image_btn_label, callback_data=f"adm_menu_img:{menu_id}", style="primary")])
     rows.append([
-        styled_button(f"⏱ Auto-Delete: {override_label}", callback_data=f"adm_menu_autodel:{menu_id}"),
-        styled_button("🌐 Translations", callback_data=f"adm_menu_trans:{menu_id}"),
+        styled_button(f"⏱ Auto-Delete: {override_label}", callback_data=f"adm_menu_autodel:{menu_id}", style="primary"),
+        styled_button("🌐 Translations", callback_data=f"adm_menu_trans:{menu_id}", style="primary"),
     ])
-    rows.append([styled_button("🔙 Back", callback_data="adm_menu_ui")])
+    rows.append([styled_button("🔙 Back", callback_data="adm_menu_ui", style="primary")])
 
     text = (
         to_deco(to_title_small_caps("Editing Menu")) + "\n\n"
@@ -5553,8 +5665,8 @@ async def cb_adm_menu_trans(update: Update, context: ContextTypes.DEFAULT_TYPE):
     have = BOT_DATA["menus"][menu_id].get("translations", {})
     for code in langs:
         mark = "✅" if code in have else "➕"
-        rows.append([styled_button(f"{mark} {LANG_NAMES.get(code, code)}", callback_data=f"adm_menu_trans_edit:{menu_id}:{code}")])
-    rows.append([styled_button("🔙 Back", callback_data=f"adm_menu_edit:{menu_id}")])
+        rows.append([styled_button(f"{mark} {LANG_NAMES.get(code, code)}", callback_data=f"adm_menu_trans_edit:{menu_id}:{code}", style="primary")])
+    rows.append([styled_button("🔙 Back", callback_data=f"adm_menu_edit:{menu_id}", style="primary")])
     await query.edit_message_text(f"🌐 Translations for {menu_id}", reply_markup=InlineKeyboardMarkup(rows))
 
 
@@ -5639,12 +5751,12 @@ async def cb_adm_menu_btns(update: Update, context: ContextTypes.DEFAULT_TYPE):
     rows = []
     for i, b in enumerate(buttons):
         rows.append([
-            styled_button(f"{i}: {b['label']}", callback_data=f"noop"),
-            styled_button("🅰️", callback_data=f"adm_btn_style:{menu_id}:{i}"),
-            styled_button("❌", callback_data=f"adm_btn_del:{menu_id}:{i}"),
+            styled_button(f"{i}: {b['label']}", callback_data=f"noop", style="primary"),
+            styled_button("🅰️", callback_data=f"adm_btn_style:{menu_id}:{i}", style="primary"),
+            styled_button("❌", callback_data=f"adm_btn_del:{menu_id}:{i}", style="danger"),
         ])
-    rows.append([styled_button("➕ Add Button", callback_data=f"adm_btn_add:{menu_id}")])
-    rows.append([styled_button("🔙 Back", callback_data=f"adm_menu_edit:{menu_id}")])
+    rows.append([styled_button("➕ Add Button", callback_data=f"adm_btn_add:{menu_id}", style="primary")])
+    rows.append([styled_button("🔙 Back", callback_data=f"adm_menu_edit:{menu_id}", style="primary")])
     await query.edit_message_text(f"🔘 Buttons for {menu_id}", reply_markup=InlineKeyboardMarkup(rows))
 
 
@@ -5679,12 +5791,12 @@ async def cb_adm_menu_btns_by_id(update, context, menu_id):
     rows = []
     for i, b in enumerate(buttons):
         rows.append([
-            styled_button(f"{i}: {b['label']}", callback_data="noop"),
-            styled_button("🅰️", callback_data=f"adm_btn_style:{menu_id}:{i}"),
-            styled_button("❌", callback_data=f"adm_btn_del:{menu_id}:{i}"),
+            styled_button(f"{i}: {b['label']}", callback_data="noop", style="primary"),
+            styled_button("🅰️", callback_data=f"adm_btn_style:{menu_id}:{i}", style="primary"),
+            styled_button("❌", callback_data=f"adm_btn_del:{menu_id}:{i}", style="danger"),
         ])
-    rows.append([styled_button("➕ Add Button", callback_data=f"adm_btn_add:{menu_id}")])
-    rows.append([styled_button("🔙 Back", callback_data=f"adm_menu_edit:{menu_id}")])
+    rows.append([styled_button("➕ Add Button", callback_data=f"adm_btn_add:{menu_id}", style="primary")])
+    rows.append([styled_button("🔙 Back", callback_data=f"adm_menu_edit:{menu_id}", style="primary")])
     await update.callback_query.edit_message_text(f"🔘 Buttons for {menu_id}", reply_markup=InlineKeyboardMarkup(rows))
 
 
@@ -7753,6 +7865,7 @@ SCREEN_RENDERERS.update(
         "adm_cmdtest": _render_adm_cmdtest,
         "adm_activity": _render_adm_activity,
         "adm_selftest": _render_adm_selftest,
+        "adm_notifications": _render_adm_notifications,
     }
 )
 
@@ -7964,6 +8077,7 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(cb_run_cmd, pattern="^run_cmd:"))
     app.add_handler(CallbackQueryHandler(cb_adm_back, pattern="^adm_back$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_stats")(cb_adm_stats), pattern="^adm_stats$"))
+    app.add_handler(CallbackQueryHandler(nav_tracked("adm_notifications")(cb_adm_notifications), pattern="^adm_notifications$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_users")(cb_adm_users), pattern="^adm_users$"))
     app.add_handler(CallbackQueryHandler(cb_adm_users_list, pattern="^adm_users_list$"))
     app.add_handler(CallbackQueryHandler(cb_adm_groups_list, pattern="^adm_groups_list$"))
