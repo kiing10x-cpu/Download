@@ -931,9 +931,9 @@ DEFAULT_MENUS = {
     "help_user": {
         "text": (
             f"{to_deco(to_small_caps('guide'))}\n\n"
-            f"① {to_small_caps('send a reel link')}\n"
-            f"② {to_small_caps('get it in best quality')}\n"
-            f"③ {to_small_caps('tap get caption for a short quote')}"
+            f"<u>➤ {to_small_caps('send a reel link')}</u>\n"
+            f"<u>➤ {to_small_caps('get it in best quality')}</u>\n"
+            f"<u>➤ {to_small_caps('tap get caption for a short quote')}</u>"
         ),
         "parse_mode": None,
         "image_file_id": None,
@@ -1057,8 +1057,8 @@ DEFAULT_MENUS = {
         "text": (
             "<blockquote>"
             "𝘞𝘢𝘯𝘵 𝘵𝘰 𝘥𝘰𝘸𝘯𝘭𝘰𝘢𝘥 𝘢 𝘙𝘦𝘦𝘭?\n\n"
-            "➤ 𝘊𝘰𝘱𝘺 𝘵𝘩𝘦 𝘙𝘦𝘦𝘭 𝘭𝘪𝘯𝘬 𝘧𝘳𝘰𝘮 𝘐𝘯𝘴𝘵𝘢𝘨𝘳𝘢𝘮\n\n"
-            "➤ 𝘗𝘢𝘴𝘵𝘦 𝘵𝘩𝘦 𝘭𝘪𝘯𝘬 𝘩𝘦𝘳𝘦\n\n"
+            "<u>➤ 𝘊𝘰𝘱𝘺 𝘵𝘩𝘦 𝘙𝘦𝘦𝘭 𝘭𝘪𝘯𝘬 𝘧𝘳𝘰𝘮 𝘐𝘯𝘴𝘵𝘢𝘨𝘳𝘢𝘮</u>\n\n"
+            "<u>➤ 𝘗𝘢𝘴𝘵𝘦 𝘵𝘩𝘦 𝘭𝘪𝘯𝘬 𝘩𝘦𝘳𝘦</u>\n\n"
             "𝘛𝘩𝘢𝘵'𝘴 𝘪𝘵 — 𝘐'𝘭𝘭 𝘥𝘰 𝘵𝘩𝘦 𝘳𝘦𝘴𝘵."
             "</blockquote>"
         ),
@@ -1100,13 +1100,13 @@ DEFAULT_MENUS = {
     "gift": {
         "text": (
             "<blockquote>"
-            "✨ 𝐒𝐔𝐏𝐏𝐎𝐑𝐓 𝐎𝐔𝐑 𝐁𝐎𝐓\n\n"
-            "Tʜɪꜱ ꜱᴜᴘᴘᴏʀᴛ ɪꜱ ᴄᴏᴍᴘʟᴇᴛᴇʟʏ ᴏᴘᴛɪᴏɴᴀʟ.\n"
-            "Wᴇ ɴᴇᴠᴇʀ ꜰᴏʀᴄᴇ ᴀɴʏᴏɴᴇ ᴛᴏ ꜱᴇɴᴅ ᴀ ᴘᴀʏᴍᴇɴᴛ.\n\n"
-            "Iꜰ ʏᴏᴜ ᴇɴᴊᴏʏ ᴜꜱɪɴɢ ᴛʜᴇ ʙᴏᴛ ᴀɴᴅ ᴡᴀɴᴛ ᴛᴏ ꜱᴜᴘᴘᴏʀᴛ ɪᴛ, "
-            "ʏᴏᴜ ᴄᴀɴ ᴄᴏɴᴛʀɪʙᴜᴛᴇ ᴀɴʏ ᴀᴍᴏᴜɴᴛ ʏᴏᴜ ᴘʀᴇꜰᴇʀ.\n\n"
-            "Yᴏᴜʀ ꜱᴜᴘᴘᴏʀᴛ ʜᴇʟᴘꜱ ᴜꜱ ᴋᴇᴇᴘ ᴡᴏʀᴋɪɴɢ ᴏɴ ᴛʜᴇ ʙᴏᴛ, ɪᴍᴘʀᴏᴠɪɴɢ "
-            "ᴇxɪꜱᴛɪɴɢ ꜰᴇᴀᴛᴜʀᴇꜱ, ᴀᴅᴅɪɴɢ ɴᴇᴡ ꜰᴜɴᴄᴛɪᴏɴꜱ ᴀɴᴅ ʙʀɪɴɢɪɴɢ ᴍᴏʀᴇ ᴜꜱᴇꜰᴜʟ ᴜᴘɢʀᴀᴅᴇꜱ.\n\n"
+            "<u>✨ 𝐒𝐔𝐏𝐏𝐎𝐑𝐓 𝐎𝐔𝐑 𝐁𝐎𝐓</u>\n\n"
+            "<u>➤ Tʜɪꜱ ꜱᴜᴘᴘᴏʀᴛ ɪꜱ ᴄᴏᴍᴘʟᴇᴛᴇʟʏ ᴏᴘᴛɪᴏɴᴀʟ.</u>\n"
+            "<u>➤ Wᴇ ɴᴇᴠᴇʀ ꜰᴏʀᴄᴇ ᴀɴʏᴏɴᴇ ᴛᴏ ꜱᴇɴᴅ ᴀ ᴘᴀʏᴍᴇɴᴛ.</u>\n\n"
+            "<u>➤ Iꜰ ʏᴏᴜ ᴇɴᴊᴏʏ ᴜꜱɪɴɢ ᴛʜᴇ ʙᴏᴛ ᴀɴᴅ ᴡᴀɴᴛ ᴛᴏ ꜱᴜᴘᴘᴏʀᴛ ɪᴛ,</u> "
+            "<u>ʏᴏᴜ ᴄᴀɴ ᴄᴏɴᴛʀɪʙᴜᴛᴇ ᴀɴʏ ᴀᴍᴏᴜɴᴛ ʏᴏᴜ ᴘʀᴇꜰᴇʀ.</u>\n\n"
+            "<u>➤ Yᴏᴜʀ ꜱᴜᴘᴘᴏʀᴛ ʜᴇʟᴘꜱ ᴜꜱ ᴋᴇᴇᴘ ᴡᴏʀᴋɪɴɢ ᴏɴ ᴛʜᴇ ʙᴏᴛ, ɪᴍᴘʀᴏᴠɪɴɢ "
+            "ᴇxɪꜱᴛɪɴɢ ꜰᴇᴀᴛᴜʀᴇꜱ, ᴀᴅᴅɪɴɢ ɴᴇᴡ ꜰᴜɴᴄᴛɪᴏɴꜱ ᴀɴᴅ ʙʀɪɴɢɪɴɢ ᴍᴏʀᴇ ᴜꜱᴇꜰᴜʟ ᴜᴘɢʀᴀᴅᴇꜱ.</u>\n\n"
             "Wᴇ ꜱɪɴᴄᴇʀᴇʟʏ ᴀᴘᴘʀᴇᴄɪᴀᴛᴇ ᴇᴠᴇʀʏ ʙɪᴛ ᴏꜰ ꜱᴜᴘᴘᴏʀᴛ. ❤️"
             "</blockquote>"
         ),
@@ -1119,7 +1119,7 @@ DEFAULT_MENUS = {
         "translations": {},
     },
     "language": {
-        "text": "🌐 " + to_small_caps("choose your language:"),
+        "text": "🌐 <u>" + to_small_caps("choose your language:") + "</u>",
         "parse_mode": None,
         "image_file_id": None,
         "buttons": [],
@@ -1129,7 +1129,7 @@ DEFAULT_MENUS = {
         "translations": {},
     },
     "developer": {
-        "text": to_small_caps("tap below to message the developer:"),
+        "text": "<u>➤ " + to_small_caps("tap below to message the developer:") + "</u>",
         "parse_mode": None,
         "image_file_id": None,
         "buttons": [],
@@ -1141,10 +1141,10 @@ DEFAULT_MENUS = {
     "support": {
         "text": (
             "<blockquote>"
-            + to_title_small_caps("Please type your message below.") + "\n\n"
-            + "🛠️ " + to_title_small_caps("Report a problem") + "\n"
-            + "💡 " + to_title_small_caps("Share your feedback") + "\n"
-            + "❓ " + to_title_small_caps("Ask a question") + "\n"
+            + "<u>" + to_title_small_caps("Please type your message below.") + "</u>\n\n"
+            + "<u>🛠️ " + to_title_small_caps("Report a problem") + "</u>\n"
+            + "<u>💡 " + to_title_small_caps("Share your feedback") + "</u>\n"
+            + "<u>❓ " + to_title_small_caps("Ask a question") + "</u>\n"
             + "💭 " + to_title_small_caps("Suggest a feature") + "\n\n"
             + to_title_small_caps("We'll review your message and get back to you as soon as possible.")
             + "</blockquote>"
@@ -1210,11 +1210,18 @@ DEFAULT_DATA = {
         "leaderboard_enabled": False,  # admin toggle — top-donor ranking shown inside Send Gift
         "share_enabled": True,         # admin toggle — "📤 Share" button under My Usage
         "share_url": None,             # link the Share button points to; falls back to the bot link
+        "share_text": "Try this Instagram Reel Downloader bot.",
         "premium_emoji_enabled": False,   # #17 — greeting uses a Premium custom emoji
         "premium_emoji_id": None,         # custom_emoji_id captured from the admin's sample message
         "premium_emoji_char": "🌟",       # fallback glyph shown to non-Premium users automatically
         "activity_channel_id": None,      # #18 — dedicated channel for the Reel Delivered card
         "activity_channel_enabled": False,
+        # v11 — owner-only Instagram failure monitor / AI Check dashboard.
+        "instagram_monitor_threshold": 5,
+        "instagram_monitor_window_minutes": 10,
+        "instagram_monitor_cooldown_minutes": 60,
+        "instagram_monitor_recovery_successes": 3,
+        "instagram_monitor_owner_ids": [OWNER_ID] if OWNER_ID else [],
     },
     "broadcast_log": [],
     "activity_log": [],         # ring buffer: {time, user_id, name, username, chat_type, url}
@@ -1225,6 +1232,13 @@ DEFAULT_DATA = {
     "blocked_domains": [],      # PDF #3 — whole domains blocked by admin
     "error_log": [],            # #13 — capped ring buffer of recent errors
     "metrics": {"reels_downloaded": 0, "audio_gets": 0, "caption_gets": 0, "start_count": 0, "broadcasts_sent": 0},
+    # Rolling Instagram-only monitoring state. Old events are pruned automatically.
+    "instagram_monitor": {
+        "failures": [], "successes": [], "outage_active": False,
+        "last_alert_at": None, "last_recovery_at": None,
+        "last_error_category": None, "last_error_detail": None,
+        "alert_count": 0, "recovery_count": 0,
+    },
     "tickets": {},               # v2 §6 — ticket_id(str) -> {...}
     "ticket_msg_map": {},        # v2 §6 — admin_group_message_id(str) -> ticket_id
     "support_msg_map": {},       # one-shot support admin-message-id(str) -> user_id(str)
@@ -3334,6 +3348,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         bump_usage(uid)
         BOT_DATA["metrics"]["reels_downloaded"] = BOT_DATA["metrics"].get("reels_downloaded", 0) + 1
         BOT_DATA["users"].setdefault(uid, {})["reels_count"] = BOT_DATA["users"].get(uid, {}).get("reels_count", 0) + 1
+        await instagram_monitor_success(context, user_id)
         save_data()
         await log_event(
             context,
@@ -3361,6 +3376,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if "no video formats found" in str(e).lower():
             log_error("ytdlp_no_formats", f"url={url} err={e} — yt-dlp may need updating (pip install -U yt-dlp)")
         log_error("download", f"url={url} err={e}")
+        await instagram_monitor_failure(context, user_id, e)
         try:
             await status_msg.edit_text(USER_ERR_NOT_AVAILABLE, parse_mode="HTML")
         except Exception:
@@ -3637,6 +3653,286 @@ async def cb_download_another(update: Update, context: ContextTypes.DEFAULT_TYPE
     query = update.callback_query
     await query.answer()
     await query.message.reply_text("🔗 " + to_small_caps("paste your next instagram reel link."))
+
+
+# ----------------------------------------------------------------------------
+# v11 — OWNER-ONLY Instagram Download Failure Monitor
+# ----------------------------------------------------------------------------
+
+def _ig_monitor_state() -> dict:
+    state = BOT_DATA.setdefault("instagram_monitor", {})
+    state.setdefault("failures", [])
+    state.setdefault("successes", [])
+    state.setdefault("outage_active", False)
+    state.setdefault("last_alert_at", None)
+    state.setdefault("last_recovery_at", None)
+    state.setdefault("last_error_category", None)
+    state.setdefault("last_error_detail", None)
+    state.setdefault("alert_count", 0)
+    state.setdefault("recovery_count", 0)
+    return state
+
+
+def _ig_monitor_cfg(key: str, default):
+    return BOT_DATA.get("settings", {}).get(key, default)
+
+
+def _ig_error_category(error: Exception | str) -> str:
+    msg = str(error).lower()
+    # These are normally properties of one URL, not an Instagram-wide outage.
+    individual = (
+        "private", "deleted", "not found", "does not exist", "invalid url",
+        "unsupported url", "login required", "not available", "removed",
+        "page isn't available", "page is unavailable",
+    )
+    if any(x in msg for x in individual):
+        return "individual_link"
+    if any(x in msg for x in ("timed out", "timeout", "connection", "network",
+                              "dns", "temporarily unavailable", "502", "503",
+                              "504", "429", "rate limit")):
+        return "network_temporary"
+    if any(x in msg for x in ("no video formats found", "unable to extract",
+                              "requested format is not available",
+                              "extractor", "instagram")):
+        return "instagram_extractor"
+    if "ffmpeg" in msg or "ffprobe" in msg:
+        return "local_media"
+    return "download_other"
+
+
+def _ig_monitor_prune(now: datetime | None = None):
+    now = now or datetime.utcnow()
+    st = _ig_monitor_state()
+    window = timedelta(minutes=int(_ig_monitor_cfg("instagram_monitor_window_minutes", 10)))
+    cutoff = now - window
+    for key in ("failures", "successes"):
+        kept = []
+        for e in st.get(key, []):
+            try:
+                dt = datetime.fromisoformat(e["time"])
+                if dt >= cutoff:
+                    kept.append(e)
+            except Exception:
+                continue
+        st[key] = kept[-100:]
+
+
+async def _ig_monitor_admin_ids(context: ContextTypes.DEFAULT_TYPE) -> list[int]:
+    raw = BOT_DATA.get("settings", {}).get("instagram_monitor_owner_ids")
+    ids = raw if isinstance(raw, list) else []
+    if not ids and OWNER_ID:
+        ids = [OWNER_ID]
+    out = []
+    for value in ids:
+        try:
+            iv = int(value)
+            if iv and iv not in out:
+                out.append(iv)
+        except Exception:
+            pass
+    return out
+
+
+async def _ig_monitor_send_alert(context: ContextTypes.DEFAULT_TYPE, recovered: bool = False):
+    st = _ig_monitor_state()
+    now = datetime.utcnow()
+    if recovered:
+        text = (
+            "🟢 " + to_title_small_caps("Instagram Download System") + "\n\n"
+            "✓ " + to_small_caps("downloading has recovered.") + "\n\n"
+            + f"{to_title_small_caps('Status')} : 🟢 " + to_small_caps("Operational") + "\n"
+            + f"{to_title_small_caps('Successful Checks')} : {len(st.get('successes', []))}\n"
+            + f"{to_title_small_caps('Failures')} : {len(st.get('failures', []))}\n"
+            + f"{to_title_small_caps('Time')} : {now_ist_str('%d %b %Y, %I:%M:%S %p')} IST\n\n"
+            + to_small_caps("the Instagram downloader is working normally again.")
+        )
+    else:
+        failures = st.get("failures", [])
+        categories = {}
+        for e in failures:
+            categories[e.get("category", "unknown")] = categories.get(e.get("category", "unknown"), 0) + 1
+        reason = max(categories, key=categories.get) if categories else "unknown"
+        text = (
+            "🚨 " + to_title_small_caps("Instagram Download Alert") + "\n\n"
+            "⚠️ " + to_small_caps("possible system issue detected") + "\n\n"
+            + to_small_caps("Instagram reel downloads are failing unusually.") + "\n\n"
+            + f"{to_title_small_caps('Failures')} : {len(failures)}\n"
+            + f"{to_title_small_caps('Affected Users')} : {len({e.get('user_id') for e in failures})}\n"
+            + f"{to_title_small_caps('Status')} : 🔴 " + to_small_caps("Unstable") + "\n"
+            + f"{to_title_small_caps('Category')} : {html.escape(reason.replace('_', ' ').title())}\n"
+            + f"{to_title_small_caps('Window')} : {int(_ig_monitor_cfg('instagram_monitor_window_minutes', 10))} min\n"
+            + f"{to_title_small_caps('Time')} : {now_ist_str('%d %b %Y, %I:%M:%S %p')} IST\n\n"
+            + to_small_caps("the bot will continue monitoring the system.")
+        )
+    kb = InlineKeyboardMarkup([[styled_button("🔄 " + to_small_caps("Check Status"), callback_data="ai_check")]])
+    for aid in await _ig_monitor_admin_ids(context):
+        try:
+            await context.bot.send_message(aid, text, parse_mode="HTML", reply_markup=kb)
+        except Exception:
+            log.exception("Instagram monitor notification failed for admin %s", aid)
+
+
+async def instagram_monitor_failure(context: ContextTypes.DEFAULT_TYPE, user_id: int, error: Exception | str):
+    """Record a REAL Instagram Reel download failure without blocking the downloader."""
+    try:
+        now = datetime.utcnow()
+        st = _ig_monitor_state()
+        category = _ig_error_category(error)
+        _ig_monitor_prune(now)
+        # Ignore failures that are clearly local/individual when deciding on an IG-wide outage.
+        event = {"time": now.isoformat(), "user_id": str(user_id), "category": category,
+                 "detail": str(error)[:500]}
+        st["failures"].append(event)
+        st["last_error_category"] = category
+        st["last_error_detail"] = str(error)[:500]
+        _ig_monitor_prune(now)
+
+        candidates = [e for e in st["failures"]
+                      if e.get("category") == category
+                      and category not in ("individual_link", "local_media", "network_temporary")]
+        threshold = int(_ig_monitor_cfg("instagram_monitor_threshold", 5))
+        distinct_users = len({e.get("user_id") for e in candidates})
+        likely_systemic = len(candidates) >= threshold and (distinct_users >= 2 or len(candidates) >= threshold + 2)
+
+        if likely_systemic and not st.get("outage_active"):
+            cooldown = timedelta(minutes=int(_ig_monitor_cfg("instagram_monitor_cooldown_minutes", 60)))
+            last = None
+            try:
+                last = datetime.fromisoformat(st.get("last_alert_at")) if st.get("last_alert_at") else None
+            except Exception:
+                pass
+            if last is None or now - last >= cooldown:
+                st["outage_active"] = True
+                st["last_alert_at"] = now.isoformat()
+                st["alert_count"] = int(st.get("alert_count", 0)) + 1
+                save_data()
+                await _ig_monitor_send_alert(context, recovered=False)
+                return
+        save_data()
+    except Exception:
+        # Monitoring must NEVER break the main Reel Downloader.
+        log.exception("Instagram failure monitor crashed")
+
+
+async def instagram_monitor_success(context: ContextTypes.DEFAULT_TYPE, user_id: int):
+    """Record a successful Reel delivery and detect recovery after an outage."""
+    try:
+        now = datetime.utcnow()
+        st = _ig_monitor_state()
+        _ig_monitor_prune(now)
+        st["successes"].append({"time": now.isoformat(), "user_id": str(user_id)})
+        _ig_monitor_prune(now)
+        if st.get("outage_active"):
+            threshold = int(_ig_monitor_cfg("instagram_monitor_recovery_successes", 3))
+            if len(st["successes"]) >= threshold:
+                st["outage_active"] = False
+                st["last_recovery_at"] = now.isoformat()
+                st["recovery_count"] = int(st.get("recovery_count", 0)) + 1
+                save_data()
+                await _ig_monitor_send_alert(context, recovered=True)
+                return
+        save_data()
+    except Exception:
+        log.exception("Instagram recovery monitor crashed")
+
+
+async def _render_ai_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Owner/admin live control-room dashboard with the bot-wide premium
+    typography, pointer + underline convention, and a single Telegram
+    blockquote card. Rendering is read-only and never blocks downloading."""
+    query = update.callback_query
+    if not is_admin(update.effective_user.id):
+        await query.answer("🔒 " + to_small_caps("admin only."), show_alert=True)
+        return
+
+    now = datetime.utcnow()
+    day_ago = now - timedelta(hours=24)
+    _ig_monitor_prune(now)
+    st = _ig_monitor_state()
+
+    def recent(ts):
+        dt = _parse_iso(ts)
+        return bool(dt and dt >= day_ago)
+
+    users = BOT_DATA.get("users", {})
+    active_24h = sum(1 for u in users.values() if recent(u.get("last_active")))
+    new_users_24h = sum(1 for u in users.values() if recent(u.get("joined")))
+    events_24h = [e for e in BOT_DATA.get("activity_log", []) if recent(e.get("time"))]
+    errors_24h = [e for e in BOT_DATA.get("error_log", []) if recent(e.get("time"))]
+    download_errors_24h = [e for e in errors_24h if e.get("kind") in ("download", "ytdlp_no_formats")]
+
+    request_count = len(events_24h)
+    monitor_failures = st.get("failures", [])
+    monitor_successes = st.get("successes", [])
+    systemic = [e for e in monitor_failures if e.get("category") == "instagram_extractor"]
+    distinct_failed_users = len({e.get("user_id") for e in systemic if e.get("user_id")})
+    total_health_events = len(monitor_failures) + len(monitor_successes)
+    health_rate = (len(monitor_successes) / total_health_events * 100) if total_health_events else 100.0
+
+    if st.get("outage_active"):
+        status = "🔴 " + to_small_caps("Instagram downloads unstable")
+        state_label = "🔴 " + to_small_caps("Critical")
+    elif systemic and len(systemic) >= max(1, int(_ig_monitor_cfg("instagram_monitor_threshold", 5)) - 1):
+        status = "🟡 " + to_small_caps("Instagram being watched closely")
+        state_label = "🟡 " + to_small_caps("Warning")
+    else:
+        status = "🟢 " + to_small_caps("Instagram downloads operational")
+        state_label = "🟢 " + to_small_caps("Operational")
+
+    last_failure = monitor_failures[-1] if monitor_failures else None
+    last_error = html.escape(str(st.get("last_error_detail") or "—")[:120])
+    last_category = html.escape(str((last_failure or {}).get("category") or "—"))
+
+    def row(icon, label, value):
+        return f"{icon} <u>➤ {to_small_caps(label)}</u> : {value}"
+
+    lines = [
+        "🤖 " + to_title_small_caps("AI Check"),
+        "",
+        "<u>📊 " + to_title_small_caps("Admin Dashboard") + "</u>",
+        row("📡", "Instagram Status", status),
+        row("⏱", "Bot Uptime", html.escape(human_uptime())),
+        row("👥", "Total Users", len(users)),
+        row("🆕", "New Users · 24h", new_users_24h),
+        row("🟢", "Active Users · 24h", active_24h),
+        row("🎬", "Reel Requests · 24h", request_count),
+        row("❌", "Download Errors · 24h", len(download_errors_24h)),
+        row("📈", "Lifetime Reels Delivered", BOT_DATA.get("metrics", {}).get("reels_downloaded", 0)),
+        "",
+        "<u>🧠 " + to_title_small_caps("Smart Instagram Monitor") + "</u>",
+        row("🚦", "State", state_label),
+        row("📉", "Failures · Window", len(monitor_failures)),
+        row("✓", "Successes · Window", len(monitor_successes)),
+        row("🎯", "Failure Threshold", int(_ig_monitor_cfg("instagram_monitor_threshold", 5))),
+        row("🕒", "Detection Window", f"{int(_ig_monitor_cfg('instagram_monitor_window_minutes', 10))} min"),
+        row("🔁", "Recovery Threshold", f"{int(_ig_monitor_cfg('instagram_monitor_recovery_successes', 3))} successes"),
+        row("⏳", "Alert Cooldown", f"{int(_ig_monitor_cfg('instagram_monitor_cooldown_minutes', 60))} min"),
+        row("👤", "Affected Users · Extractor", distinct_failed_users),
+        row("📊", "Health Rate · Window", f"{health_rate:.0f}%"),
+        row("🧩", "Last Error Type", last_category),
+        row("📝", "Last Error", last_error),
+    ]
+    if st.get("last_alert_at"):
+        lines.append(row("🚨", "Last Alert", html.escape(str(st.get("last_alert_at")))))
+    if st.get("last_recovery_at"):
+        lines.append(row("🟢", "Last Recovery", html.escape(str(st.get("last_recovery_at")))))
+
+    # Keep the entire dashboard inside the same native Telegram quote/card,
+    # matching the bot's existing premium message convention.
+    text = "<blockquote>" + "\n".join(lines) + "</blockquote>"
+    kb = InlineKeyboardMarkup([
+        [styled_button("🔄 " + to_small_caps("Refresh"), callback_data="ai_check")],
+        [styled_button("📊 " + to_small_caps("Statistics"), callback_data="adm_stats"),
+         styled_button("📜 " + to_small_caps("Activity Log"), callback_data="adm_activity")],
+        back_row(),
+        home_row(),
+    ])
+    await query.edit_message_text(text, parse_mode="HTML", reply_markup=kb)
+
+
+async def cb_ai_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    await _render_ai_check(update, context)
 
 
 # ----------------------------------------------------------------------------
@@ -3946,7 +4242,7 @@ async def show_usage_screen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = None
     if BOT_DATA["settings"].get("share_enabled", True):
         share_url = await resolve_share_url(context)
-        kb = InlineKeyboardMarkup([[styled_button("📤 Share", url=share_url)]])
+        kb = InlineKeyboardMarkup([[styled_button("📤 " + to_small_caps("Share Bot"), url=share_url)]])
     await _replace_rkb_screen(context, update.effective_chat.id, "usage", text, reply_markup=kb, parse_mode="HTML")
 
 
@@ -3962,17 +4258,19 @@ def _normalize_username_link(value: str) -> str:
 
 
 async def resolve_share_url(context: ContextTypes.DEFAULT_TYPE) -> str:
-    """v5 — where the 'My Usage' Share button points. Admin can set a
-    custom link (e.g. a channel/landing page) in Admin Panel > Leaderboard
-    & Sharing; otherwise it falls back to the bot's own t.me link."""
-    url = BOT_DATA["settings"].get("share_url")
-    if url:
-        return url
+    """v11 — the My Usage Share button now opens Telegram's real share
+    composer instead of simply opening the bot profile. The configured
+    share_url remains the content being shared; when unset, the live bot
+    username is resolved automatically."""
+    target = BOT_DATA["settings"].get("share_url")
     try:
-        me = await context.bot.get_me()
-        return f"https://t.me/{me.username}"
+        if not target:
+            me = await context.bot.get_me()
+            target = f"https://t.me/{me.username}" if me.username else "https://t.me/"
     except Exception:
-        return "https://t.me/"
+        target = "https://t.me/"
+    text = BOT_DATA["settings"].get("share_text") or "Try this Instagram Reel Downloader bot."
+    return "https://t.me/share/url?url=" + quote(target, safe="") + "&text=" + quote(text, safe="")
 
 
 async def resolve_developer_url(context: ContextTypes.DEFAULT_TYPE) -> str | None:
@@ -4766,12 +5064,13 @@ def admin_panel_keyboard():
              styled_button("🕵️ Live User Feed", callback_data="adm_live")],
             [styled_button("🎨 Menu & UI", callback_data="adm_menu_ui"),
              styled_button("🧪 Test Commands", callback_data="adm_cmdtest")],
-            [styled_button("🔔 Notifications", callback_data="adm_notifications"),
-             styled_button("📜 Activity Log", callback_data="adm_activity")],
-            [styled_button("🩺 Self-Test", callback_data="adm_selftest"),
-             styled_button("🧩 Feature Plugins", callback_data="adm_plugins")],
-            [styled_button("⚙️ Settings", callback_data="adm_settings"),
-             styled_button("☠️ Danger Zone", callback_data="adm_danger")],
+            [styled_button("🤖 AI Check", callback_data="ai_check"),
+             styled_button("🔔 Notifications", callback_data="adm_notifications")],
+            [styled_button("📜 Activity Log", callback_data="adm_activity"),
+             styled_button("🩺 Self-Test", callback_data="adm_selftest")],
+            [styled_button("🧩 Feature Plugins", callback_data="adm_plugins"),
+             styled_button("⚙️ Settings", callback_data="adm_settings")],
+            [styled_button("☠️ Danger Zone", callback_data="adm_danger")],
         ]
     )
 
@@ -8738,6 +9037,7 @@ SCREEN_RENDERERS.update(
         "adm_activity": _render_adm_activity,
         "adm_selftest": _render_adm_selftest,
         "adm_notifications": _render_adm_notifications,
+        "ai_check": _render_ai_check,
     }
 )
 
@@ -8952,6 +9252,7 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(cb_adm_back, pattern="^adm_back$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_stats")(cb_adm_stats), pattern="^adm_stats$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_notifications")(cb_adm_notifications), pattern="^adm_notifications$"))
+    app.add_handler(CallbackQueryHandler(cb_ai_check, pattern="^ai_check$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_users")(cb_adm_users), pattern="^adm_users$"))
     app.add_handler(CallbackQueryHandler(cb_adm_users_list, pattern="^adm_users_list$"))
     app.add_handler(CallbackQueryHandler(cb_adm_groups_list, pattern="^adm_groups_list$"))
