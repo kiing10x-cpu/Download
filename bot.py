@@ -554,6 +554,28 @@ INSTAGRAM_URL_RE = re.compile(
     r"(https?://(?:www\.)?instagram\.com/(?:reel|reels|p|tv)/[A-Za-z0-9_\-]+/?\S*)"
 )
 
+
+def _is_private_chat(update: Update) -> bool:
+    chat = update.effective_chat
+    return bool(chat and chat.type == "private")
+
+
+def _message_mentions_this_bot(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """True when a message explicitly tags this bot. Useful in groups where
+    privacy mode is disabled and we must never answer unrelated chatter."""
+    try:
+        username = (context.bot.username or "").lower()
+    except Exception:
+        username = ""
+    text = (update.effective_message.text or "").lower() if update.effective_message else ""
+    return bool(username and f"@{username}" in text)
+
+
+def _safe_filename(value: str, fallback: str = "Instagram_Audio") -> str:
+    value = re.sub(r'[\\/:*?"<>|]+', " ", str(value or ""))
+    value = re.sub(r"\s+", " ", value).strip(" .")
+    return (value[:80] or fallback)
+
 # ----------------------------------------------------------------------------
 # Unicode "style" helpers (#1 — Style Text)
 # ----------------------------------------------------------------------------
@@ -567,23 +589,33 @@ SMALL_CAPS_MAP = {
 
 
 def to_small_caps(text: str) -> str:
-    return "".join(SMALL_CAPS_MAP.get(ch.lower(), ch) for ch in text)
+    """Bot-wide house style: Initial Capital + Unicode small caps.
+
+    Every normal user/admin UI string that passes through this helper now
+    follows the same typography, e.g. ``Stats & Activity`` ->
+    ``Sᴛᴀᴛꜱ & Aᴄᴛɪᴠɪᴛʏ``. This keeps old generated messages from drifting
+    between plain lowercase and all-small-caps styles.
+    """
+    out = []
+    word_start = True
+    for ch in str(text):
+        if ch.isalpha() and ch.isascii():
+            if word_start:
+                out.append(ch.upper())
+                word_start = False
+            else:
+                out.append(SMALL_CAPS_MAP.get(ch.lower(), ch))
+        else:
+            out.append(ch)
+            # Start a new styled word after whitespace/punctuation, but not
+            # after an already-styled Unicode small-cap glyph.
+            word_start = not (ch.isalnum() or ch in "'’")
+    return "".join(out)
 
 
 def to_title_small_caps(text: str) -> str:
-    """Same house style used throughout the bot's cards ('Nᴀᴍᴇ', 'Uꜱᴇʀ Iᴅ',
-    'Sᴛᴀᴛᴜꜱ') — the first letter of every word stays a normal capital, the
-    rest of the word is rendered in small-caps glyphs. Keeps every
-    admin/user-facing card built from this generated consistently instead
-    of relying on hand-typed unicode that can drift out of sync."""
-    words = text.split(" ")
-    out = []
-    for w in words:
-        if not w:
-            out.append(w)
-            continue
-        out.append(w[0].upper() + to_small_caps(w[1:]))
-    return " ".join(out)
+    """Alias for the single bot-wide Initial-Capital small-caps house style."""
+    return to_small_caps(text)
 
 
 # ----------------------------------------------------------------------------
@@ -680,16 +712,20 @@ USER_ERR_WRONG_FORMAT = (
 )
 
 USER_ERR_NOT_AVAILABLE = (
-    "❌ " + to_bold_sans("Not available") + "\n\n"
-    + to_small_caps("This reel can't be downloaded right now.") + "\n"
-    + to_small_caps("Please try again later or contact support.")
+    "<blockquote>❌ " + to_title_small_caps("Not Available") + "\n\n"
+    + to_title_small_caps("This Reel Can't Be Downloaded Right Now.") + "\n"
+    + to_title_small_caps("Please Try Again Later Or Contact Support.")
+    + "</blockquote>"
 )
 
+
 USER_ERR_AUDIO_NOT_AVAILABLE = (
-    "❌ A" + to_small_caps("udio ") + "N" + to_small_caps("ot ") + "A" + to_small_caps("vailable") + "\n\n"
-    + "T" + to_small_caps("his reel doesn't have its own audio track to extract.") + "\n"
-    + "P" + to_small_caps("lease try again later or contact ") + "S" + to_small_caps("upport.")
+    "<blockquote>❌ " + to_title_small_caps("Audio Not Available") + "\n\n"
+    + to_title_small_caps("This Reel Doesn't Have An Audio Track To Extract.") + "\n"
+    + to_title_small_caps("Please Try Again Later Or Contact Support.")
+    + "</blockquote>"
 )
+
 
 USER_ERR_GENERIC = (
     "❌ " + to_bold_sans("Something went wrong") + "\n\n"
@@ -2547,6 +2583,35 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if is_blocked(user_obj.id) and not is_admin(user_obj.id):
         return  # silently ignored, per spec
     is_new = touch_user(update)
+
+    # Group-specific /start: don't show the private onboarding/gate flow in
+    # a group. Show a clean card with the group name as a link and who
+    # started the bot, matching the bot's house typography.
+    if not _is_private_chat(update):
+        chat = update.effective_chat
+        title = html.escape(chat.title or "This Group")
+        if getattr(chat, "username", None):
+            group_link = f"https://t.me/{chat.username}"
+        elif str(chat.id).startswith("-100") and update.message:
+            group_link = f"https://t.me/c/{str(chat.id)[4:]}/{update.message.message_id}"
+        else:
+            group_link = None
+        group_name = f'<a href="{group_link}">{title}</a>' if group_link else title
+        starter = update.effective_user
+        starter_name = html.escape(starter.full_name or "User")
+        starter_link = f'<a href="tg://user?id={starter.id}">{starter_name}</a>'
+        body = (
+            "<blockquote>🚀 " + to_title_small_caps("Bot Started In") + "\n\n"
+            + "👥 " + group_name + "\n"
+            + "👤 " + to_title_small_caps("Started By") + " : " + starter_link + "\n\n"
+            + to_title_small_caps("Send An Instagram Reel Link To Download It.")
+            + "</blockquote>"
+        )
+        await update.message.reply_text(body, parse_mode="HTML", disable_web_page_preview=True)
+        await notify_admins_new_start(context, update, is_new)
+        await delete_incoming(update)
+        return
+
     # FIX — this notification used to fire only AFTER the rate-limit /
     # maintenance / disclaimer+force-join gate checks below all passed. Any
     # one of those returning early (extremely common: force-join is the
@@ -2819,6 +2884,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = update.message.text or ""
 
+    # Group safety: never answer normal group conversation. The bot only
+    # reacts to an actual Instagram URL (with or without @BotUsername).
+    # Private chats retain the normal helpful invalid-link feedback.
+    if not _is_private_chat(update) and text:
+        if not INSTAGRAM_URL_RE.search(text):
+            return
+
     # BUGFIX #2 (part 2) — non-text media that isn't part of an active ticket
     # or awaited-input flow has nothing to do here; don't fall through to the
     # "not a valid reel link" text reply for a bare photo/video.
@@ -2928,7 +3000,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if not match:
-        # #15 — simple keyword auto-reply
+        # Never spam groups for ordinary conversation. Auto-replies and the
+        # invalid-link message are intentionally private-chat only.
+        if not _is_private_chat(update):
+            return
         low = text.lower()
         for phrase, reply in BOT_DATA["settings"].get("auto_replies", {}).items():
             if phrase in low:
@@ -3031,11 +3106,31 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     def run_download(use_merge: bool):
         opts = build_ydl_opts(use_merge)
-        info = _ytdlp_extract_with_retry(opts, url, download=True)
+        try:
+            info = _ytdlp_extract_with_retry(opts, url, download=True)
+        except Exception as first_error:
+            # Instagram occasionally exposes only one extractor-visible stream
+            # for a reel. Retry once with yt-dlp's broadest format selector
+            # instead of failing solely because our quality preference was too
+            # strict. The real exception still reaches logs if this also fails.
+            log.warning("Preferred Instagram format failed; retrying with plain best: %s", first_error)
+            opts = {
+                "format": "best/bestvideo+bestaudio",
+                "outtmpl": out_template,
+                "quiet": True,
+                "no_warnings": True,
+                "progress_hooks": [_progress_hook],
+            }
+            if FFMPEG_PATH:
+                opts["ffmpeg_location"] = FFMPEG_PATH
+            info = _ytdlp_extract_with_retry(opts, url, download=True)
         with yt_dlp.YoutubeDL(opts) as ydl:
             fp = ydl.prepare_filename(info)
-        if not fp.endswith(".mp4") and os.path.exists(fp.rsplit(".", 1)[0] + ".mp4"):
-            fp = fp.rsplit(".", 1)[0] + ".mp4"
+        stem = fp.rsplit(".", 1)[0]
+        for candidate in (fp, stem + ".mp4", stem + ".webm", stem + ".mkv"):
+            if os.path.exists(candidate):
+                fp = candidate
+                break
         ig_caption = (info.get("description") or "").strip()
         uploader = (info.get("uploader") or info.get("uploader_id") or "").strip()
         return fp, ig_caption, uploader
@@ -3166,7 +3261,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # after sending (see finally: below), so Audio re-downloads
         # audio-only from the cached URL rather than needing the video kept
         # around on disk.
-        _caption_cache[(sent.chat_id, sent.message_id)] = {"caption": ig_caption, "url": url}
+        _caption_cache[(sent.chat_id, sent.message_id)] = {
+            "caption": ig_caption,
+            "url": url,
+            "uploader": ig_uploader,
+            "title": (ig_caption.splitlines()[0] if ig_caption else ig_uploader or "Instagram Audio"),
+        }
         if len(_caption_cache) > CAPTION_CACHE_MAX:
             _caption_cache.pop(next(iter(_caption_cache)))
 
@@ -3201,10 +3301,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             log_error("ytdlp_no_formats", f"url={url} err={e} — yt-dlp may need updating (pip install -U yt-dlp)")
         log_error("download", f"url={url} err={e}")
         try:
-            await status_msg.edit_text(USER_ERR_NOT_AVAILABLE)
+            await status_msg.edit_text(USER_ERR_NOT_AVAILABLE, parse_mode="HTML")
         except Exception:
             try:
-                await update.message.reply_text(USER_ERR_NOT_AVAILABLE)
+                await update.message.reply_text(USER_ERR_NOT_AVAILABLE, parse_mode="HTML")
             except Exception:
                 pass
     finally:
@@ -3409,15 +3509,22 @@ async def cb_get_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         source_path = await asyncio.to_thread(run_source_download)
         if not source_path:
-            await status_msg.edit_text(USER_ERR_AUDIO_NOT_AVAILABLE)
+            await status_msg.edit_text(USER_ERR_AUDIO_NOT_AVAILABLE, parse_mode="HTML")
             return
         audio_path = await asyncio.to_thread(extract_audio_ffmpeg, source_path)
         if not audio_path or not os.path.exists(audio_path):
-            await status_msg.edit_text(USER_ERR_AUDIO_NOT_AVAILABLE)
+            await status_msg.edit_text(USER_ERR_AUDIO_NOT_AVAILABLE, parse_mode="HTML")
             return
         protect = bool(BOT_DATA["settings"].get("lock_all_content", False))
+        # Give Telegram a clean, human-readable filename/title instead of the
+        # temporary yt-dlp filename full of ids and timestamps.
+        audio_title = _safe_filename((entry or {}).get("uploader") or (entry or {}).get("title") or "Instagram Audio")
+        filename = _safe_filename((entry or {}).get("title") or audio_title) + ".mp3"
         with open(audio_path, "rb") as aud:
-            await query.message.reply_audio(audio=aud, protect_content=protect)
+            await query.message.reply_audio(
+                audio=aud, protect_content=protect, filename=filename,
+                title=audio_title, performer="Instagram"
+            )
         uid = str(query.from_user.id)
         u = BOT_DATA["users"].setdefault(uid, {})
         u["audio_count"] = u.get("audio_count", 0) + 1
@@ -3430,10 +3537,10 @@ async def cb_get_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         log.exception("Audio extraction failed for %s", url)
         log_error("audio", f"url={url} err={e}")
         try:
-            await status_msg.edit_text(USER_ERR_AUDIO_NOT_AVAILABLE)
+            await status_msg.edit_text(USER_ERR_AUDIO_NOT_AVAILABLE, parse_mode="HTML")
         except Exception:
             try:
-                await query.message.reply_text(USER_ERR_AUDIO_NOT_AVAILABLE)
+                await query.message.reply_text(USER_ERR_AUDIO_NOT_AVAILABLE, parse_mode="HTML")
             except Exception:
                 pass
     finally:
@@ -4886,11 +4993,11 @@ async def cb_run_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         if key == "start":
             await query.answer("✅ " + to_small_caps("running /start..."))
-            await render_menu(context, chat_id, "start")
+            await track(await render_menu(context, chat_id, "start"))
 
         elif key == "help":
             await query.answer("✅ " + to_small_caps("running /help..."))
-            await render_menu(context, chat_id, "help_admin" if is_admin(admin_id) else "help_user")
+            await track(await render_menu(context, chat_id, "help_admin" if is_admin(admin_id) else "help_user"))
 
         elif key == "language":
             await query.answer("✅ " + to_small_caps("running /language..."))
@@ -4905,18 +5012,21 @@ async def cb_run_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await send(get_admin_panel_title(), reply_markup=admin_panel_keyboard())
 
         elif key == "ping":
+            # Same live status data/format as the real /ping command.
             await query.answer()
             t0 = time.monotonic()
-            msg = await context.bot.send_message(chat_id, "🏓 Pong!")
+            msg = await context.bot.send_message(chat_id, "🏓 " + to_title_small_caps("Pong!"))
             await track(msg)
             ms = int((time.monotonic() - t0) * 1000)
-            col = get_mongo_collection()
-            backend = "MongoDB ✅" if col is not None else "Local JSON"
+            backend = "MongoDB" if get_mongo_collection() is not None else "Local JSON File"
+            lines = [
+                f"↬ {to_title_small_caps('Uptime')} : {human_uptime_full()}",
+                f"↬ {to_title_small_caps('Storage')} : {to_title_small_caps(backend)}",
+                f"↬ {to_title_small_caps('Server Time')} : {now_ist_str('%d %b %Y, %H:%M:%S')} IST",
+            ]
             await msg.edit_text(
-                f"🏓 Pong! {ms}ms\n\n"
-                f"⏱ Uptime: {human_uptime()}\n"
-                f"🗄 Storage: {backend}\n"
-                f"🕒 Server time: {now_ist_str('%d %b %Y, %H:%M:%S')} IST\n"
+                f"🏓 <b>{to_title_small_caps('Pong!')}</b> {ms}ms\n\n<blockquote>{html.escape(chr(10).join(lines))}</blockquote>",
+                parse_mode="HTML",
             )
 
         elif key == "health":
@@ -5141,23 +5251,21 @@ async def cb_adm_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def _render_adm_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    col = get_mongo_collection()
-    backend = "MongoDB ✅" if col is not None else "Local JSON file (fallback)"
-    if col is None and _mongo_last_error and MONGO_URI:
-        backend += f"\n   ⚠️ Mongo error: {_mongo_last_error}"
-    mem = get_memory_usage_mb()
+    mem = get_memory_mb()
+    backend = "MongoDB" if get_mongo_collection() is not None else "Local JSON File"
+    uptime = human_uptime()
     text = (
-        "📊 Stats & Activity\n\n"
-        f"👥 Users: {len(BOT_DATA['users'])}\n"
-        f"👨‍👩‍👧 Groups: {len(BOT_DATA['groups'])}\n"
-        f"🚫 Blocked: {len(BOT_DATA['blocked'])}\n"
-        f"📢 Broadcasts sent: {len(BOT_DATA['broadcast_log'])}\n"
-        f"⬇️ Reels downloaded: {BOT_DATA['metrics'].get('reels_downloaded', 0)}\n"
-        f"🚀 /start count: {BOT_DATA['metrics'].get('start_count', 0)}\n"
-        f"🚫 Copyright reports: {len(BOT_DATA['copyright_reports'])}\n"
-        f"⏱ Uptime: {human_uptime()}\n"
-        f"💾 Memory: {mem if mem is not None else 'n/a'} MB\n"
-        f"🗄 Storage backend: {backend}\n"
+        "📊 " + to_title_small_caps("Stats & Activity") + "\n\n"
+        + f"{to_title_small_caps('Users')} : {len(BOT_DATA['users'])}\n"
+        + f"{to_title_small_caps('Groups')} : {len(BOT_DATA['groups'])}\n"
+        + f"{to_title_small_caps('Blocked')} : {len(BOT_DATA.get('blocked_users', []))}\n"
+        + f"{to_title_small_caps('Broadcasts Sent')} : {BOT_DATA['metrics'].get('broadcasts_sent', 0)}\n"
+        + f"{to_title_small_caps('Reels Downloaded')} : {BOT_DATA['metrics'].get('reels_downloaded', 0)}\n"
+        + f"{to_title_small_caps('/Start Count')} : {BOT_DATA['metrics'].get('start_count', 0)}\n"
+        + f"{to_title_small_caps('Copyright Reports')} : {len(BOT_DATA['copyright_reports'])}\n\n"
+        + f"{to_title_small_caps('Uptime')} : {uptime}\n"
+        + f"{to_title_small_caps('Memory')} : {mem if mem is not None else 'N/A'} MB\n"
+        + f"{to_title_small_caps('Storage')} : {to_title_small_caps(backend)}"
     )
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup([back_row(), home_row()]))
 
@@ -5870,7 +5978,7 @@ async def _render_adm_menu_ui(update: Update, context: ContextTypes.DEFAULT_TYPE
         name = MENU_DISPLAY_NAMES.get(mid, mid.replace("_", " ").title())
         return f"{name} ✅" if has_image else name
 
-    rows = []
+    rows = [[styled_button("🖼️ Set Welcome Image", callback_data="adm_menu_img:start")]]
     for i in range(0, len(menu_ids), 2):
         pair = menu_ids[i:i + 2]
         rows.append([styled_button(_label(mid), callback_data=f"adm_menu_edit:{mid}") for mid in pair])
@@ -5894,11 +6002,11 @@ def _build_menu_edit_screen(menu_id: str):
     when first opening it and when refreshing it in place after a save
     (e.g. right after an image upload), so the two never drift apart."""
     menu = BOT_DATA["menus"][menu_id]
-    parse_mode_label = menu.get("parse_mode") or "OFF (raw text)"
+    parse_mode_label = menu.get("parse_mode") or "OFF (Raw Text)"
     override = menu.get("auto_delete_seconds")
-    override_label = f"{override}s" if override is not None else "uses global"
+    override_label = f"{override}s" if override is not None else "Uses Global"
     has_image = bool(menu.get("image_file_id"))
-    image_status = "✅ Set" if has_image else "❌ Not set"
+    image_status = "✅ " + to_title_small_caps("Set") if has_image else "❌ " + to_title_small_caps("Not Set")
     image_btn_label = ("🖼️ Change Image" if has_image else "🖼️ Set Image")
 
     rows = [
@@ -6893,12 +7001,13 @@ def _build_adm_premium_view():
         f"👥 Active premium users: {premium_count}",
         "",
     ]
+    # Main controls stay at the top; every ➕ Add action is grouped at the
+    # bottom so the management flow is cleaner on mobile.
     kb_rows = [
         [styled_button(toggle_label("🔀 Master Switch", s.get('premium_enabled')),
                         callback_data="stgl:premium_enabled:adm_premium")],
         [styled_button("✏️ Set Daily Limit", callback_data="adm_set_dailylimit")],
         [styled_button("👥 See Premium Users", callback_data="adm_premium_users")],
-        [styled_button("➕ Add Premium User (by ID)", callback_data="adm_premium_grant")],
         [styled_button("💳 UPI Settings", callback_data="adm_upi")],
     ]
     if not plans:
@@ -6919,6 +7028,8 @@ def _build_adm_premium_view():
                               callback_data=f"adm_plan_toggle:{p['id']}"),
                 styled_button("🗑", callback_data=f"adm_plan_del:{p['id']}"),
             ])
+    # Keep all Add actions together at the bottom.
+    kb_rows.append([styled_button("➕ Add Premium User (By ID)", callback_data="adm_premium_grant")])
     kb_rows.append([styled_button("➕ Add Plan", callback_data="adm_plan_add")])
     kb_rows.append(back_row())
     kb_rows.append(home_row())
@@ -8078,18 +8189,18 @@ async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ram = get_ram_percent()
         disk = get_disk_percent()
 
-        lines = [f"↬ ᴜᴩᴛɪᴍᴇ : {human_uptime_full()}"]
+        lines = [f"↬ {to_title_small_caps('Uptime')} : {human_uptime_full()}"]
         if ram is not None:
-            lines.append(f"↬ ʀᴀᴍ : {ram:.1f}%")
+            lines.append(f"↬ {to_title_small_caps('RAM')} : {ram:.1f}%")
         if cpu is not None:
-            lines.append(f"↬ ᴄᴩᴜ : {cpu:.1f}%")
+            lines.append(f"↬ {to_title_small_caps('CPU')} : {cpu:.1f}%")
         if disk is not None:
-            lines.append(f"↬ ᴅɪsᴋ : {disk:.1f}%")
-        lines.append(f"↬ sᴛᴏʀᴀɢᴇ : {backend}")
-        lines.append(f"↬ sᴇʀᴠᴇʀ ᴛɪᴍᴇ : {now_ist_str('%d %b %Y, %H:%M:%S')} IST")
+            lines.append(f"↬ {to_title_small_caps('Disk')} : {disk:.1f}%")
+        lines.append(f"↬ {to_title_small_caps('Storage')} : {to_title_small_caps(backend)}")
+        lines.append(f"↬ {to_title_small_caps('Server Time')} : {now_ist_str('%d %b %Y, %H:%M:%S')} IST")
 
         quote_body = html.escape("\n".join(lines))
-        text = f"🏓 <b>Pong!</b> {ms}ms\n\n<blockquote>{quote_body}</blockquote>"
+        text = f"🏓 <b>{to_title_small_caps('Pong!')}</b> {ms}ms\n\n<blockquote>{quote_body}</blockquote>"
         await msg.edit_text(text, parse_mode="HTML")
     else:
         await msg.edit_text(f"🏓 Pong! {ms}ms")
