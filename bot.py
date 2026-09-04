@@ -530,6 +530,22 @@ def to_small_caps(text: str) -> str:
     return "".join(SMALL_CAPS_MAP.get(ch.lower(), ch) for ch in text)
 
 
+def to_title_small_caps(text: str) -> str:
+    """Same house style used throughout the bot's cards ('Nᴀᴍᴇ', 'Uꜱᴇʀ Iᴅ',
+    'Sᴛᴀᴛᴜꜱ') — the first letter of every word stays a normal capital, the
+    rest of the word is rendered in small-caps glyphs. Keeps every
+    admin/user-facing card built from this generated consistently instead
+    of relying on hand-typed unicode that can drift out of sync."""
+    words = text.split(" ")
+    out = []
+    for w in words:
+        if not w:
+            out.append(w)
+            continue
+        out.append(w[0].upper() + to_small_caps(w[1:]))
+    return " ".join(out)
+
+
 # ----------------------------------------------------------------------------
 # v2 build prompt — centralized small-caps strings (Section 10)
 # ----------------------------------------------------------------------------
@@ -1349,18 +1365,18 @@ def check_rate_limit(user_id: int) -> bool:
     return True
 
 
-async def log_event(context: ContextTypes.DEFAULT_TYPE, text: str):
+async def log_event(context: ContextTypes.DEFAULT_TYPE, text: str, parse_mode: str = None):
     """#14 — send a short line to the admin-configured logger channel, if any."""
     settings = BOT_DATA.get("settings", {})
     if not settings.get("logger_enabled") or not settings.get("logger_channel_id"):
         return
     try:
-        await context.bot.send_message(chat_id=settings["logger_channel_id"], text=text)
+        await context.bot.send_message(chat_id=settings["logger_channel_id"], text=text, parse_mode=parse_mode)
     except Exception:
         log.exception("Failed to send to logger channel")
 
 
-async def dm_all_admins(context: ContextTypes.DEFAULT_TYPE, text: str, reply_markup=None):
+async def dm_all_admins(context: ContextTypes.DEFAULT_TYPE, text: str, reply_markup=None, parse_mode: str = None):
     """Send a message to every admin's private chat (owner + BOT_DATA['admins']).
     One admin having blocked the bot / never opened a DM must never stop the
     others from getting it, so each send is isolated."""
@@ -1369,7 +1385,7 @@ async def dm_all_admins(context: ContextTypes.DEFAULT_TYPE, text: str, reply_mar
         targets.add(OWNER_ID)
     for admin_id in targets:
         try:
-            await context.bot.send_message(chat_id=admin_id, text=text, reply_markup=reply_markup)
+            await context.bot.send_message(chat_id=admin_id, text=text, reply_markup=reply_markup, parse_mode=parse_mode)
         except Exception:
             log.warning("Could not DM admin %s (bot blocked / never started a DM)", admin_id)
 
@@ -1386,25 +1402,64 @@ def clickable_user(user_obj) -> str:
     return f'<a href="tg://user?id={user_obj.id}">{name}</a>'
 
 
+_LANGUAGE_NAME_MAP = {
+    "en": "English", "hi": "Hindi", "ur": "Urdu", "bn": "Bengali", "ta": "Tamil",
+    "te": "Telugu", "mr": "Marathi", "gu": "Gujarati", "kn": "Kannada", "ml": "Malayalam",
+    "pa": "Punjabi", "ar": "Arabic", "es": "Spanish", "fr": "French", "de": "German",
+    "pt": "Portuguese", "ru": "Russian", "id": "Indonesian", "tr": "Turkish", "zh": "Chinese",
+    "ja": "Japanese", "ko": "Korean", "it": "Italian", "vi": "Vietnamese", "fa": "Persian",
+}
+
+
 def build_join_details(update: Update, is_new: bool) -> str:
     """Full detail card for a /start — new user OR bot started inside a
-    group — so admins get the complete picture in one glance."""
+    group — so admins get the complete picture in one glance. HTML: Name
+    is a clickable link straight to the user's profile."""
     user = update.effective_user
     chat = update.effective_chat
+    lbl = to_title_small_caps
+    username_display = f"@{user.username}" if user.username else "Not Set"
+    lang_code = (user.language_code or "").lower()
+    lang_display = _LANGUAGE_NAME_MAP.get(lang_code, user.language_code or "Unknown")
+
     lines = [
-        "🆕 " + ("New User Started Bot" if is_new else "Bot Started In Group") + "",
+        "🆕 " + lbl("New User Started Bot" if is_new else "Bot Started In Group"),
         "",
-        f"👤 Name: {user.full_name}",
-        f"🔗 Username: @{user.username}" if user.username else "🔗 Username: (none)",
-        f"🆔 User ID: {user.id}",
-        f"🌐 Language: {user.language_code or 'unknown'}",
-        f"⭐ Telegram Premium: {'Yes' if getattr(user, 'is_premium', False) else 'No'}",
-        f"💬 Chat type: {chat.type}",
+        _CARD_SEP,
+        "",
+        "👤 " + lbl("User Information"),
+        "",
+        f"{lbl('Name')} : {clickable_user(user)}",
+        f"{lbl('Username')} : {html.escape(username_display)}",
+        f"{lbl('User Id')} : {user.id}",
     ]
+
     if chat.type in ("group", "supergroup"):
-        lines.append(f"👨‍👩‍👧 Group: {chat.title}")
-        lines.append(f"🆔 Group ID: {chat.id}")
-    lines.append(f"🕒 Time (IST): {now_ist_str()}")
+        lines += [
+            "",
+            "👨‍👩‍👧 " + lbl("Group Details"),
+            "",
+            f"{lbl('Group')} : {html.escape(chat.title or '')}",
+            f"{lbl('Group Id')} : {chat.id}",
+        ]
+    else:
+        lines += [
+            "",
+            "🌐 " + lbl("Account Details"),
+            "",
+            f"{lbl('Language')} : {lbl(lang_display)}",
+            f"{lbl('Chat Type')} : {lbl(chat.type.capitalize())}",
+            f"{lbl('Telegram Premium')} : {lbl('Yes') if getattr(user, 'is_premium', False) else lbl('No')}",
+        ]
+
+    lines += [
+        "",
+        "🕒 " + lbl("Started At"),
+        "",
+        now_ist_str("%d %B %Y • %H:%M:%S") + " IST",
+        "",
+        _CARD_SEP,
+    ]
     return "\n".join(lines)
 
 
@@ -1418,8 +1473,8 @@ async def notify_admins_new_start(context: ContextTypes.DEFAULT_TYPE, update: Up
     if not (is_new or is_group):
         return
     text = build_join_details(update, is_new)
-    await dm_all_admins(context, text)
-    await log_event(context, text)
+    await dm_all_admins(context, text, parse_mode="HTML")
+    await log_event(context, text, parse_mode="HTML")
 
 
 async def log_user_activity(context: ContextTypes.DEFAULT_TYPE, update: Update, url: str):
@@ -1980,27 +2035,43 @@ _BOT_LIVE_FALLBACK = (
 )
 
 
-async def _send_typewriter(context: ContextTypes.DEFAULT_TYPE, chat_id: int, text: str, reply_markup=None):
-    """Reveals the maintenance message progressively, word by word, instead
-    of dumping the full block instantly — a light, quick animation (a few
-    short steps) just enough for a premium 'being typed' feel without
-    dragging the user's wait time out. The button (if any) only appears on
-    the final, complete message."""
+async def _send_typewriter(
+    context: ContextTypes.DEFAULT_TYPE, chat_id: int, text: str,
+    reply_markup=None, parse_mode=None, delay: float = 0.25,
+):
+    """Reveals the message progressively, word by word, instead of dumping
+    the full block instantly — a light animation just enough for a premium
+    'someone is actually typing this' feel without dragging the user's wait
+    time out. The button (if any) only appears on the final, complete
+    message.
+
+    parse_mode is applied ONLY on the final, complete frame — every
+    intermediate reveal is sent as plain text. This matters when `text`
+    contains HTML (e.g. a <blockquote> wrapper): parsing a half-revealed
+    string as HTML would leave an unclosed tag and Telegram would reject
+    the edit, so intermediate frames are deliberately unparsed and only the
+    finished message renders styled.
+
+    `delay` controls the pause between reveal steps — bump it slightly
+    (e.g. for the Support confirmation) for a more deliberate, human-typed
+    feel; the default stays snappy for shorter, lower-stakes messages."""
     words = text.split(" ")
     if len(words) <= 4:
         try:
             await context.bot.send_chat_action(chat_id=chat_id, action="typing")
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(max(delay, 0.5))
         except Exception:
             pass
-        return await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
+        return await context.bot.send_message(
+            chat_id=chat_id, text=text, reply_markup=reply_markup, parse_mode=parse_mode
+        )
 
     try:
         await context.bot.send_chat_action(chat_id=chat_id, action="typing")
     except Exception:
         pass
 
-    steps = 5  # short and snappy — just enough to feel alive, not slow
+    steps = 5  # short and deliberate — just enough to feel alive, not slow
     chunk = max(1, -(-len(words) // steps))  # ceil division
     msg = None
     for i in range(chunk, len(words) + chunk, chunk):
@@ -2011,7 +2082,11 @@ async def _send_typewriter(context: ContextTypes.DEFAULT_TYPE, chat_id: int, tex
             if msg is None:
                 msg = await context.bot.send_message(chat_id=chat_id, text=shown + cursor)
             else:
-                await msg.edit_text(shown + cursor, reply_markup=reply_markup if is_last else None)
+                await msg.edit_text(
+                    shown + cursor,
+                    reply_markup=reply_markup if is_last else None,
+                    parse_mode=parse_mode if is_last else None,
+                )
         except Exception:
             pass
         if not is_last:
@@ -2019,9 +2094,9 @@ async def _send_typewriter(context: ContextTypes.DEFAULT_TYPE, chat_id: int, tex
                 await context.bot.send_chat_action(chat_id=chat_id, action="typing")
             except Exception:
                 pass
-            await asyncio.sleep(0.25)
+            await asyncio.sleep(delay)
     if msg is None:
-        msg = await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup)
+        msg = await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup, parse_mode=parse_mode)
     return msg
 
 
@@ -3125,10 +3200,15 @@ async def handle_admin_ticket_reply(update: Update, context: ContextTypes.DEFAUL
         pass
 
 
-SUPPORT_PROMPT_TEXT = to_bold_sans(
-    "Describe any issue, suggestion, or feedback\n"
-    "you want to share about the bot.\n"
-    "Please provide a clear description so we can understand and assist you properly."
+SUPPORT_PROMPT_TEXT = (
+    "<blockquote>"
+    + to_title_small_caps("Please type your message below.") + "\n\n"
+    + "🛠️ " + to_title_small_caps("Report a problem") + "\n"
+    + "💡 " + to_title_small_caps("Share your feedback") + "\n"
+    + "❓ " + to_title_small_caps("Ask a question") + "\n"
+    + "💭 " + to_title_small_caps("Suggest a feature") + "\n\n"
+    + to_title_small_caps("We'll review your message and get back to you as soon as possible.")
+    + "</blockquote>"
 )
 
 
@@ -3142,10 +3222,12 @@ async def support_button_entry(update: Update, context: ContextTypes.DEFAULT_TYP
     confirmation sent after submission is sent separately (see
     handle_user_awaiting_input) and is never tracked under that slot, so
     switching to another bottom-keyboard button later can never delete the
-    user's submission confirmation."""
+    user's submission confirmation. The prompt itself IS explicitly deleted
+    the moment the user submits their message — see the "support_message"
+    branch of handle_user_awaiting_input."""
     chat_id = update.effective_chat.id
     context.user_data["awaiting"] = "support_message"
-    await _replace_rkb_screen(context, chat_id, "support", SUPPORT_PROMPT_TEXT)
+    await _replace_rkb_screen(context, chat_id, "support", SUPPORT_PROMPT_TEXT, parse_mode="HTML")
 
 
 async def cb_ticket_close(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3199,24 +3281,33 @@ async def cb_ticket_reopen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await log_event(context, f"🎫 Ticket #{tid} reopened by {update.effective_user.id}")
 
 
+_CARD_SEP = "──────────────────"
+
+
 def _build_support_admin_card(rid: str) -> tuple:
-    """Admin-facing 'NEW SUPPORT REQUEST' card — labels in Mathematical
-    Sans-Serif Bold, all real values (name link aside) left as normal text.
-    Reused both when the request first comes in and when an admin marks it
-    resolved, so the card always reflects the live status."""
+    """Admin-facing 'New Support Request' card — sectioned layout, message
+    quoted in « », live Pending/Resolved status, name is a clickable link
+    to the user's profile. Reused both when the request first comes in and
+    when an admin marks it resolved, so the card always reflects the live
+    status."""
     req = BOT_DATA["support_requests"][rid]
-    lbl = to_bold_sans
+    lbl = to_title_small_caps
     is_open = req["status"] == "pending"
-    status_word = "Pending" if is_open else "Resolved"
+    status_word = lbl("Pending") if is_open else lbl("Resolved")
+    received = iso_to_ist_str(req["created_at"], "%d %B %Y") + " • " + iso_to_ist_str(req["created_at"], "%H:%M:%S") + " IST"
     payload = (
-        f"{lbl('NEW SUPPORT REQUEST')}\n\n"
-        f"{lbl('User')} — {req['user_mention']}\n"
-        f"{lbl('User ID')} — {req['user_id']}\n"
-        f"{lbl('Username')} — {req['username_display']}\n\n"
-        f"{lbl('Request ID')} — #{rid}\n"
-        f"{lbl('Status')} — {status_word}\n\n"
-        f"{lbl('Message')}\n{html.escape(req['text'])}\n\n"
-        f"{lbl('Received')} — {iso_to_ist_str(req['created_at'], '%d %b %Y, %H:%M')} IST"
+        "📩 " + lbl("New Support Request") + "\n\n"
+        f"{_CARD_SEP}\n\n"
+        "👤 " + lbl("User Information") + "\n\n"
+        f"{lbl('Name')} : {req['user_mention']}\n"
+        f"{lbl('Username')} : {html.escape(req['username_display'])}\n"
+        f"{lbl('User Id')} : {req['user_id']}\n\n"
+        "💬 " + lbl("Support Message") + "\n\n"
+        f"«{html.escape(req['text'])}»\n\n"
+        "🕒 " + lbl("Received At") + "\n\n"
+        f"{received}\n\n"
+        f"{_CARD_SEP}\n\n"
+        "📌 " + f"{lbl('Status')} : {status_word}"
     )
     kb = None
     if is_open:
@@ -3227,24 +3318,27 @@ def _build_support_admin_card(rid: str) -> tuple:
 
 
 def _build_support_user_confirmation(rid: str) -> str:
-    """User-facing confirmation — the exact styled copy from spec, with the
-    live status swapped between PENDING and SOLVED."""
+    """User-facing confirmation — the exact requested copy, with the live
+    status swapped between the just-submitted card and the resolved card."""
     req = BOT_DATA["support_requests"][rid]
+    lbl = to_title_small_caps
     if req["status"] == "pending":
-        plain = (
-            "Your request has been submitted successfully. ✅\n"
-            "We'll let you know here once your issue has been resolved.\n\n"
-            f"REQUEST ID — #{rid}   STATUS — PENDING\n\n"
-            "You can also track your request from the Support menu."
+        body = (
+            "✅ " + lbl("Message Submitted") + "\n\n"
+            + lbl("Thank you for contacting support.") + "\n\n"
+            + "📩 " + lbl("Your message has been sent to our support team.") + "\n\n"
+            + lbl("We'll review it and get back to you as soon as possible.") + "\n\n"
+            + "❤️ " + lbl("Thank you for your patience.")
         )
     else:
-        plain = (
-            "Your support request has been resolved. ✅\n"
-            "Thanks for your patience — reach out again anytime you need help.\n\n"
-            f"REQUEST ID — #{rid}   STATUS — SOLVED\n\n"
-            "You can also track your request from the Support menu."
+        body = (
+            "✅ " + lbl("Support Request Resolved") + "\n\n"
+            + lbl("Thank you for contacting support.") + "\n\n"
+            + "📩 " + lbl("Your issue has been reviewed and marked as resolved.") + "\n\n"
+            + lbl("Need anything else? Just send us a new message anytime.") + "\n\n"
+            + "❤️ " + lbl("Thank you for your patience.")
         )
-    return to_bold_sans(plain)
+    return "<blockquote>" + body + "</blockquote>"
 
 
 async def cb_support_resolve(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3276,12 +3370,15 @@ async def cb_support_resolve(update: Update, context: ContextTypes.DEFAULT_TYPE)
             chat_id=req["confirm_chat_id"],
             message_id=req["confirm_message_id"],
             text=_build_support_user_confirmation(rid),
+            parse_mode="HTML",
         )
     except Exception:
         # Message may have been deleted by the user / too old to edit —
         # fall back to a fresh "resolved" message in the same style.
         try:
-            msg = await context.bot.send_message(chat_id=req["confirm_chat_id"], text=_build_support_user_confirmation(rid))
+            msg = await context.bot.send_message(
+                chat_id=req["confirm_chat_id"], text=_build_support_user_confirmation(rid), parse_mode="HTML"
+            )
             req["confirm_chat_id"] = msg.chat_id
             req["confirm_message_id"] = msg.message_id
             save_data()
@@ -3343,7 +3440,7 @@ async def show_usage_screen(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines += ["", f"💎 Pʀᴇᴍɪᴜᴍ Sᴛᴀᴛᴜꜱ : {'Active' if active else 'Expired'}", f"Eхᴘɪʀʏ : {html.escape(expiry_text)}"]
 
     text = "<blockquote>" + "\n".join(lines) + "</blockquote>"
-    await _replace_rkb_screen(context, update.effective_chat.id, "usage", text, reply_markup=None)
+    await _replace_rkb_screen(context, update.effective_chat.id, "usage", text, reply_markup=None, parse_mode="HTML")
 
 
 # ----------------------------------------------------------------------------
@@ -3902,7 +3999,7 @@ async def cb_support_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     context.user_data["awaiting"] = "support_message"
-    await query.message.reply_text(SUPPORT_PROMPT_TEXT)
+    await query.message.reply_text(SUPPORT_PROMPT_TEXT, parse_mode="HTML")
 
 
 async def handle_user_awaiting_input(update: Update, context: ContextTypes.DEFAULT_TYPE, awaiting: str):
@@ -3914,6 +4011,20 @@ async def handle_user_awaiting_input(update: Update, context: ContextTypes.DEFAU
         # request can never accidentally re-trigger on a later message even
         # if something below raises.
         context.user_data.pop("awaiting", None)
+
+        # The "please type your message below" prompt is only ever needed
+        # up until this exact moment — the user just submitted it. Delete
+        # it now so the chat doesn't keep showing a now-stale instruction
+        # sitting above the confirmation. It's the same "rkb_latest" panel
+        # message _replace_rkb_screen tracked when the prompt was shown.
+        _prompt_key = f"rkb_latest:{update.effective_chat.id}"
+        _prompt_msg_id = BOT_DATA.get("panel_msg", {}).pop(_prompt_key, None)
+        if _prompt_msg_id:
+            try:
+                await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=_prompt_msg_id)
+            except Exception:
+                pass
+            save_data()
 
         rid = str(BOT_DATA["next_support_id"])
         BOT_DATA["next_support_id"] += 1
@@ -3962,7 +4073,8 @@ async def handle_user_awaiting_input(update: Update, context: ContextTypes.DEFAU
         # so switching to any other bottom-keyboard screen afterwards can
         # never delete this confirmation as a side effect.
         confirm_msg = await _send_typewriter(
-            context, update.effective_chat.id, _build_support_user_confirmation(rid)
+            context, update.effective_chat.id, _build_support_user_confirmation(rid),
+            parse_mode="HTML", delay=0.45,
         )
         if confirm_msg:
             req["confirm_message_id"] = confirm_msg.message_id
@@ -4684,6 +4796,7 @@ async def _render_adm_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [
             [styled_button("📋 List Users (last 20)", callback_data="adm_users_list")],
             [styled_button("👨‍👩‍👧 List Groups", callback_data="adm_groups_list")],
+            [styled_button("🔍 Check User", callback_data="adm_check_user")],
             [styled_button("✉️ Message a User", callback_data="adm_users_msg")],
             back_row(),
             home_row(),
@@ -4733,6 +4846,93 @@ async def cb_adm_users_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     context.user_data["awaiting"] = "message_user_id"
     await query.message.reply_text(to_small_caps("send the id of the user you want to message."))
+
+
+async def cb_adm_check_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    context.user_data["awaiting"] = "check_user_id"
+    await query.message.reply_text(to_small_caps("send the user id you want to check."))
+
+
+async def build_user_details_card(context: ContextTypes.DEFAULT_TYPE, target_id: int) -> str:
+    """Full live detail card for one user, shown to an admin from
+    '🔍 Check User' — same sectioned house style as the New User Started
+    alert / Stats screen, but pulled fresh from stored data + a live
+    getChat call, and with a clickable Name."""
+    lbl = to_title_small_caps
+    uid = str(target_id)
+    u = BOT_DATA["users"].get(uid, {})
+
+    # Prefer a live getChat so name/username/premium reflect the user's
+    # CURRENT profile, not whatever was cached at their last /start. Falls
+    # back to stored data if the chat can't be fetched (user blocked the
+    # bot, invalid id, never started it, etc.).
+    chat_obj = None
+    try:
+        chat_obj = await context.bot.get_chat(target_id)
+    except Exception:
+        pass
+
+    if chat_obj is not None:
+        name = chat_obj.full_name if hasattr(chat_obj, "full_name") else (
+            " ".join(filter(None, [getattr(chat_obj, "first_name", None), getattr(chat_obj, "last_name", None)]))
+        )
+        name = name or u.get("name") or str(target_id)
+        username = getattr(chat_obj, "username", None) or u.get("username")
+        is_premium = getattr(chat_obj, "is_premium", None)
+        name_link = f'<a href="https://t.me/{username}">{html.escape(name)}</a>' if username else f'<a href="tg://user?id={target_id}">{html.escape(name)}</a>'
+    else:
+        name = u.get("name") or str(target_id)
+        username = u.get("username")
+        is_premium = None
+        name_link = f'<a href="tg://user?id={target_id}">{html.escape(name)}</a>'
+
+    if not u and chat_obj is None:
+        return None  # unknown to the bot AND not resolvable live — caller shows "not found"
+
+    username_display = f"@{username}" if username else "Not Set"
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    used_today = u.get("downloads_today", 0) if u.get("downloads_today_date") == today else 0
+    plan = u.get("plan", "Free")
+    active_premium = is_premium_active(uid)
+    joined = u.get("joined_at") or u.get("started_at")
+    joined_display = iso_to_ist_str(joined, "%d %B %Y • %H:%M:%S") + " IST" if joined else "Unknown"
+    banned = target_id in BOT_DATA.get("blocked", [])
+
+    lines = [
+        "🔍 " + lbl("User Details"),
+        "",
+        _CARD_SEP,
+        "",
+        "👤 " + lbl("User Information"),
+        "",
+        f"{lbl('Name')} : {name_link}",
+        f"{lbl('Username')} : {html.escape(username_display)}",
+        f"{lbl('User Id')} : {target_id}",
+        "",
+        "📊 " + lbl("Activity"),
+        "",
+        f"{lbl('Reels Downloaded')} : {u.get('reels_count', 0)}",
+        f"{lbl('Audios Get')} : {u.get('audio_count', 0)}",
+        f"{lbl('Captions Get')} : {u.get('caption_count', 0)}",
+        f"{lbl('Used Today')} : {used_today}",
+        "",
+        "💎 " + lbl("Premium"),
+        "",
+        f"{lbl('Plan')} : {lbl(plan)}",
+        f"{lbl('Status')} : {lbl('Active') if active_premium else lbl('Not Active')}",
+        "",
+        "⚙️ " + lbl("Account"),
+        "",
+        f"{lbl('Joined At')} : {joined_display}",
+        f"{lbl('Banned')} : {lbl('Yes') if banned else lbl('No')}",
+    ]
+    if is_premium is not None:
+        lines.append(f"{lbl('Telegram Premium')} : {lbl('Yes') if is_premium else lbl('No')}")
+    lines += ["", _CARD_SEP]
+
+    return "<blockquote>" + "\n".join(lines) + "</blockquote>"
 
 
 # ---- Broadcast (reliable delivery, admin copy, /broadcast command, and month-wise delete) ----
@@ -6785,6 +6985,17 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
             await update.message.reply_text(f"🚫 User {uid_int} banned.")
             await log_event(context, f"🚫 Admin banned user {uid_int} (via panel)")
 
+    elif awaiting == "check_user_id":
+        context.user_data.pop("awaiting", None)
+        if not text.isdigit():
+            await update.message.reply_text(to_small_caps("please send a valid numeric user id."))
+            return
+        card = await build_user_details_card(context, int(text))
+        if card is None:
+            await update.message.reply_text(to_small_caps("no record found for this user id."))
+            return
+        await update.message.reply_text(card, parse_mode="HTML")
+
     elif awaiting == "message_user_id":
         if not text.isdigit():
             await update.message.reply_text(to_small_caps("please send a valid numeric user id."))
@@ -7604,6 +7815,7 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(cb_adm_users_list, pattern="^adm_users_list$"))
     app.add_handler(CallbackQueryHandler(cb_adm_groups_list, pattern="^adm_groups_list$"))
     app.add_handler(CallbackQueryHandler(cb_adm_users_msg, pattern="^adm_users_msg$"))
+    app.add_handler(CallbackQueryHandler(cb_adm_check_user, pattern="^adm_check_user$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_live")(cb_adm_live), pattern="^adm_live$"))
     app.add_handler(CallbackQueryHandler(cb_adm_quickban, pattern="^adm_quickban$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_broadcast")(cb_adm_broadcast), pattern="^adm_broadcast$"))
