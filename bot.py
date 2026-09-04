@@ -960,6 +960,42 @@ DEFAULT_MENUS = {
         "updated_at": None,
         "translations": {},
     },
+    "download": {
+        "text": (
+            "<blockquote>"
+            "𝘞𝘢𝘯𝘵 𝘵𝘰 𝘥𝘰𝘸𝘯𝘭𝘰𝘢𝘥 𝘢 𝘙𝘦𝘦𝘭?\n\n"
+            "➤ 𝘊𝘰𝘱𝘺 𝘵𝘩𝘦 𝘙𝘦𝘦𝘭 𝘭𝘪𝘯𝘬 𝘧𝘳𝘰𝘮 𝘐𝘯𝘴𝘵𝘢𝘨𝘳𝘢𝘮\n\n"
+            "➤ 𝘗𝘢𝘴𝘵𝘦 𝘵𝘩𝘦 𝘭𝘪𝘯𝘬 𝘩𝘦𝘳𝘦\n\n"
+            "𝘛𝘩𝘢𝘵'𝘴 𝘪𝘵 — 𝘐'𝘭𝘭 𝘥𝘰 𝘵𝘩𝘦 𝘳𝘦𝘴𝘵."
+            "</blockquote>"
+        ),
+        "parse_mode": "HTML",
+        "image_file_id": None,
+        "buttons": [],
+        "auto_delete_seconds": None,
+        "updated_by": None,
+        "updated_at": None,
+        "translations": {},
+    },
+    "howto": {
+        "text": (
+            "<blockquote>"
+            "𝐇𝐎𝐖 𝐓𝐎 𝐔𝐒𝐄\n\n"
+            "➤ Cᴏᴘʏ ᴀɴʏ Iɴsᴛᴀɢʀᴀᴍ Rᴇᴇʟ ʟɪɴᴋ\n\n"
+            "➤ Pᴀsᴛᴇ ᴛʜᴇ ʟɪɴᴋ ʜᴇʀᴇ ɪɴ ᴄʜᴀᴛ\n\n"
+            "➤ Wᴀɪᴛ ᴀ ғᴇᴡ sᴇᴄᴏɴᴅs\n\n"
+            "➤ Gᴇᴛ ʏᴏᴜʀ Rᴇᴇʟ ᴅᴏᴡɴʟᴏᴀᴅᴇᴅ ɪɴsᴛᴀɴᴛʟʏ\n\n"
+            "➤ 𝐍𝐎𝐓𝐄 : Oɴʟʏ Pᴜʙʟɪᴄ Iɴsᴛᴀɢʀᴀᴍ Rᴇᴇʟ ʟɪɴᴋs ᴀʀᴇ sᴜᴘᴘᴏʀᴛᴇᴅ"
+            "</blockquote>"
+        ),
+        "parse_mode": "HTML",
+        "image_file_id": None,
+        "buttons": [],
+        "auto_delete_seconds": None,
+        "updated_by": None,
+        "updated_at": None,
+        "translations": {},
+    },
 }
 
 DEFAULT_DATA = {
@@ -1577,6 +1613,18 @@ def human_uptime() -> str:
     return " ".join(parts)
 
 
+def human_uptime_full() -> str:
+    """Same as human_uptime() but with seconds, in the small-caps
+    'Xᴅᴀʏs, Yʜ:Zᴍ:Ws' style used by the /ping quote block."""
+    secs = int(time.time() - START_TIME)
+    d, secs = divmod(secs, 86400)
+    h, secs = divmod(secs, 3600)
+    m, s = divmod(secs, 60)
+    if d:
+        return f"{d}ᴅᴀʏs, {h}ʜ:{m:02d}ᴍ:{s:02d}s"
+    return f"{h}ʜ:{m:02d}ᴍ:{s:02d}s"
+
+
 def get_memory_usage_mb():
     try:
         import psutil
@@ -1589,6 +1637,37 @@ def get_memory_usage_mb():
             return round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024, 1)
         except Exception:
             return None
+
+
+def get_cpu_percent():
+    """System-wide CPU usage %, or None if psutil isn't installed."""
+    try:
+        import psutil
+
+        return psutil.cpu_percent(interval=0.3)
+    except Exception:
+        return None
+
+
+def get_ram_percent():
+    """System-wide RAM usage %, or None if psutil isn't installed."""
+    try:
+        import psutil
+
+        return psutil.virtual_memory().percent
+    except Exception:
+        return None
+
+
+def get_disk_percent():
+    """Disk usage % of the filesystem the bot runs on, or None if psutil
+    isn't installed."""
+    try:
+        import psutil
+
+        return psutil.disk_usage(os.getcwd()).percent
+    except Exception:
+        return None
 
 
 async def _delete_message_job(context: ContextTypes.DEFAULT_TYPE):
@@ -2533,18 +2612,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # this is always safe.
         context.user_data.pop("awaiting", None)
     if text == RKB_DOWNLOAD:
-        download_text = (
-            "<blockquote>"
-            "𝘞𝘢𝘯𝘵 𝘵𝘰 𝘥𝘰𝘸𝘯𝘭𝘰𝘢𝘥 𝘢 𝘙𝘦𝘦𝘭?\n\n"
-            "➤ 𝘊𝘰𝘱𝘺 𝘵𝘩𝘦 𝘙𝘦𝘦𝘭 𝘭𝘪𝘯𝘬 𝘧𝘳𝘰𝘮 𝘐𝘯𝘴𝘵𝘢𝘨𝘳𝘢𝘮\n\n"
-            "➤ 𝘗𝘢𝘴𝘵𝘦 𝘵𝘩𝘦 𝘭𝘪𝘯𝘬 𝘩𝘦𝘳𝘦\n\n"
-            "𝘛𝘩𝘢𝘵'𝘴 𝘪𝘵 — 𝘐'𝘭𝘭 𝘥𝘰 𝘵𝘩𝘦 𝘳𝘦𝘴𝘵."
-            "</blockquote>"
-        )
-        await _replace_rkb_screen(
-            context, update.effective_chat.id, "download",
-            download_text, parse_mode="HTML",
-        )
+        # Now a fully admin-editable menu (text/image/buttons) via
+        # Menu & UI → "download", instead of a hardcoded string — same
+        # single-slot panel behavior as every other reply-keyboard screen.
+        sent = await render_menu(context, update.effective_chat.id, "download")
+        await track_and_refresh_panel(context, update.effective_chat.id, "rkb_latest", sent)
         return
     if text == RKB_USAGE:
         await show_usage_screen(update, context)
@@ -2559,7 +2631,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_developer_button(update, context)
         return
     if text == RKB_HOWTO:
-        await _replace_rkb_screen(context, update.effective_chat.id, "howto", STR["how_to_use"], parse_mode="HTML")
+        # Same treatment as Download Reel above — admin-editable via
+        # Menu & UI → "howto".
+        sent = await render_menu(context, update.effective_chat.id, "howto")
+        await track_and_refresh_panel(context, update.effective_chat.id, "rkb_latest", sent)
         return
     if text == RKB_SUPPORT:
         await support_button_entry(update, context)
@@ -7200,21 +7275,32 @@ async def cmd_exportusers(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """v2 §12 — latency check, available to everyone. Admins get the full
-    picture (uptime, storage, server time in IST); regular users just get
-    the plain pong, since the extra detail isn't meant for them."""
+    picture (uptime, RAM/CPU/disk load, storage backend, server time in
+    IST) rendered as a Telegram quote block; regular users just get the
+    plain pong, since the extra detail isn't meant for them."""
     t0 = time.monotonic()
     msg = await update.message.reply_text("🏓 Pong!")
     ms = int((time.monotonic() - t0) * 1000)
     if is_admin(update.effective_user.id):
         col = get_mongo_collection()
         backend = "MongoDB ✅" if col is not None else "Local JSON"
-        text = (
-            f"🏓 Pong! {ms}ms\n\n"
-            f"⏱ Uptime: {human_uptime()}\n"
-            f"🗄 Storage: {backend}\n"
-            f"🕒 Server time: {now_ist_str('%d %b %Y, %H:%M:%S')} IST\n"
-        )
-        await msg.edit_text(text)
+        cpu = get_cpu_percent()
+        ram = get_ram_percent()
+        disk = get_disk_percent()
+
+        lines = [f"↬ ᴜᴩᴛɪᴍᴇ : {human_uptime_full()}"]
+        if ram is not None:
+            lines.append(f"↬ ʀᴀᴍ : {ram:.1f}%")
+        if cpu is not None:
+            lines.append(f"↬ ᴄᴩᴜ : {cpu:.1f}%")
+        if disk is not None:
+            lines.append(f"↬ ᴅɪsᴋ : {disk:.1f}%")
+        lines.append(f"↬ sᴛᴏʀᴀɢᴇ : {backend}")
+        lines.append(f"↬ sᴇʀᴠᴇʀ ᴛɪᴍᴇ : {now_ist_str('%d %b %Y, %H:%M:%S')} IST")
+
+        quote_body = html.escape("\n".join(lines))
+        text = f"🏓 <b>Pong!</b> {ms}ms\n\n<blockquote>{quote_body}</blockquote>"
+        await msg.edit_text(text, parse_mode="HTML")
     else:
         await msg.edit_text(f"🏓 Pong! {ms}ms")
 
