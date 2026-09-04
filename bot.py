@@ -1751,18 +1751,15 @@ async def log_user_activity(context: ContextTypes.DEFAULT_TYPE, update: Update, 
         del buf[: len(buf) - 300]
     save_data()
 
-    if not BOT_DATA["settings"].get("user_activity_dm", True):
-        return
-    uname = f"@{user.username}" if user.username else "(no username)"
-    text = (
-        "🕵️ Live Activity\n\n"
-        f"👤 {user.full_name} {uname}\n"
-        f"🆔 {user.id}\n"
-        f"🕒 {iso_to_ist_str(entry['time'], '%H:%M:%S')} IST\n"
-        f"🔗 {url}"
-    )
-    await dm_all_admins(context, text)
-    await log_event(context, text)
+    # NOTE: this used to also DM admins a plain-text "Live Activity" ping
+    # right here, at request time. That has been superseded by the richer
+    # Reel Delivered-style card (see build_reel_delivered_card /
+    # send_reel_delivered_card) which now goes to admin DM once the reel is
+    # actually delivered — same "📡 Feed To Admin DM" toggle, one consistent
+    # format instead of two different-looking messages for the same event.
+    # The activity_log entry above (used by the Live User Feed / quick-ban
+    # screen) is still recorded immediately, so nothing about the
+    # anti-misuse monitoring itself is lost.
 
 
 def track_sent_message(chat_id: int, message_id: int):
@@ -2772,43 +2769,74 @@ async def cb_agree_terms(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Reel download
 # ----------------------------------------------------------------------------
 
-def build_reel_delivered_card(user_name: str, user_id, reel_number, original_reel_url: str) -> str:
-    """HTML card for the Activity Channel — exact structure/spacing per
-    spec: underlined heading, small-caps labels, a bare href with no
-    visible URL text and no InlineKeyboardButton, disable_web_page_preview
-    set by the caller. All dynamic values are HTML-escaped before
-    insertion, including the URL used in the href attribute."""
+def build_reel_delivered_card(user_name: str, user_id, reel_number, original_reel_url: str, username: str = None) -> str:
+    """HTML card used for both the Activity Channel AND the admin-DM Live
+    Activity feed — same layout in both places so admins never see two
+    different formats for the same event.
+
+    Layout (per spec):
+        Rᴇᴇʟ Nᴏ : #2      <- underlined (label + value)
+        Sᴛᴀᴛᴜs : Dᴇʟɪᴠᴇʀᴇᴅ <- underlined (label + value)
+
+        Uꜱᴇʀ : <clickable name>
+        Uꜱᴇʀɴᴀᴍᴇ : Not Set / @username
+        Uꜱᴇʀ ID : 123456
+
+        Click Here To View Reel   (bare link, no visible URL)
+
+    All dynamic values are HTML-escaped before insertion, including the
+    URL used in the href attribute. The user's name is a clickable link
+    straight to their Telegram profile (via @username if set, otherwise
+    tg://user?id), same pattern as clickable_user() elsewhere in the bot.
+    """
     safe_name = html.escape(str(user_name or "—"))
     safe_uid = html.escape(str(user_id))
     safe_no = html.escape(str(reel_number))
     safe_url = html.escape(original_reel_url or "", quote=True)
-    heading = "<u>" + to_title_small_caps("Reel Delivered") + "</u>"
+    username_display = f"@{username}" if username else "Not Set"
+
+    if username:
+        name_html = f'<a href="https://t.me/{html.escape(username, quote=True)}">{safe_name}</a>'
+    else:
+        name_html = f'<a href="tg://user?id={safe_uid}">{safe_name}</a>'
+
+    reel_no_line = f"<u>{to_title_small_caps('Reel No')} : #{safe_no}</u>"
+    status_line = f"<u>{to_title_small_caps('Status')} : {to_title_small_caps('Delivered')}</u>"
+
     return (
-        f"{heading}\n\n"
-        f"{to_title_small_caps('User')} : {safe_name}\n"
+        f"{reel_no_line}\n"
+        f"{status_line}\n\n"
+        f"{to_title_small_caps('User')} : {name_html}\n"
+        f"{to_title_small_caps('Username')} : {html.escape(username_display)}\n"
         f"{to_title_small_caps('User Id')} : {safe_uid}\n\n"
-        f"{to_title_small_caps('Reel No')} : #{safe_no}\n"
-        f"{to_title_small_caps('Status')} : {to_title_small_caps('Delivered')}\n\n"
         f'<a href="{safe_url}">{to_title_small_caps("Click Here To View Reel")}</a>'
     )
 
 
-async def send_reel_delivered_card(context, user_name: str, user_id, reel_number, original_reel_url: str):
-    """Posts the card to the Activity Channel only, if configured/enabled —
-    kept separate from the general Logger Channel so that feed stays pure
-    (no errors/debug noise mixed into the delivery log)."""
+async def send_reel_delivered_card(context, user_name: str, user_id, reel_number, original_reel_url: str, username: str = None):
+    """Posts the reel-delivered card to two places:
+      1. The Activity Channel, if configured/enabled (unchanged behavior).
+      2. Every admin's DM — this is the new "Live Activity" feed, replacing
+         the old plain-text ping, gated by the same "📡 Feed To Admin DM"
+         toggle (adm_live > user_activity_dm) admins already know."""
+    card = build_reel_delivered_card(user_name, user_id, reel_number, original_reel_url, username=username)
+
     s = BOT_DATA["settings"]
-    if not s.get("activity_channel_enabled") or not s.get("activity_channel_id"):
-        return
-    try:
-        await context.bot.send_message(
-            chat_id=s["activity_channel_id"],
-            text=build_reel_delivered_card(user_name, user_id, reel_number, original_reel_url),
-            parse_mode="HTML",
-            disable_web_page_preview=True,
-        )
-    except Exception:
-        log.warning("Activity Channel reel-delivered post failed", exc_info=True)
+    if s.get("activity_channel_enabled") and s.get("activity_channel_id"):
+        try:
+            await context.bot.send_message(
+                chat_id=s["activity_channel_id"],
+                text=card,
+                parse_mode="HTML",
+                disable_web_page_preview=True,
+            )
+        except Exception:
+            log.warning("Activity Channel reel-delivered post failed", exc_info=True)
+
+    if s.get("user_activity_dm", True):
+        notif_kb = InlineKeyboardMarkup([[styled_button("🔔 Notification Center", callback_data="adm_notifications")]])
+        await dm_all_admins(context, card, reply_markup=notif_kb, parse_mode="HTML")
+        await log_event(context, card, parse_mode="HTML")
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3285,6 +3313,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user_id=user_id,
             reel_number=BOT_DATA["metrics"]["reels_downloaded"],
             original_reel_url=url,
+            username=user_obj.username,
         )
 
         seconds = menu.get("auto_delete_seconds")
@@ -5300,6 +5329,10 @@ async def _render_adm_notifications(update: Update, context: ContextTypes.DEFAUL
         1 for g in BOT_DATA["groups"].values()
         if (dt := _parse(g.get("added_at"))) and dt >= day_ago
     )
+    reel_activity_24h = sum(
+        1 for e in BOT_DATA.get("activity_log", [])
+        if (dt := _parse(e.get("time"))) and dt >= day_ago
+    )
 
     # Tickets / support requests still waiting on a reply.
     open_tickets = sum(1 for t in BOT_DATA.get("tickets", {}).values() if t.get("status") == "open")
@@ -5340,6 +5373,7 @@ async def _render_adm_notifications(update: Update, context: ContextTypes.DEFAUL
     lines.append("📈 " + to_small_caps("last 24 hours"))
     lines.append(f"👤 " + to_small_caps("new users: ") + str(new_users_24h))
     lines.append(f"👨‍👩‍👧 " + to_small_caps("new groups: ") + str(new_groups_24h))
+    lines.append(f"🎬 " + to_small_caps("reel activity: ") + str(reel_activity_24h))
     lines.append("")
 
     if last_error:
@@ -5353,6 +5387,7 @@ async def _render_adm_notifications(update: Update, context: ContextTypes.DEFAUL
     lines.append("📊 " + to_small_caps("current totals"))
     lines.append(f"👥 " + to_small_caps("users: ") + str(len(BOT_DATA["users"])))
     lines.append(f"🚫 " + to_small_caps("blocked: ") + str(blocked_count))
+    lines.append(f"🎬 " + to_small_caps("reels delivered: ") + str(BOT_DATA["metrics"].get("reels_downloaded", 0)))
     lines.append(f"⏱ " + to_small_caps("uptime: ") + human_uptime())
 
     text = "\n".join(lines)
@@ -8577,6 +8612,23 @@ async def global_error_handler(update: object, context: ContextTypes.DEFAULT_TYP
         await log_event(context, f"🐞 Error: {str(context.error)[:300]}")
     except Exception:
         pass
+
+    # Urgent/critical errors go straight to every admin's DM, unconditionally
+    # — this does NOT check the Logger Channel toggle (log_event above does),
+    # so an admin who never bothered configuring a logger channel still finds
+    # out immediately when something actually breaks, instead of it only
+    # showing up next time they happen to open Activity Log.
+    if kind == "unhandled":
+        try:
+            await dm_all_admins(
+                context,
+                "🚨 " + to_title_small_caps("Urgent Alert") + "\n\n"
+                + f"{to_title_small_caps('Type')} : {html.escape(update_type)}\n"
+                + f"{to_title_small_caps('Error')} : {html.escape(err_text[:300])}",
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
 
 
 SCREEN_RENDERERS.update(
