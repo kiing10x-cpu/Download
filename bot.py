@@ -559,7 +559,7 @@ STR = {
 # is idempotent (re-applying it to already-styled text is a safe no-op), so
 # this can't get out of sync with styled_kb_button()'s own wrapping below.
 RKB_DOWNLOAD = to_small_caps("⬇️ Download reel")
-RKB_USAGE = to_small_caps("📊 My usage")
+RKB_USAGE = to_small_caps("📊 Stats")
 RKB_GIFT = to_small_caps("🎁 Send a gift")
 RKB_LANGUAGE = to_small_caps("🌐 Language")
 RKB_DEVELOPER = to_small_caps("👨‍💻 Developer")
@@ -607,6 +607,36 @@ def to_bold_sans(text: str) -> str:
 
 def to_bold_italic_sans(text: str) -> str:
     return _map_alpha_digit(text, 0x1D63C, 0x1D656, 0x1D7EC)
+
+
+# -----------------------------------------------------------------------------
+# User-facing error messages
+# -----------------------------------------------------------------------------
+# Keep technical exceptions (yt-dlp / ffmpeg / Telegram / network details)
+# in the server/admin logs only. Users should always receive short, clean
+# messages in the same typography as the rest of the bot UI.
+USER_ERR_WRONG_FORMAT = (
+    "❌ " + to_bold_sans("Wrong format") + "\n\n"
+    + to_small_caps("Please send a valid Instagram Reel link.") + "\n"
+    + to_small_caps("If you need help, contact support.")
+)
+
+USER_ERR_NOT_AVAILABLE = (
+    "❌ " + to_bold_sans("Not available") + "\n\n"
+    + to_small_caps("This reel can't be downloaded right now.") + "\n"
+    + to_small_caps("Please try again later or contact support.")
+)
+
+USER_ERR_AUDIO_NOT_AVAILABLE = (
+    "❌ " + to_bold_sans("Not available") + "\n\n"
+    + to_small_caps("Audio is not available for this reel right now.") + "\n"
+    + to_small_caps("Please try again later or contact support.")
+)
+
+USER_ERR_GENERIC = (
+    "❌ " + to_bold_sans("Something went wrong") + "\n\n"
+    + to_small_caps("Please try again later or contact support.")
+)
 
 
 def to_monospace(text: str) -> str:
@@ -660,12 +690,17 @@ except TypeError:
     SUPPORTS_KB_BUTTON_STYLE = False
 
 
+def premium_button_text(text: str) -> str:
+    """First alphabetic character uppercase, remaining letters in small caps."""
+    text = str(text)
+    for i, ch in enumerate(text):
+        if ch.isalpha():
+            return text[:i] + ch.upper() + to_small_caps(text[i + 1:])
+    return text
+
+
 def styled_button(text, callback_data=None, url=None, style=None):
-    """Every inline button in the bot goes through here (dynamic menu
-    buttons, admin panel, gift/ticket/force-join flows, etc.) — so applying
-    small-caps once, centrally, gives every button in the bot the small-caps
-    look without having to touch 100+ individual call sites. Safe to call
-    on text that's already small-caps (to_small_caps is idempotent)."""
+    """Central inline-button renderer with premium typography."""
     kwargs = {}
     if callback_data is not None:
         kwargs["callback_data"] = callback_data
@@ -673,7 +708,7 @@ def styled_button(text, callback_data=None, url=None, style=None):
         kwargs["url"] = url
     if style and SUPPORTS_BUTTON_STYLE:
         kwargs["style"] = style
-    return InlineKeyboardButton(to_small_caps(str(text)), **kwargs)
+    return InlineKeyboardButton(premium_button_text(text), **kwargs)
 
 
 # ---- Activity Log: categorization + plain-English fix hints -----------------
@@ -751,9 +786,8 @@ def toggle_label(base: str, is_on: bool) -> str:
 
 
 def styled_kb_button(text, style=None):
-    """Same small-caps treatment as styled_button(), for the persistent
-    bottom reply-keyboard buttons."""
-    text = to_small_caps(str(text))
+    """Reply-keyboard button renderer with premium typography."""
+    text = premium_button_text(text)
     if style and SUPPORTS_KB_BUTTON_STYLE:
         return KeyboardButton(text, style=style)
     return KeyboardButton(text)
@@ -961,7 +995,7 @@ DEFAULT_DATA = {
     "blocked_links": [],        # PDF #3 — specific links blocked by admin
     "blocked_domains": [],      # PDF #3 — whole domains blocked by admin
     "error_log": [],            # #13 — capped ring buffer of recent errors
-    "metrics": {"reels_downloaded": 0, "start_count": 0, "broadcasts_sent": 0},
+    "metrics": {"reels_downloaded": 0, "audio_gets": 0, "caption_gets": 0, "start_count": 0, "broadcasts_sent": 0},
     "tickets": {},               # v2 §6 — ticket_id(str) -> {...}
     "ticket_msg_map": {},        # v2 §6 — admin_group_message_id(str) -> ticket_id
     "support_msg_map": {},       # one-shot support admin-message-id(str) -> user_id(str)
@@ -1121,6 +1155,7 @@ def touch_user(update: Update) -> bool:
             "accepted_terms": False, "accepted_terms_at": None,
             "downloads_today": 0, "downloads_today_date": None,
             "downloads_month": 0, "downloads_month_key": None,
+            "reels_count": 0, "audio_count": 0, "caption_count": 0,
             "plan": "Free", "open_ticket_id": None,
         }
     else:
@@ -2495,13 +2530,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if phrase in low:
                 await update.message.reply_text(reply)
                 return
-        await update.message.reply_text(
-            "<blockquote>"
-            + to_small_caps("that doesn't look like a valid instagram reel link. please send a valid link, e.g.:")
-            + "\n<code>https://www.instagram.com/reel/XXXXXXXX/</code>"
-            "</blockquote>",
-            parse_mode="HTML",
-        )
+        await update.message.reply_text(USER_ERR_WRONG_FORMAT)
         return
 
     # Maintenance is already enforced at the top of handle_text().
@@ -2740,6 +2769,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         track_sent_message(sent.chat_id, sent.message_id)
         bump_usage(uid)
         BOT_DATA["metrics"]["reels_downloaded"] = BOT_DATA["metrics"].get("reels_downloaded", 0) + 1
+        BOT_DATA["users"].setdefault(uid, {})["reels_count"] = BOT_DATA["users"].get(uid, {}).get("reels_count", 0) + 1
         save_data()
         await log_event(
             context,
@@ -2754,30 +2784,18 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:  # noqa: BLE001
         anim_task.cancel()
         log.exception("Download failed")
-        # BUGFIX — `e` was interpolated into an HTML-parsed message unescaped.
-        # Any "<" ">" "&" in a yt-dlp error (common in URLs) broke Telegram's
-        # HTML parser, edit_text raised, and the user was left staring at a
-        # frozen "processing..." message forever with no visible error.
-        import html as _html
-        safe_err = _html.escape(str(e))[:500]
-        # "No video formats found" surviving the cache-clear retry (see
-        # _ytdlp_extract_with_retry) almost always means yt-dlp itself is
-        # out of date for Instagram's current site — Instagram changes
-        # things often enough that this needs periodic `pip install -U
-        # yt-dlp`. Surface that to the admin so it doesn't look like an
-        # unexplained one-off failure every time it happens.
+        # Technical details stay in logs/admin activity only. Never expose
+        # yt-dlp/Instagram/ffmpeg exceptions to the end user.
         if "no video formats found" in str(e).lower():
             log_error("ytdlp_no_formats", f"url={url} err={e} — yt-dlp may need updating (pip install -U yt-dlp)")
+        log_error("download", f"url={url} err={e}")
         try:
-            await status_msg.edit_text(
-                "❌ " + to_small_caps("download failed. the link may be private, deleted, or instagram rate-limited us.")
-                + f"\n\n<code>{safe_err}</code>",
-                parse_mode="HTML",
-            )
+            await status_msg.edit_text(USER_ERR_NOT_AVAILABLE)
         except Exception:
-            await status_msg.edit_text(
-                "❌ " + to_small_caps("download failed. the link may be private, deleted, or instagram rate-limited us.")
-            )
+            try:
+                await update.message.reply_text(USER_ERR_NOT_AVAILABLE)
+            except Exception:
+                pass
     finally:
         if file_path and os.path.exists(file_path):
             try:
@@ -2798,6 +2816,11 @@ async def cb_get_caption(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Telegram message limit is 4096 chars — split if needed.
     for i in range(0, len(caption), 4000):
         await query.message.reply_text(caption[i:i + 4000])
+    uid = str(query.from_user.id)
+    u = BOT_DATA["users"].setdefault(uid, {})
+    u["caption_count"] = u.get("caption_count", 0) + 1
+    BOT_DATA["metrics"]["caption_gets"] = BOT_DATA["metrics"].get("caption_gets", 0) + 1
+    save_data()
 
 
 async def cb_copy_caption(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2814,6 +2837,11 @@ async def cb_copy_caption(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     for i in range(0, len(caption), 4000):
         await query.message.reply_text(caption[i:i + 4000])
+    uid = str(query.from_user.id)
+    u = BOT_DATA["users"].setdefault(uid, {})
+    u["caption_count"] = u.get("caption_count", 0) + 1
+    BOT_DATA["metrics"]["caption_gets"] = BOT_DATA["metrics"].get("caption_gets", 0) + 1
+    save_data()
 
 
 async def cb_remove_reel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2979,17 +3007,24 @@ async def cb_get_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         protect = bool(BOT_DATA["settings"].get("lock_all_content", False))
         with open(audio_path, "rb") as aud:
             await query.message.reply_audio(audio=aud, protect_content=protect)
+        uid = str(query.from_user.id)
+        u = BOT_DATA["users"].setdefault(uid, {})
+        u["audio_count"] = u.get("audio_count", 0) + 1
+        BOT_DATA["metrics"]["audio_gets"] = BOT_DATA["metrics"].get("audio_gets", 0) + 1
+        save_data()
         await status_msg.delete()
     except Exception as e:
-        import html as _html
-        safe_err = _html.escape(str(e))[:500]
+        # Full technical error is useful for debugging, but must never be
+        # shown to users. Keep it in the server/admin log only.
+        log.exception("Audio extraction failed for %s", url)
+        log_error("audio", f"url={url} err={e}")
         try:
-            await status_msg.edit_text(
-                "❌ " + to_small_caps("audio extraction failed.") + f"\n\n<code>{safe_err}</code>",
-                parse_mode="HTML",
-            )
+            await status_msg.edit_text(USER_ERR_AUDIO_NOT_AVAILABLE)
         except Exception:
-            await status_msg.edit_text("❌ " + to_small_caps("audio extraction failed."))
+            try:
+                await query.message.reply_text(USER_ERR_AUDIO_NOT_AVAILABLE)
+            except Exception:
+                pass
     finally:
         for p in (source_path, audio_path):
             if p and os.path.exists(p):
@@ -3269,74 +3304,46 @@ async def cb_support_resolve(update: Update, context: ContextTypes.DEFAULT_TYPE)
 # ----------------------------------------------------------------------------
 
 async def show_usage_screen(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """📊 Stats screen. Premium status/expiry are hidden unless a Premium
+    plan has actually been assigned to this user from the Admin Panel."""
     await _clear_ephemeral(context, update.effective_chat.id)
-    uid = str(update.effective_user.id)
+    user = update.effective_user
+    uid = str(user.id)
     u = BOT_DATA["users"].setdefault(uid, {})
     today = datetime.utcnow().strftime("%Y-%m-%d")
-    month = datetime.utcnow().strftime("%Y-%m")
-    today_count = u.get("downloads_today", 0) if u.get("downloads_today_date") == today else 0
-    month_count = u.get("downloads_month", 0) if u.get("downloads_month_key") == month else 0
+    used = u.get("downloads_today", 0) if u.get("downloads_today_date") == today else 0
+    assigned_premium = u.get("plan", "Free") != "Free"
+    active = is_premium_active(uid)
     limit = BOT_DATA["settings"].get("daily_limit", 20)
-    plan = u.get("plan", "Free")
-    pct = min(100, int((today_count / limit) * 100)) if limit else 0
-    filled = pct // 10
-    bar = "▓" * filled + "░" * (10 - filled)
-    now = datetime.utcnow()
-    tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-    remaining = tomorrow - now
-    hh, mm = remaining.seconds // 3600, (remaining.seconds % 3600) // 60
-    text = (
-        f"{STR['usage_title']}\n\n"
-        f"📥 {to_small_caps('today')}: {today_count}/{limit} {to_small_caps('downloads')}\n"
-        f"📅 {to_small_caps('this month')}: {month_count} {to_small_caps('downloads')}\n"
-        f"⚡ {to_small_caps('plan')}: {plan}\n"
-        f"⏳ {to_small_caps('resets in')}: {hh}ʜ {mm}ᴍ\n\n"
-        f"{bar} {pct}%"
-    )
-    kb_rows = []
-    # v4 — admin-added premium plans now list directly under Usage (not just
-    # buried behind a generic "upgrade" button), so a newly-added plan is
-    # visible to every user right away.
-    s = BOT_DATA["settings"]
-    plans = [p for p in s.get("premium_plans", []) if p.get("enabled")] if s.get("premium_enabled") else []
-    if plans:
-        text += "\n\n💎 " + to_small_caps("available plans") + "\n"
-        for p in plans:
-            price_bits = []
-            if p.get("price_inr"):
-                price_bits.append(f"₹{p['price_inr']}")
-            if p.get("price_stars"):
-                price_bits.append(f"{p['price_stars']}⭐")
-            text += f"• {p['name']} — {' / '.join(price_bits)} — {p.get('days', 30)}{to_small_caps('d')}\n"
-            kb_rows.append([styled_button(f"💎 {p['name']}", callback_data=f"gift_plan:{p['id']}", style="success")])
-    # FIX — Upgrade button under "My Usage" must ONLY appear once the admin
-    # has actually added a real plan in Admin Panel > Premium, and tapping
-    # it must always lead straight to that plan's fixed price (no generic
-    # "pick any amount" gift flow). The old `elif s.get("premium_enabled")`
-    # fallback showed a generic "🚀 Upgrade for more" button (-> cb_gift_menu,
-    # a free-amount Stars/UPI flow) even when zero plans existed, which is
-    # exactly the mismatch reported. Removed: no plans = no Upgrade button.
-    # v5 — colored Share button under My Usage, admin-toggleable.
-    # FIX — "share button workable nahi hai": it was a plain url= button
-    # pointing straight at the bot/channel link, so tapping it just opened
-    # that link in-app instead of actually sharing anything — there was
-    # nothing to "share" to a friend. Switched to Telegram's native
-    # t.me/share/url deep link, which opens Telegram's own chat picker with
-    # the link + a message pre-filled, so one tap lets the user forward it
-    # straight into any chat — the same menu, now an actually working share.
-    if s.get("share_enabled", True):
-        share_url = await resolve_share_url(context)
-        share_text = to_small_caps("check out this bot! 🎬 instagram reel downloader")
-        share_deeplink = f"https://t.me/share/url?url={quote(share_url, safe='')}&text={quote(share_text, safe='')}"
-        kb_rows.append([styled_button("📤 " + to_small_caps("share"), url=share_deeplink, style="primary")])
-    try:
-        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-    except Exception:
-        pass
-    await _replace_rkb_screen(
-        context, update.effective_chat.id, "usage", text,
-        reply_markup=InlineKeyboardMarkup(kb_rows) if kb_rows else None,
-    )
+    username = f"@{user.username}" if user.username else "Not set"
+    limit_text = "Unlimited" if assigned_premium else str(limit)
+    remaining = "Unlimited" if assigned_premium else str(max(0, limit - used))
+
+    lines = [
+        "📊 Sᴛᴀᴛs", "",
+        f"Nᴀᴍᴇ : {html.escape(user.full_name)}",
+        f"Uꜱᴇʀɴᴀᴍᴇ : {html.escape(username)}",
+        f"Uꜱᴇʀ Iᴅ : {user.id}",
+        f"Rᴇᴇʟs Dᴏᴡɴʟᴏᴀᴅᴇᴅ : {u.get('reels_count', 0)}",
+        f"Aᴜᴅɪᴏs Gᴇᴛ : {u.get('audio_count', 0)}",
+        f"Cᴀᴘᴛɪᴏɴs Gᴇᴛ : {u.get('caption_count', 0)}",
+        f"Lɪᴍɪᴛ : {limit_text}",
+        f"Uꜱᴇᴅ : {used}",
+        f"Rᴇᴍᴀɪɴɪɴɢ : {remaining}",
+    ]
+    if assigned_premium:
+        expiry = u.get("plan_expires_at")
+        if expiry:
+            try:
+                expiry_text = to_ist(datetime.fromisoformat(expiry)).strftime("%d %b %Y, %I:%M %p") + " IST"
+            except Exception:
+                expiry_text = expiry
+        else:
+            expiry_text = "No expiry"
+        lines += ["", f"💎 Pʀᴇᴍɪᴜᴍ Sᴛᴀᴛᴜꜱ : {'Active' if active else 'Expired'}", f"Eхᴘɪʀʏ : {html.escape(expiry_text)}"]
+
+    text = "<blockquote>" + "\n".join(lines) + "</blockquote>"
+    await _replace_rkb_screen(context, update.effective_chat.id, "usage", text, reply_markup=None)
 
 
 # ----------------------------------------------------------------------------
@@ -6796,7 +6803,9 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
             await context.bot.send_message(chat_id=target, text=text)
             await update.message.reply_text(to_small_caps("✅ message delivered."))
         except Exception as e:  # noqa: BLE001
-            await update.message.reply_text(to_small_caps("❌ could not deliver: ") + str(e))
+            log.exception("Admin message delivery failed for target %s", target)
+            log_error("message_user", f"target={target} err={e}")
+            await update.message.reply_text(USER_ERR_GENERIC)
 
     elif awaiting == "broadcast_content":
         context.user_data.pop("awaiting", None)
