@@ -907,17 +907,17 @@ DEFAULT_MENUS = {
             "𝐖𝐄𝐋𝐂𝐎𝐌𝐄 ᴛᴏ {bot_link}\n\n"
             "Yᴏᴜʀ ᴘᴇʀsᴏɴᴀʟ Iɴsᴛᴀɢʀᴀᴍ Rᴇᴇʟ ᴀssɪsᴛᴀɴᴛ.\n\n"
             "𝐓𝐇𝐈𝐒 𝐁𝐎𝐓 𝐂𝐀𝐍\n\n"
-            "➤ Dᴏᴡɴʟᴏᴀᴅ Iɴsᴛᴀɢʀᴀᴍ Rᴇᴇʟs\n\n"
-            "➤ Gᴇᴛ Rᴇᴇʟ Cᴀᴘᴛɪᴏɴs\n\n"
-            "➤ Gᴇᴛ Rᴇᴇʟ Aᴜᴅɪᴏ\n\n"
+            "<u>➤ Dᴏᴡɴʟᴏᴀᴅ Iɴsᴛᴀɢʀᴀᴍ Rᴇᴇʟs</u>\n\n"
+            "<u>➤ Gᴇᴛ Rᴇᴇʟ Cᴀᴘᴛɪᴏɴs</u>\n\n"
+            "<u>➤ Gᴇᴛ Rᴇᴇʟ Aᴜᴅɪᴏ</u>\n\n"
             "𝐖𝐇𝐘 𝐂𝐇𝐎𝐎𝐒𝐄 𝐔𝐒?\n\n"
-            "➤ Nᴏ Wᴀᴛᴇʀᴍᴀᴋs\n\n"
-            "➤ Hɪɢʜ-Qᴜᴀʟɪᴛʏ Rᴇᴇʟ Dᴏᴡɴʟᴏᴀᴅs\n\n"
-            "➤ Fᴀsᴛ ᴀɴᴅ Sᴍᴏᴏᴛʜ Sᴇʀᴠɪᴄᴇ\n\n"
-            "➤ Hᴀssʟᴇ-Fʀᴇᴇ ᴀɴᴅ Eᴀsʏ ᴛᴏ Uꜱᴇ\n\n"
-            "➤ Sᴀᴠᴇs Tɪᴍᴇ ᴀɴᴅ Eғғᴏʀᴛ\n\n"
-            "➤ Rᴇᴇʟ, Cᴀᴘᴛɪᴏɴ ᴀɴᴅ Aᴜᴅɪᴏ ɪɴ Oɴᴇ Pʟᴀᴄᴇ\n\n"
-            "➤ Nᴏ Exᴛʀᴀ Tᴏᴏʟs ᴏʀ Cᴏᴍᴘʟɪᴄᴀᴛᴇᴅ Sᴛᴇᴘs"
+            "<u>➤ Nᴏ Wᴀᴛᴇʀᴍᴀᴋs</u>\n\n"
+            "<u>➤ Hɪɢʜ-Qᴜᴀʟɪᴛʏ Rᴇᴇʟ Dᴏᴡɴʟᴏᴀᴅs</u>\n\n"
+            "<u>➤ Fᴀsᴛ ᴀɴᴅ Sᴍᴏᴏᴛʜ Sᴇʀᴠɪᴄᴇ</u>\n\n"
+            "<u>➤ Hᴀssʟᴇ-Fʀᴇᴇ ᴀɴᴅ Eᴀsʏ ᴛᴏ Uꜱᴇ</u>\n\n"
+            "<u>➤ Sᴀᴠᴇs Tɪᴍᴇ ᴀɴᴅ Eғғᴏʀᴛ</u>\n\n"
+            "<u>➤ Rᴇᴇʟ, Cᴀᴘᴛɪᴏɴ ᴀɴᴅ Aᴜᴅɪᴏ ɪɴ Oɴᴇ Pʟᴀᴄᴇ</u>\n\n"
+            "<u>➤ Nᴏ Exᴛʀᴀ Tᴏᴏʟs ᴏʀ Cᴏᴍᴘʟɪᴄᴀᴛᴇᴅ Sᴛᴇᴘs</u>"
             "</blockquote>"
         ),
         "parse_mode": "HTML",
@@ -1206,6 +1206,7 @@ DEFAULT_DATA = {
         "premium_plans": [],  # v4 — admin-defined plans: {id, name, days, price_inr, price_stars, enabled}
         "detailed_join_alerts": True,  # new-user/group-start full details -> admin DMs + logger
         "user_activity_dm": True,      # every reel-link a user sends -> owner DM (misuse monitoring)
+        "notify_route": "all",         # where the Reel-Delivered activity card goes: logger | activity | dm | all
         "leaderboard_enabled": False,  # admin toggle — top-donor ranking shown inside Send Gift
         "share_enabled": True,         # admin toggle — "📤 Share" button under My Usage
         "share_url": None,             # link the Share button points to; falls back to the bot link
@@ -1511,6 +1512,25 @@ def _force_join_targets():
     return normalized
 
 
+def normalize_channel_id(raw: str) -> str:
+    """Auto-fix the #1 real-world force-join bug: an admin pastes a numeric
+    channel ID that's missing Telegram's mandatory "-100" prefix for
+    channels/supergroups (very common — many ID-lookup bots/forwarded
+    messages show the bare internal number, e.g. "-5080988402" instead of
+    the actual Bot-API-usable "-1005080988402"). Using the bare form makes
+    every get_chat_member call fail with "chat not found", which silently
+    blocks every single user — exactly the "force-join doesn't work at
+    all" symptom. Public @usernames and already-correct IDs pass through
+    unchanged."""
+    raw = str(raw).strip()
+    if raw.startswith("@") or not raw.lstrip("-").isdigit():
+        return raw
+    digits = raw.lstrip("-")
+    if raw.startswith("-") and not digits.startswith("100"):
+        return f"-100{digits}"
+    return raw
+
+
 async def is_force_join_ok(context: ContextTypes.DEFAULT_TYPE, user_id: int) -> bool:
     """Require membership in every configured force-join channel.
 
@@ -1524,7 +1544,7 @@ async def is_force_join_ok(context: ContextTypes.DEFAULT_TYPE, user_id: int) -> 
         return True
     verified = BOT_DATA["settings"].get("force_join_request_verified", {}).get(str(user_id), [])
     for target in targets:
-        chat_id = target.get("chat_id")
+        chat_id = normalize_channel_id(target.get("chat_id")) if target.get("chat_id") else None
         key = str(chat_id or target.get("link"))
         if key in verified:
             continue
@@ -1581,8 +1601,8 @@ async def handle_force_join_request(update: Update, context: ContextTypes.DEFAUL
     verified_map = BOT_DATA["settings"].setdefault("force_join_request_verified", {})
     keys = set(verified_map.get(uid, []))
     for target in _force_join_targets():
-        chat_id = target.get("chat_id")
-        if str(chat_id) == str(req.chat.id):
+        chat_id = normalize_channel_id(target.get("chat_id")) if target.get("chat_id") else None
+        if chat_id and str(chat_id) == str(req.chat.id):
             keys.add(str(chat_id))
         # Match the actual invite link if Telegram exposes it.
         inv = getattr(req, "invite_link", None)
@@ -2306,8 +2326,8 @@ async def show_force_join_prompt(update: Update, context: ContextTypes.DEFAULT_T
     links = await get_force_join_links(context)
     kb_rows = []
     for i, link in enumerate(links, 1):
-        label = "📢 JOIN CHANNEL" if len(links) == 1 else f"📢 JOIN CHANNEL {i}"
-        kb_rows.append([InlineKeyboardButton(label, url=link)])
+        label = "📢 Join Channel" if len(links) == 1 else f"📢 Join Channel {i}"
+        kb_rows.append([styled_button(label, url=link)])
     kb_rows.append([styled_button("✅ I'VE JOINED / SENT REQUEST", callback_data="check_force_join", style="success")])
     text = "🔒 " + to_small_caps("please join all required channels to use this bot.")
     if not links:
@@ -2814,15 +2834,19 @@ def build_reel_delivered_card(user_name: str, user_id, reel_number, original_ree
 
 
 async def send_reel_delivered_card(context, user_name: str, user_id, reel_number, original_reel_url: str, username: str = None):
-    """Posts the reel-delivered card to two places:
-      1. The Activity Channel, if configured/enabled (unchanged behavior).
-      2. Every admin's DM — this is the new "Live Activity" feed, replacing
-         the old plain-text ping, gated by the same "📡 Feed To Admin DM"
-         toggle (adm_live > user_activity_dm) admins already know."""
+    """Posts the reel-delivered card to admin-facing destinations, per the
+    admin-configurable "📡 Notify Route" (Settings & Admins > Live Feed):
+      - "logger"   -> Logger Channel only
+      - "activity" -> Activity Channel only
+      - "dm"       -> Admin DM only
+      - "all"      -> all three (default)
+    Same card/format everywhere, so admins never see two different-looking
+    messages for the same event."""
     card = build_reel_delivered_card(user_name, user_id, reel_number, original_reel_url, username=username)
-
     s = BOT_DATA["settings"]
-    if s.get("activity_channel_enabled") and s.get("activity_channel_id"):
+    route = s.get("notify_route", "all")
+
+    if route in ("activity", "all") and s.get("activity_channel_enabled") and s.get("activity_channel_id"):
         try:
             await context.bot.send_message(
                 chat_id=s["activity_channel_id"],
@@ -2833,9 +2857,10 @@ async def send_reel_delivered_card(context, user_name: str, user_id, reel_number
         except Exception:
             log.warning("Activity Channel reel-delivered post failed", exc_info=True)
 
-    if s.get("user_activity_dm", True):
-        notif_kb = InlineKeyboardMarkup([[styled_button("🔔 Notification Center", callback_data="adm_notifications")]])
-        await dm_all_admins(context, card, reply_markup=notif_kb, parse_mode="HTML")
+    if route in ("dm", "all") and s.get("user_activity_dm", True):
+        await dm_all_admins(context, card, parse_mode="HTML")
+
+    if route in ("logger", "all"):
         await log_event(context, card, parse_mode="HTML")
 
 
@@ -5200,9 +5225,15 @@ async def _render_adm_live(update: Update, context: ContextTypes.DEFAULT_TYPE):
             lines.append(f"• {when} IST — {e.get('name')} {uname} [{e.get('user_id')}]\n  ↳ {e.get('url')}")
     body = "\n".join(lines)
     s = BOT_DATA["settings"]
+    route = s.get("notify_route", "all")
+    route_labels = {"logger": "📋 Logger", "activity": "📢 Activity", "dm": "📩 Admin Dm", "all": "🌐 All"}
     kb = InlineKeyboardMarkup(
         [
             [styled_button("🚫 Ban / Unban User (by ID)", callback_data="adm_quickban")],
+            [styled_button(
+                f"📡 Notify Route: {route_labels.get(route, 'All')}",
+                callback_data="adm_notify_route_cycle",
+            )],
             [styled_button(
                 toggle_label("📡 Feed To Admin DM", s.get('user_activity_dm', True)),
                 callback_data="stgl:user_activity_dm:adm_live",
@@ -5222,6 +5253,21 @@ async def cb_adm_live(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     if not is_admin(update.effective_user.id):
         return
+    await _render_adm_live(update, context)
+
+
+async def cb_adm_notify_route_cycle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Cycles the Reel-Delivered notification destination: Logger ->
+    Activity -> Admin DM -> All -> Logger ... one tap, no sub-menu needed."""
+    query = update.callback_query
+    await query.answer()
+    if not is_admin(update.effective_user.id):
+        return
+    order = ["all", "logger", "activity", "dm"]
+    current = BOT_DATA["settings"].get("notify_route", "all")
+    nxt = order[(order.index(current) + 1) % len(order)] if current in order else "all"
+    BOT_DATA["settings"]["notify_route"] = nxt
+    save_data()
     await _render_adm_live(update, context)
 
 
@@ -6606,11 +6652,15 @@ def _build_adm_force_join_view():
     for i, t in enumerate(targets, 1):
         lines.append(f"{i}. {t.get('chat_id') or '(link-only)'}\n   🔗 {t.get('link') or 'auto-resolve'}")
     text = (
-        "📢 Multiple Force-Join\n\n"
-        + ("\n\n".join(lines) if lines else "No channels set — force-join disabled.")
-        + "\n\nUsers must satisfy ALL listed channels. Public @usernames, numeric "
-          "channel IDs and t.me/invite links are supported. Join requests are also "
-          "accepted when Telegram delivers the request update to this bot."
+        "📢 " + to_title_small_caps("Multiple Force-Join") + "\n\n"
+        + ("\n\n".join(lines) if lines else to_small_caps("no channels set — force-join disabled."))
+        + "\n\n<blockquote>"
+        + to_title_small_caps(
+            "Users Must Satisfy All Listed Channels. Public @Usernames, Numeric "
+            "Channel IDs And t.me/Invite Links Are Supported. Join Requests Are Also "
+            "Accepted When Telegram Delivers The Request Update To This Bot."
+        )
+        + "</blockquote>"
     )
     kb_rows = [
         [styled_button("➕ Add Channel / Link", callback_data="adm_force_join_set")],
@@ -6625,7 +6675,7 @@ def _build_adm_force_join_view():
 async def _render_adm_force_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     text, kb = _build_adm_force_join_view()
-    await query.edit_message_text(text, reply_markup=kb)
+    await query.edit_message_text(text, reply_markup=kb, parse_mode="HTML")
 
 
 async def cb_adm_force_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -6639,9 +6689,15 @@ async def cb_adm_force_join_set(update: Update, context: ContextTypes.DEFAULT_TY
     remember_panel_message(context, query, "force_join")
     context.user_data["awaiting"] = "force_join_channel"
     await query.message.reply_text(
-        "Send a public @channelusername, numeric channel ID (-100xxxxxxxxxx), "
-        "or a full https://t.me/... invite/join link. You can add multiple channels one by one. "
-        "For reliable membership checking, the bot should be an admin in each channel."
+        "<blockquote>"
+        + to_title_small_caps("Send A Public") + " @ChannelUsername, "
+        + to_title_small_caps("Numeric Channel") + " ID (-100xxxxxxxxxx), "
+        + to_title_small_caps("Or A Full") + " https://t.me/... "
+        + to_title_small_caps("Invite/Join Link. You Can Add Multiple Channels One By One. "
+                               "For Reliable Membership Checking, The Bot Should Be An Admin "
+                               "In Each Channel.")
+        + "</blockquote>",
+        parse_mode="HTML",
     )
 
 
@@ -7565,7 +7621,7 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
             channel = raw
             if not channel.lstrip("-").isdigit() and not channel.startswith("@"):
                 channel = "@" + channel
-            target["chat_id"] = channel
+            target["chat_id"] = normalize_channel_id(channel)
         targets = _force_join_targets()
         key = str(target.get("chat_id") or target.get("link"))
         if any(str(x.get("chat_id") or x.get("link")) == key for x in targets):
@@ -7577,11 +7633,16 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
         save_data()
         refreshed = await refresh_panel_after_save(context, "force_join", lambda: _build_adm_force_join_view())
         await update.message.reply_text(
-            f"✅ Added force-join target: {raw}\n\n"
-            "Add another from the panel if needed. For private link-only channels, "
-            "membership can be confirmed through join-request updates; for normal "
-            "membership checks, configure the channel ID/@username and make the bot admin."
-            + ("" if refreshed else "\n(Reopen the panel to confirm.)")
+            "✅ " + to_title_small_caps(f"Added Force-Join Target: {raw}") + "\n\n"
+            + "<blockquote>"
+            + to_title_small_caps(
+                "Add Another From The Panel If Needed. For Private Link-Only Channels, "
+                "Membership Can Be Confirmed Through Join-Request Updates; For Normal "
+                "Membership Checks, Configure The Channel ID/@Username And Make The Bot Admin."
+            )
+            + "</blockquote>"
+            + ("" if refreshed else "\n" + to_small_caps("(reopen the panel to confirm.)")),
+            parse_mode="HTML",
         )
 
     elif awaiting == "share_url":
@@ -8879,6 +8940,7 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(cb_adm_check_user, pattern="^adm_check_user$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_live")(cb_adm_live), pattern="^adm_live$"))
     app.add_handler(CallbackQueryHandler(cb_adm_quickban, pattern="^adm_quickban$"))
+    app.add_handler(CallbackQueryHandler(cb_adm_notify_route_cycle, pattern="^adm_notify_route_cycle$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_broadcast")(cb_adm_broadcast), pattern="^adm_broadcast$"))
     app.add_handler(CallbackQueryHandler(cb_adm_start_broadcast, pattern="^adm_start_broadcast$"))
     app.add_handler(CallbackQueryHandler(cb_adm_start_broadcast_confirm, pattern="^adm_start_broadcast_confirm$"))
