@@ -1176,6 +1176,8 @@ DEFAULT_DATA = {
         "premium_emoji_enabled": False,   # #17 — greeting uses a Premium custom emoji
         "premium_emoji_id": None,         # custom_emoji_id captured from the admin's sample message
         "premium_emoji_char": "🌟",       # fallback glyph shown to non-Premium users automatically
+        "activity_channel_id": None,      # #18 — dedicated channel for the Reel Delivered card
+        "activity_channel_enabled": False,
     },
     "broadcast_log": [],
     "activity_log": [],         # ring buffer: {time, user_id, name, username, chat_type, url}
@@ -2705,6 +2707,45 @@ async def cb_agree_terms(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Reel download
 # ----------------------------------------------------------------------------
 
+def build_reel_delivered_card(user_name: str, user_id, reel_number, original_reel_url: str) -> str:
+    """HTML card for the Activity Channel — exact structure/spacing per
+    spec: underlined heading, small-caps labels, a bare href with no
+    visible URL text and no InlineKeyboardButton, disable_web_page_preview
+    set by the caller. All dynamic values are HTML-escaped before
+    insertion, including the URL used in the href attribute."""
+    safe_name = html.escape(str(user_name or "—"))
+    safe_uid = html.escape(str(user_id))
+    safe_no = html.escape(str(reel_number))
+    safe_url = html.escape(original_reel_url or "", quote=True)
+    heading = "<u>" + to_title_small_caps("Reel Delivered") + "</u>"
+    return (
+        f"{heading}\n\n"
+        f"{to_title_small_caps('User')} : {safe_name}\n"
+        f"{to_title_small_caps('User Id')} : {safe_uid}\n\n"
+        f"{to_title_small_caps('Reel No')} : #{safe_no}\n"
+        f"{to_title_small_caps('Status')} : {to_title_small_caps('Delivered')}\n\n"
+        f'<a href="{safe_url}">{to_title_small_caps("Click Here To View Reel")}</a>'
+    )
+
+
+async def send_reel_delivered_card(context, user_name: str, user_id, reel_number, original_reel_url: str):
+    """Posts the card to the Activity Channel only, if configured/enabled —
+    kept separate from the general Logger Channel so that feed stays pure
+    (no errors/debug noise mixed into the delivery log)."""
+    s = BOT_DATA["settings"]
+    if not s.get("activity_channel_enabled") or not s.get("activity_channel_id"):
+        return
+    try:
+        await context.bot.send_message(
+            chat_id=s["activity_channel_id"],
+            text=build_reel_delivered_card(user_name, user_id, reel_number, original_reel_url),
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+        )
+    except Exception:
+        log.warning("Activity Channel reel-delivered post failed", exc_info=True)
+
+
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # BUGFIX — root cause of the recurring "'NoneType' object has no
     # attribute 'reply_to_message'" crash in the Activity Log: this handler
@@ -2744,7 +2785,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if problem_text:
                     tag = (
                         "<blockquote>"
-                        + "↩️ " + to_title_small_caps("Reply To Your Message") + "\n\n"
+                        + to_title_small_caps("Admin's Reply") + " ↩️" + "\n\n"
                         + f"«{html.escape(problem_text[:300])}»"
                         + "</blockquote>"
                     )
@@ -3137,6 +3178,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await log_event(
             context,
             f"📥 New download — user {user_id} (@{user_obj.username or 'no username'}) — {url}",
+        )
+        await send_reel_delivered_card(
+            context,
+            user_name=user_obj.full_name or (f"@{user_obj.username}" if user_obj.username else str(user_id)),
+            user_id=user_id,
+            reel_number=BOT_DATA["metrics"]["reels_downloaded"],
+            original_reel_url=url,
         )
 
         seconds = menu.get("auto_delete_seconds")
@@ -4366,15 +4414,14 @@ async def handle_user_awaiting_input(update: Update, context: ContextTypes.DEFAU
         save_data()
         await log_event(context, f"🆘 Support request #{rid} from {user_obj.id}")
 
-        # Short typing/loading animation before the confirmation — the exact
-        # same reveal helper used for the Maintenance Mode message.
-        # IMPORTANT — sent as a brand-new, untracked message (never routed
-        # through _replace_rkb_screen / the shared "rkb_latest" panel slot),
-        # so switching to any other bottom-keyboard screen afterwards can
-        # never delete this confirmation as a side effect.
-        confirm_msg = await _send_typewriter(
-            context, update.effective_chat.id, _build_support_user_confirmation(rid),
-            parse_mode="HTML", delay=0.45,
+        # v11 — typing animation removed here per request (it was showing
+        # raw <blockquote> markup mid-reveal on some clients since
+        # intermediate frames are sent unparsed by design). Confirmation
+        # now sends instantly, fully HTML-parsed, no animation.
+        confirm_msg = await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=_build_support_user_confirmation(rid),
+            parse_mode="HTML",
         )
         if confirm_msg:
             req["confirm_message_id"] = confirm_msg.message_id
@@ -6128,7 +6175,8 @@ async def _render_adm_settings(update: Update, context: ContextTypes.DEFAULT_TYP
              ),
              styled_button("👑 Owner/Developer Contact", callback_data="adm_owner_contact")],
             [styled_button("📋 Logger Channel", callback_data="adm_logger_channel"),
-             styled_button(f"📢 Force-Join: {s.get('force_join_channel') or 'OFF'}", callback_data="adm_force_join")],
+             styled_button("📣 Activity Channel", callback_data="adm_activity_channel")],
+            [styled_button(f"📢 Force-Join: {s.get('force_join_channel') or 'OFF'}", callback_data="adm_force_join")],
             [styled_button(
                 toggle_label("📄 Send As Document", s.get('send_as_document')),
                 callback_data="stgl:send_as_document:adm_settings",
@@ -6354,6 +6402,53 @@ async def cb_adm_logger_channel_set(update: Update, context: ContextTypes.DEFAUL
     await query.answer()
     remember_panel_message(context, query, "logger_channel")
     context.user_data["awaiting"] = "logger_channel_id"
+    await query.message.reply_text(
+        "Forward any message from the target channel here (bot must be an "
+        "admin there), or just type its numeric ID (looks like -100xxxxxxxxxx)."
+    )
+
+
+# ---- #18 — Activity Channel (dedicated home for the Reel Delivered card) ------
+
+def _build_adm_activity_channel_view():
+    s = BOT_DATA["settings"]
+    text = (
+        "📣 Activity Channel\n\n"
+        f"Channel ID: {s.get('activity_channel_id') or '(not set)'}\n"
+        f"Enabled: {'✅ ON' if s.get('activity_channel_enabled') else '❌ OFF'}\n\n"
+        "Every delivered reel posts a clean 'Reel Delivered' card here — "
+        "separate from the general Logger Channel, so this stays a pure "
+        "delivery feed with no error/debug noise mixed in."
+    )
+    kb = InlineKeyboardMarkup(
+        [
+            [styled_button("✏️ Set Channel", callback_data="adm_activity_channel_set")],
+            [styled_button(
+                toggle_label("🔀 Enabled", s.get('activity_channel_enabled')),
+                callback_data="stgl:activity_channel_enabled:adm_activity_channel",
+            )],
+            back_row(),
+        ]
+    )
+    return text, kb
+
+
+async def _render_adm_activity_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    text, kb = _build_adm_activity_channel_view()
+    await query.edit_message_text(text, reply_markup=kb)
+
+
+async def cb_adm_activity_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    await _render_adm_activity_channel(update, context)
+
+
+async def cb_adm_activity_channel_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    remember_panel_message(context, query, "activity_channel")
+    context.user_data["awaiting"] = "activity_channel_id"
     await query.message.reply_text(
         "Forward any message from the target channel here (bot must be an "
         "admin there), or just type its numeric ID (looks like -100xxxxxxxxxx)."
@@ -7383,6 +7478,33 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
         refreshed = await refresh_panel_after_save(context, "logger_channel", _build_adm_logger_channel_view)
         await update.message.reply_text(f"✅ Logger channel set to {chat_id} and enabled." + ("" if refreshed else "\n(reopen the logger panel to confirm)"))
 
+    elif awaiting == "activity_channel_id":
+        context.user_data.pop("awaiting", None)
+        chat_id = None
+        forward_origin = getattr(update.message, "forward_origin", None)
+        if forward_origin is not None:
+            chat_obj = getattr(forward_origin, "chat", None)
+            if chat_obj is not None:
+                chat_id = chat_obj.id
+        if chat_id is None:
+            legacy_fwd = getattr(update.message, "forward_from_chat", None)
+            if legacy_fwd is not None:
+                chat_id = legacy_fwd.id
+        if chat_id is None and text.lstrip("-").isdigit():
+            chat_id = int(text)
+        if chat_id is None:
+            await update.message.reply_text(
+                to_small_caps("channel not detected. either forward a message from the channel, ")
+                + to_small_caps("or type the numeric id (-100...).")
+            )
+            context.user_data["awaiting"] = "activity_channel_id"
+            return
+        BOT_DATA["settings"]["activity_channel_id"] = chat_id
+        BOT_DATA["settings"]["activity_channel_enabled"] = True
+        save_data()
+        refreshed = await refresh_panel_after_save(context, "activity_channel", _build_adm_activity_channel_view)
+        await update.message.reply_text(f"✅ Activity channel set to {chat_id} and enabled." + ("" if refreshed else "\n(reopen the activity panel to confirm)"))
+
     elif awaiting == "daily_limit":
         context.user_data.pop("awaiting", None)
         if not text.isdigit():
@@ -8360,6 +8482,7 @@ SCREEN_RENDERERS.update(
         "adm_danger": _render_adm_danger,
         "adm_owner_contact": _render_adm_owner_contact,
         "adm_logger_channel": _render_adm_logger_channel,
+        "adm_activity_channel": _render_adm_activity_channel,
         "adm_force_join": _render_adm_force_join,
         "adm_premium": _render_adm_premium,
         "adm_upi": _render_adm_upi,
@@ -8528,6 +8651,7 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(cb_adm_owner_contact_set, pattern="^adm_owner_contact_set$"))
     app.add_handler(CallbackQueryHandler(cb_adm_owner_contact_clear, pattern="^adm_owner_contact_clear$"))
     app.add_handler(CallbackQueryHandler(cb_adm_logger_channel_set, pattern="^adm_logger_channel_set$"))
+    app.add_handler(CallbackQueryHandler(cb_adm_activity_channel_set, pattern="^adm_activity_channel_set$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_force_join")(cb_adm_force_join), pattern="^adm_force_join$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_leaderboard")(cb_adm_leaderboard), pattern="^adm_leaderboard$"))
     app.add_handler(CallbackQueryHandler(cb_adm_post_leaderboard, pattern="^adm_post_leaderboard$"))
@@ -8641,6 +8765,7 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(cb_adm_restore_info, pattern="^adm_restore_info$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_owner_contact")(cb_adm_owner_contact), pattern="^adm_owner_contact$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_logger_channel")(cb_adm_logger_channel), pattern="^adm_logger_channel$"))
+    app.add_handler(CallbackQueryHandler(nav_tracked("adm_activity_channel")(cb_adm_activity_channel), pattern="^adm_activity_channel$"))
 
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_premium")(cb_adm_premium), pattern="^adm_premium$"))
     app.add_handler(CallbackQueryHandler(cb_adm_premium_users, pattern="^adm_premium_users$"))
