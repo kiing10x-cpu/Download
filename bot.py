@@ -574,14 +574,14 @@ STR = {
 # with what the reply-keyboard button actually sends back — to_small_caps()
 # is idempotent (re-applying it to already-styled text is a safe no-op), so
 # this can't get out of sync with styled_kb_button()'s own wrapping below.
-RKB_DOWNLOAD = to_small_caps("⬇️ Download reel")
-RKB_USAGE = to_small_caps("📊 Stats")
-RKB_GIFT = to_small_caps("🎁 Send a gift")
-RKB_LANGUAGE = to_small_caps("🌐 Language")
-RKB_DEVELOPER = to_small_caps("👨‍💻 Developer")
-RKB_HOWTO = to_small_caps("📘 How to use")
-RKB_SUPPORT = to_small_caps("🎧 Support")
-RKB_ADMINPANEL = to_small_caps("🛠 Admin Panel")
+RKB_DOWNLOAD = to_title_small_caps("Download Reel")
+RKB_USAGE = to_title_small_caps("My Usage")
+RKB_GIFT = to_title_small_caps("Send A Gift")
+RKB_LANGUAGE = to_title_small_caps("Language")
+RKB_DEVELOPER = to_title_small_caps("Developer")
+RKB_HOWTO = to_title_small_caps("How To Use")
+RKB_SUPPORT = to_title_small_caps("Support")
+RKB_ADMINPANEL = to_title_small_caps("Admin Panel")
 
 
 def main_reply_keyboard(is_admin_user: bool = False) -> ReplyKeyboardMarkup:
@@ -707,12 +707,12 @@ except TypeError:
 
 
 def premium_button_text(text: str) -> str:
-    """First alphabetic character uppercase, remaining letters in small caps."""
-    text = str(text)
-    for i, ch in enumerate(text):
-        if ch.isalpha():
-            return text[:i] + ch.upper() + to_small_caps(text[i + 1:])
-    return text
+    """First alphabetic character of EVERY word uppercase, rest of that
+    word in small caps — same house style as to_title_small_caps(), used
+    as the single place every button (inline + reply-keyboard) gets its
+    typography from. Idempotent, so pre-styled constants stay stable even
+    after passing through this a second time at render."""
+    return to_title_small_caps(str(text))
 
 
 def styled_button(text, callback_data=None, url=None, style=None):
@@ -818,7 +818,7 @@ DEFAULT_MENUS = {
         "text": (
             "<blockquote>"
             "Hᴇʟʟᴏ, {username}!\n\n"
-            "𝐖𝐄𝐋𝐂𝐎𝐌𝐄 ᴛᴏ {bot_name}\n\n"
+            "𝐖𝐄𝐋𝐂𝐎𝐌𝐄 ᴛᴏ {bot_link}\n\n"
             "Yᴏᴜʀ ᴘᴇʀsᴏɴᴀʟ Iɴsᴛᴀɢʀᴀᴍ Rᴇᴇʟ ᴀssɪsᴛᴀɴᴛ.\n\n"
             "𝐓𝐇𝐈𝐒 𝐁𝐎𝐓 𝐂𝐀𝐍\n\n"
             "➤ Dᴏᴡɴʟᴏᴀᴅ Iɴsᴛᴀɢʀᴀᴍ Rᴇᴇʟs\n\n"
@@ -872,6 +872,7 @@ DEFAULT_MENUS = {
     },
     "disclaimer": {
         "text": (
+            "<blockquote expandable>"
             "<b>Disclaimer &amp; Terms of Use</b>\n\n"
             "This bot is a general-purpose media-downloading tool provided for "
             "personal and fair-use purposes only. It does not host, store, own, "
@@ -892,6 +893,7 @@ DEFAULT_MENUS = {
             "the bot's servers.\n\n"
             "Tap <b>I Agree &amp; Continue</b> to confirm you have read and "
             "accepted these terms."
+            "</blockquote>"
         ),
         "parse_mode": "HTML",
         "image_file_id": None,
@@ -1900,7 +1902,7 @@ def remember_panel_message(context: ContextTypes.DEFAULT_TYPE, query, screen_key
     }
 
 
-async def refresh_panel_after_save(context: ContextTypes.DEFAULT_TYPE, screen_key: str, build_fn) -> bool:
+async def refresh_panel_after_save(context: ContextTypes.DEFAULT_TYPE, screen_key: str, build_fn, parse_mode=None) -> bool:
     """Edits the original admin-panel screen (remembered via
     remember_panel_message) in place to reflect a just-saved value.
     Returns True if it succeeded, so callers can still send a plain
@@ -1912,7 +1914,7 @@ async def refresh_panel_after_save(context: ContextTypes.DEFAULT_TYPE, screen_ke
     text, kb = build_fn()
     try:
         await context.bot.edit_message_text(
-            chat_id=info["chat_id"], message_id=info["message_id"], text=text, reply_markup=kb,
+            chat_id=info["chat_id"], message_id=info["message_id"], text=text, reply_markup=kb, parse_mode=parse_mode,
         )
         return True
     except Exception:
@@ -3492,7 +3494,7 @@ async def show_usage_screen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     remaining = "Unlimited" if assigned_premium else str(max(0, limit - used))
 
     lines = [
-        "📊 Sᴛᴀᴛs", "",
+        to_title_small_caps("My Usage"), "",
         f"Nᴀᴍᴇ : {html.escape(user.full_name)}",
         f"Uꜱᴇʀɴᴀᴍᴇ : {html.escape(username)}",
         f"Uꜱᴇʀ Iᴅ : {user.id}",
@@ -3585,17 +3587,35 @@ async def show_gift_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     support the bot', any amount, no plan attached.
     v5 — the top-donor leaderboard now lives right inside this screen
     (not a separate top-level menu button), and only when the admin has
-    turned it on in the Admin Panel."""
+    turned it on in the Admin Panel.
+    v6 — redesigned copy/buttons for a cleaner, more premium feel. Amount
+    selection logic (Stars fixed buttons, UPI free-text entry) is left
+    exactly as it already works — only the wording/labels changed here."""
     await _clear_ephemeral(context, update.effective_chat.id)
-    kb_rows = [[styled_button("⭐ Send Stars", callback_data="gift_stars", style="success")]]
+    kb_rows = [[styled_button("💎 Support With Stars", callback_data="gift_stars", style="success")]]
     if BOT_DATA["settings"].get("upi_id"):
-        kb_rows.append([styled_button("💳 Pay via UPI", callback_data="gift_upi", style="primary")])
-    text = "🎁 " + to_small_caps("send a gift — pick a method:")
+        kb_rows.append([styled_button("💳 Support Via UPI", callback_data="gift_upi", style="primary")])
+
+    lines = [
+        to_title_small_caps("💎 Support Our Bot"), "",
+        to_title_small_caps("This support is completely optional."),
+        to_title_small_caps("We never force anyone to send a payment."), "",
+        to_title_small_caps(
+            "If you enjoy using the bot and want to support it, you can contribute any amount you prefer."
+        ), "",
+        to_title_small_caps(
+            "Your support helps us keep working on the bot, improving existing features, "
+            "adding new functions and bringing more useful upgrades."
+        ), "",
+        to_title_small_caps("We sincerely appreciate every bit of support.") + " ❤️",
+    ]
+    text = "<blockquote>" + "\n".join(lines) + "</blockquote>"
+
     if BOT_DATA["settings"].get("leaderboard_enabled"):
         text += "\n\n" + build_leaderboard_text(limit=3)
         kb_rows.append([styled_button("🏆 Full Leaderboard", callback_data="view_leaderboard")])
     await _replace_rkb_screen(
-        context, update.effective_chat.id, "gift", text, reply_markup=InlineKeyboardMarkup(kb_rows),
+        context, update.effective_chat.id, "gift", text, reply_markup=InlineKeyboardMarkup(kb_rows), parse_mode="HTML",
     )
 
 
@@ -3855,7 +3875,7 @@ async def start_upi_order(update: Update, context: ContextTypes.DEFAULT_TYPE, am
     )
     if qr_photo is None:
         qr_photo = f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={quote(upi_uri)}"
-    kb = InlineKeyboardMarkup([[styled_button("✅ I've Paid", callback_data=f"gift_upi_paid:{oid}", style="success")]])
+    kb = InlineKeyboardMarkup([[styled_button("✅ Done", callback_data=f"gift_upi_paid:{oid}", style="success")]])
     msg = await context.bot.send_photo(
         chat_id=update.effective_chat.id, photo=qr_photo,
         caption=f"💳 ₹{amount} — {to_small_caps('scan to pay via upi')}\n⏳ expires in 10:00",
@@ -3910,7 +3930,7 @@ async def upi_countdown_job(context: ContextTypes.DEFAULT_TYPE):
         await context.bot.edit_message_caption(
             chat_id=chat_id, message_id=message_id,
             caption=f"💳 ₹{order['amount']} — {to_small_caps('scan to pay via upi')}\n⏳ expires in {mm:02d}:{ss:02d}",
-            reply_markup=InlineKeyboardMarkup([[styled_button("✅ I've Paid", callback_data=f"gift_upi_paid:{oid}", style="success")]]),
+            reply_markup=InlineKeyboardMarkup([[styled_button("✅ Done", callback_data=f"gift_upi_paid:{oid}", style="success")]]),
         )
     except Exception:
         pass
@@ -4286,6 +4306,9 @@ async def cb_adm_block_domain(update: Update, context: ContextTypes.DEFAULT_TYPE
 # content menu, since these are actions, not editable copy)
 # ----------------------------------------------------------------------------
 
+ADMIN_PANEL_TITLE = to_deco(to_title_small_caps("Control Center"))
+
+
 def admin_panel_keyboard():
     # v6 — 2-per-row grid layout: every top-level Admin Panel entry is now
     # arranged two buttons per row instead of one, so the whole panel fits
@@ -4297,37 +4320,40 @@ def admin_panel_keyboard():
     # premium plans, so it belongs with them, not as its own top-level
     # button) and 🕵️ Live User Feed is paired with 👥 Users & Groups since
     # both are user-monitoring tools — nothing sits alone on its own row.
+    # v7 — emoji stripped from every button label except ⚙️ Settings, per
+    # request; the clean text still gets the same premium typography via
+    # styled_button().
     return InlineKeyboardMarkup(
         [
-            [styled_button("💎 Premium", callback_data="adm_premium"),
-             styled_button("🏆 Leaderboard", callback_data="adm_leaderboard")],
-            [styled_button("📤 Share Settings", callback_data="adm_share"),
-             styled_button("📢 Broadcast", callback_data="adm_broadcast")],
-            [styled_button("👨‍💻 Developer Settings", callback_data="adm_devsettings"),
-             styled_button("🎧 Support Settings", callback_data="adm_support_settings")],
-            [styled_button("🎫 Tickets", callback_data="adm_tickets"),
-             styled_button("📊 Bot Stats", callback_data="adm_stats")],
-            [styled_button("👥 Users & Groups", callback_data="adm_users"),
-             styled_button("🕵️ Live User Feed", callback_data="adm_live")],
-            [styled_button("🎨 Menu & UI", callback_data="adm_menu_ui"),
-             styled_button("🧪 Test Commands", callback_data="adm_cmdtest")],
+            [styled_button("Premium", callback_data="adm_premium"),
+             styled_button("Leaderboard", callback_data="adm_leaderboard")],
+            [styled_button("Share Settings", callback_data="adm_share"),
+             styled_button("Broadcast", callback_data="adm_broadcast")],
+            [styled_button("Developer Settings", callback_data="adm_devsettings"),
+             styled_button("Support Settings", callback_data="adm_support_settings")],
+            [styled_button("Tickets", callback_data="adm_tickets"),
+             styled_button("Bot Stats", callback_data="adm_stats")],
+            [styled_button("Users & Groups", callback_data="adm_users"),
+             styled_button("Live User Feed", callback_data="adm_live")],
+            [styled_button("Menu & UI", callback_data="adm_menu_ui"),
+             styled_button("Test Commands", callback_data="adm_cmdtest")],
             [styled_button("⚙️ Settings", callback_data="adm_settings"),
-             styled_button("🛑 Danger Zone", callback_data="adm_danger")],
-            [styled_button("📋 Activity Log", callback_data="adm_activity"),
-             styled_button("🧪 Self-Test", callback_data="adm_selftest")],
-            [styled_button("🧩 Feature Plugins", callback_data="adm_plugins")],
+             styled_button("Danger Zone", callback_data="adm_danger")],
+            [styled_button("Activity Log", callback_data="adm_activity"),
+             styled_button("Self-Test", callback_data="adm_selftest")],
+            [styled_button("Feature Plugins", callback_data="adm_plugins")],
         ]
     )
 
 
-def back_row(cb="adm_back", label="🔙 Back"):
+def back_row(cb="adm_back", label="Back"):
     return [styled_button(label, callback_data=cb)]
 
 
 def home_row():
     """#3 — extra row shown only on top-level category screens, alongside
     the regular (stack-aware) 🔙 Back row."""
-    return [styled_button("🏠 Admin Home", callback_data="adm_home")]
+    return [styled_button("Admin Home", callback_data="adm_home")]
 
 
 async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4335,13 +4361,13 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await _clear_ephemeral(context, update.effective_chat.id)
     context.user_data["adm_nav_stack"] = ["adm_home"]
-    sent = await update.message.reply_text("🛠️ Admin Panel", reply_markup=admin_panel_keyboard())
+    sent = await update.message.reply_text(ADMIN_PANEL_TITLE, reply_markup=admin_panel_keyboard())
     await track_and_refresh_panel(context, update.effective_chat.id, "admin", sent)
     await delete_incoming(update)
 
 
 async def _render_adm_home(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.edit_message_text("🛠️ Admin Panel", reply_markup=admin_panel_keyboard())
+    await update.callback_query.edit_message_text(ADMIN_PANEL_TITLE, reply_markup=admin_panel_keyboard())
 
 
 async def cb_adm_home(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4615,7 +4641,7 @@ async def cb_run_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         elif key == "admin":
             await query.answer("✅ " + to_small_caps("running /admin..."))
-            await send("🛠️ Admin Panel", reply_markup=admin_panel_keyboard())
+            await send(ADMIN_PANEL_TITLE, reply_markup=admin_panel_keyboard())
 
         elif key == "ping":
             await query.answer()
@@ -5435,17 +5461,27 @@ async def _render_adm_menu_ui(update: Update, context: ContextTypes.DEFAULT_TYPE
     query = update.callback_query
     # v6 — 2-per-row grid for the menu list too, so it stays compact even
     # as more menus get added.
+    # v8 — each entry now shows 🖼️✅/🖼️❌ so the admin can tell at a glance,
+    # without opening every menu, which ones already have an image set.
     menu_ids = list(BOT_DATA["menus"])
+
+    def _label(mid):
+        has_image = bool(BOT_DATA["menus"][mid].get("image_file_id"))
+        badge = "🖼️✅" if has_image else "🖼️❌"
+        return f"{mid} {badge}"
+
     rows = []
     for i in range(0, len(menu_ids), 2):
         pair = menu_ids[i:i + 2]
-        rows.append([styled_button(f"📝 {mid}", callback_data=f"adm_menu_edit:{mid}") for mid in pair])
+        rows.append([styled_button(_label(mid), callback_data=f"adm_menu_edit:{mid}") for mid in pair])
     rows.append(back_row())
     rows.append(home_row())
-    await query.edit_message_text(
-        to_small_caps("🎨 menu & ui") + "\n" + to_small_caps("select a menu below to edit its content"),
-        reply_markup=InlineKeyboardMarkup(rows),
+    text = (
+        to_deco(to_title_small_caps("Menu & UI")) + "\n\n"
+        + to_small_caps("tap a menu below to edit its text, image or buttons.") + "\n"
+        + to_small_caps("🖼️✅ = image already set  •  🖼️❌ = no image set")
     )
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(rows))
 
 
 async def cb_adm_menu_ui(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -5453,31 +5489,54 @@ async def cb_adm_menu_ui(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _render_adm_menu_ui(update, context)
 
 
-async def cb_adm_menu_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    menu_id = query.data.split(":", 1)[1]
+def _build_menu_edit_screen(menu_id: str):
+    """Single source of truth for the 'editing menu X' screen — used both
+    when first opening it and when refreshing it in place after a save
+    (e.g. right after an image upload), so the two never drift apart."""
     menu = BOT_DATA["menus"][menu_id]
     parse_mode_label = menu.get("parse_mode") or "OFF (raw text)"
     override = menu.get("auto_delete_seconds")
     override_label = f"{override}s" if override is not None else "uses global"
-    kb = InlineKeyboardMarkup(
-        [
-            [styled_button("✏️ Edit Text", callback_data=f"adm_menu_txt:{menu_id}"),
-             styled_button("🅰️ Style Text", callback_data=f"adm_menu_style:{menu_id}")],
-            [styled_button(f"🔤 Parse Mode: {parse_mode_label}", callback_data=f"adm_menu_parsemode:{menu_id}"),
-             styled_button("🔘 Manage Buttons", callback_data=f"adm_menu_btns:{menu_id}")],
-            [styled_button("🖼️ Set Image", callback_data=f"adm_menu_img:{menu_id}"),
-             styled_button("🗑️ Remove Image", callback_data=f"adm_menu_rmimg:{menu_id}")],
-            [styled_button(f"⏱ Auto-Delete: {override_label}", callback_data=f"adm_menu_autodel:{menu_id}"),
-             styled_button("🌐 Translations", callback_data=f"adm_menu_trans:{menu_id}")],
-            [styled_button("🔙 Back", callback_data="adm_menu_ui")],
-        ]
+    has_image = bool(menu.get("image_file_id"))
+    image_status = "✅ Set" if has_image else "❌ Not set"
+    image_btn_label = ("🖼️ Change Image" if has_image else "🖼️ Set Image")
+
+    rows = [
+        [styled_button("✏️ Edit Text", callback_data=f"adm_menu_txt:{menu_id}"),
+         styled_button("🅰️ Style Text", callback_data=f"adm_menu_style:{menu_id}")],
+        [styled_button(f"🔤 Parse Mode: {parse_mode_label}", callback_data=f"adm_menu_parsemode:{menu_id}"),
+         styled_button("🔘 Manage Buttons", callback_data=f"adm_menu_btns:{menu_id}")],
+    ]
+    if has_image:
+        rows.append([
+            styled_button(image_btn_label, callback_data=f"adm_menu_img:{menu_id}"),
+            styled_button("🗑️ Remove Image", callback_data=f"adm_menu_rmimg:{menu_id}"),
+        ])
+    else:
+        rows.append([styled_button(image_btn_label, callback_data=f"adm_menu_img:{menu_id}")])
+    rows.append([
+        styled_button(f"⏱ Auto-Delete: {override_label}", callback_data=f"adm_menu_autodel:{menu_id}"),
+        styled_button("🌐 Translations", callback_data=f"adm_menu_trans:{menu_id}"),
+    ])
+    rows.append([styled_button("🔙 Back", callback_data="adm_menu_ui")])
+
+    text = (
+        to_deco(to_title_small_caps("Editing Menu")) + "\n\n"
+        + f"<b>ID:</b> <code>{html.escape(menu_id)}</code>\n"
+        + f"<b>Image:</b> {image_status}\n"
+        + f"<b>Parse Mode:</b> {html.escape(parse_mode_label)}\n"
+        + f"<b>Auto-Delete:</b> {html.escape(override_label)}\n\n"
+        + to_small_caps("choose what you'd like to change below")
     )
-    await query.edit_message_text(
-        to_small_caps("📝 editing menu") + f": {menu_id}\n" + to_small_caps("choose what you'd like to change"),
-        reply_markup=kb,
-    )
+    return text, InlineKeyboardMarkup(rows)
+
+
+async def cb_adm_menu_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    menu_id = query.data.split(":", 1)[1]
+    text, kb = _build_menu_edit_screen(menu_id)
+    await query.edit_message_text(text, reply_markup=kb, parse_mode="HTML")
 
 
 async def cb_adm_menu_trans(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -5545,6 +5604,10 @@ async def cb_adm_menu_img(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     menu_id = query.data.split(":", 1)[1]
     context.user_data["awaiting"] = f"menu_image:{menu_id}"
+    # Remember this exact "editing menu" screen so that once the photo is
+    # received, we can flip its 🖼️ status straight to ✅ Set in place,
+    # instead of leaving the admin to guess whether it actually saved.
+    remember_panel_message(context, query, f"menu_edit:{menu_id}")
     await query.message.reply_text(to_small_caps("send a photo (image only, not a video)."))
 
 
@@ -7169,7 +7232,11 @@ async def handle_admin_media(update: Update, context: ContextTypes.DEFAULT_TYPE)
             return
         menu["image_file_id"] = file_id
         save_data()
-        await update.message.reply_text(to_small_caps(f"✅ '{menu_id}' image updated."))
+        refreshed = await refresh_panel_after_save(
+            context, f"menu_edit:{menu_id}", lambda: _build_menu_edit_screen(menu_id), parse_mode="HTML"
+        )
+        if not refreshed:
+            await update.message.reply_text(to_small_caps(f"✅ '{menu_id}' image updated."))
         return
 
     if awaiting == "broadcast_content":
