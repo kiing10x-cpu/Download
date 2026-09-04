@@ -1566,7 +1566,7 @@ async def is_force_join_ok(context: ContextTypes.DEFAULT_TYPE, user_id: int) -> 
 async def resolve_force_join_link(context: ContextTypes.DEFAULT_TYPE, channel) -> str | None:
     if not channel:
         return None
-    ch = str(channel)
+    ch = normalize_channel_id(channel)
     if ch.startswith("http"):
         return ch
     if ch.lstrip("-").isdigit():
@@ -1578,7 +1578,14 @@ async def resolve_force_join_link(context: ContextTypes.DEFAULT_TYPE, channel) -
                 return chat.invite_link
             return await context.bot.export_chat_invite_link(int(ch))
         except Exception as e:
+            # This is the #1 real cause of "no usable join link found" on the
+            # user-facing prompt: either the ID is still wrong (not a real
+            # channel the bot can see), or the bot IS in the channel but
+            # isn't an admin there (export_chat_invite_link needs admin
+            # rights). Logged so it shows up in Activity Log instead of
+            # silently failing with zero diagnosis.
             log.warning("Force-join: could not resolve invite link for %s: %s", ch, e)
+            log_error("force_join", f"could not resolve a join link for channel {ch}: {e}")
             return None
     return f"https://t.me/{ch.lstrip('@')}"
 
@@ -3936,7 +3943,11 @@ async def show_usage_screen(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines += ["", f"💎 Pʀᴇᴍɪᴜᴍ Sᴛᴀᴛᴜꜱ : {'Active' if active else 'Expired'}", f"Eхᴘɪʀʏ : {html.escape(expiry_text)}"]
 
     text = "<blockquote>" + "\n".join(lines) + "</blockquote>"
-    await _replace_rkb_screen(context, update.effective_chat.id, "usage", text, reply_markup=None, parse_mode="HTML")
+    kb = None
+    if BOT_DATA["settings"].get("share_enabled", True):
+        share_url = await resolve_share_url(context)
+        kb = InlineKeyboardMarkup([[styled_button("📤 Share", url=share_url)]])
+    await _replace_rkb_screen(context, update.effective_chat.id, "usage", text, reply_markup=kb, parse_mode="HTML")
 
 
 # ----------------------------------------------------------------------------
@@ -4794,6 +4805,8 @@ async def _render_adm_home(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cb_adm_home(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    await _clear_ephemeral(context, update.effective_chat.id)
+    context.user_data.pop("awaiting", None)
     context.user_data["adm_nav_stack"] = ["adm_home"]
     await _render_adm_home(update, context)
 
@@ -5311,6 +5324,11 @@ def nav_tracked(screen_key):
 async def cb_adm_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    # Sweep away any leftover "send a value..." prompt / "✅ saved" confirmation
+    # messages from whatever setup flow the admin is leaving — those should
+    # not keep sitting in the chat once the admin navigates away.
+    await _clear_ephemeral(context, update.effective_chat.id)
+    context.user_data.pop("awaiting", None)
     stack = context.user_data.setdefault("adm_nav_stack", ["adm_home"])
     if len(stack) > 1:
         stack.pop()  # drop the screen we're currently on
@@ -6352,8 +6370,7 @@ async def _render_adm_settings(update: Update, context: ContextTypes.DEFAULT_TYP
     # deep submenus stay just as easy to scan and control.
     kb = InlineKeyboardMarkup(
         [
-            [styled_button("🖼 Set Welcome Image", callback_data="adm_menu_img:start"),
-             styled_button("🔒 Maintenance", callback_data="adm_maintenance")],
+            [styled_button("🔒 Maintenance", callback_data="adm_maintenance")],
             [styled_button(f"⏱ Global Auto-Delete: {s.get('global_auto_delete_seconds', 0)}s", callback_data="adm_set_autodelete"),
              styled_button("💬 Auto-Replies", callback_data="adm_autoreply_list")],
             [styled_button("👤 Manage Admins", callback_data="adm_manage_admins"),
@@ -6688,7 +6705,7 @@ async def cb_adm_force_join_set(update: Update, context: ContextTypes.DEFAULT_TY
     await query.answer()
     remember_panel_message(context, query, "force_join")
     context.user_data["awaiting"] = "force_join_channel"
-    await query.message.reply_text(
+    msg = await query.message.reply_text(
         "<blockquote>"
         + to_title_small_caps("Send A Public") + " @ChannelUsername, "
         + to_title_small_caps("Numeric Channel") + " ID (-100xxxxxxxxxx), "
@@ -6699,6 +6716,7 @@ async def cb_adm_force_join_set(update: Update, context: ContextTypes.DEFAULT_TY
         + "</blockquote>",
         parse_mode="HTML",
     )
+    _track_ephemeral(context, msg)
 
 
 async def cb_adm_force_join_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -7632,7 +7650,7 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
         BOT_DATA["settings"]["force_join_channel"] = targets[0].get("chat_id") if targets else None
         save_data()
         refreshed = await refresh_panel_after_save(context, "force_join", lambda: _build_adm_force_join_view())
-        await update.message.reply_text(
+        confirm_msg = await update.message.reply_text(
             "✅ " + to_title_small_caps(f"Added Force-Join Target: {raw}") + "\n\n"
             + "<blockquote>"
             + to_title_small_caps(
@@ -7644,6 +7662,7 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
             + ("" if refreshed else "\n" + to_small_caps("(reopen the panel to confirm.)")),
             parse_mode="HTML",
         )
+        _track_ephemeral(context, confirm_msg)
 
     elif awaiting == "share_url":
         context.user_data.pop("awaiting", None)
