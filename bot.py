@@ -989,14 +989,14 @@ DEFAULT_MENUS = {
             "without prior notice. Continued use of this bot after any "
             "changes to these terms constitutes acceptance of the updated "
             "terms.\n\n"
-            "Tap <b>I Agree &amp; Continue</b> to confirm you have read and "
+            "Tap <b>Agree &amp; Continue</b> to confirm you have read and "
             "accepted these terms."
             "</blockquote>"
         ),
         "parse_mode": "HTML",
         "image_file_id": None,
         "buttons": [
-            {"label": "✅ I Agree & Continue", "type": "callback", "value": "agree_terms", "row": 1, "style": "success"}
+            {"label": "✅ Agree & Continue", "type": "callback", "value": "agree_terms", "row": 1, "style": "success"}
         ],
         "auto_delete_seconds": None,
         "updated_by": None,
@@ -1180,6 +1180,58 @@ DEFAULT_MENUS = {
     },
 }
 
+# ----------------------------------------------------------------------------
+# language_pack.json — ships next to bot.py with ready-made translations
+# (10 languages) for the language picker plus real per-menu text for start,
+# language, and (a shorter) disclaimer, howto, gift, support, developer,
+# download. Loaded once at import time and merged into DEFAULT_MENUS so
+# fresh installs have working translations out of the box — and again at
+# runtime in load_data() so already-deployed bots pick it up too, without
+# ever overwriting a translation an admin has since customized by hand.
+# Missing/corrupt file is never fatal — the bot just falls back to the
+# untranslated (English) text, same as before this file existed.
+# ----------------------------------------------------------------------------
+_LANGUAGE_PACK_CACHE = None
+
+
+def _load_language_pack() -> dict:
+    global _LANGUAGE_PACK_CACHE
+    if _LANGUAGE_PACK_CACHE is not None:
+        return _LANGUAGE_PACK_CACHE
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "language_pack.json")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            pack = json.load(f)
+        if not isinstance(pack, dict):
+            raise ValueError("language_pack.json is not a JSON object")
+        _LANGUAGE_PACK_CACHE = pack
+    except FileNotFoundError:
+        _LANGUAGE_PACK_CACHE = {}
+    except Exception as e:
+        log.warning("language_pack.json present but couldn't be read/parsed (%s) — continuing without it.", e)
+        _LANGUAGE_PACK_CACHE = {}
+    return _LANGUAGE_PACK_CACHE
+
+
+def _apply_language_pack_to_menus(menus: dict) -> None:
+    """Fills in menu[lang] translations that are missing, for every menu the
+    pack covers. Never overwrites a translation that's already there (so an
+    admin's own edit, or a previous run's merge, always wins)."""
+    pack = _load_language_pack()
+    for menu_id, per_lang in pack.get("menus", {}).items():
+        menu = menus.get(menu_id)
+        if not menu or not isinstance(per_lang, dict):
+            continue
+        translations = menu.setdefault("translations", {})
+        for lang, content in per_lang.items():
+            if lang not in translations and isinstance(content, dict) and content.get("text"):
+                translations[lang] = {"text": content["text"]}
+
+
+# Populate DEFAULT_MENUS itself at import time, so brand-new installs (no
+# saved bot_data.json / Mongo doc yet) start with working translations.
+_apply_language_pack_to_menus(DEFAULT_MENUS)
+
 DEFAULT_DATA = {
     "users": {},
     "groups": {},
@@ -1201,7 +1253,11 @@ DEFAULT_DATA = {
         "rate_limit_max": 20,
         "rate_limit_window_seconds": 60,
         "inactive_reengage_days": 0,
-        "languages": [],  # e.g. ["en", "hi"] — admin-added via Settings > Languages
+        # Pre-populated from language_pack.json (minus "en", which is
+        # always shown anyway) so the language picker has real options out
+        # of the box. Admin can still add/remove languages in Settings >
+        # Languages as before — this is just the starting default.
+        "languages": [c for c in _load_language_pack().get("languages", {}) if c != "en"],
         "lock_all_content": False,  # #4 — master forwarding/sharing lock
         "logger_channel_id": None,  # #14 — dedicated logger channel
         "logger_enabled": False,
@@ -1363,6 +1419,29 @@ def _apply_seed_files_if_present() -> bool:
     return False
 
 
+def _apply_language_pack_migration():
+    """Runs once after BOT_DATA is loaded from any source (fresh, local
+    JSON, MongoDB, or a restored/seeded backup). Backfills missing menu
+    translations and, if the owner has never touched Settings > Languages
+    (still the empty default), pre-fills it from language_pack.json so the
+    picker isn't empty. Purely additive — never overwrites an existing
+    admin-set value — so it's always safe to re-run on every startup."""
+    changed = False
+    menus = BOT_DATA.get("menus", {})
+    before = json.dumps(menus, sort_keys=True)
+    _apply_language_pack_to_menus(menus)
+    if json.dumps(menus, sort_keys=True) != before:
+        changed = True
+    settings = BOT_DATA.setdefault("settings", {})
+    if not settings.get("languages"):
+        pack_langs = [c for c in _load_language_pack().get("languages", {}) if c != "en"]
+        if pack_langs:
+            settings["languages"] = pack_langs
+            changed = True
+    if changed:
+        save_data()
+
+
 def load_data():
     global BOT_DATA
     col = get_mongo_collection()
@@ -1384,6 +1463,7 @@ def load_data():
                 BOT_DATA = json.loads(json.dumps(DEFAULT_DATA))
                 _apply_seed_files_if_present()
                 col.update_one({"_id": "bot_data"}, {"$set": BOT_DATA}, upsert=True)
+        _apply_language_pack_migration()
         return
 
     if os.path.exists(DATA_FILE):
@@ -1394,6 +1474,7 @@ def load_data():
         BOT_DATA = json.loads(json.dumps(DEFAULT_DATA))
         _apply_seed_files_if_present()
         save_data()
+    _apply_language_pack_migration()
 
 
 def save_data():
@@ -2434,21 +2515,30 @@ async def _clear_ephemeral(context: ContextTypes.DEFAULT_TYPE, chat_id: int = No
 
 
 async def require_disclaimer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """PDF #1 — gate behind the disclaimer/agree flow only (no force-join
-    check). Kept as a standalone building block for require_gate() below;
-    most call sites should use require_gate() instead, which also enforces
-    force-join. Returns True if the user may proceed; otherwise shows the
-    disclaimer and returns False. Admins are exempt."""
+    """PDF #1 — gate behind LANGUAGE SELECTION FIRST, then the
+    disclaimer/agree flow (no force-join check here). Kept as a standalone
+    building block for require_gate() below; most call sites should use
+    require_gate() instead, which also enforces force-join. Language is
+    asked before the disclaimer so the disclaimer that follows can be shown
+    immediately in the language the user just picked. Returns True if the
+    user may proceed; otherwise shows whichever screen is still pending and
+    returns False. Admins are exempt."""
     user_obj = update.effective_user
     if not user_obj:
         return True
     if is_admin(user_obj.id):
         return True
     uid = str(user_obj.id)
-    if BOT_DATA["users"].get(uid, {}).get("accepted_terms"):
-        return True
-    await render_menu(context, update.effective_chat.id, "disclaimer")
-    return False
+    user = BOT_DATA["users"].get(uid, {})
+    if not user.get("lang_prompted"):
+        user["lang_prompted"] = True
+        save_data()
+        await _send_language_picker(context, update.effective_chat.id)
+        return False
+    if not user.get("accepted_terms"):
+        await render_menu(context, update.effective_chat.id, "disclaimer", lang=user.get("lang"))
+        return False
+    return True
 
 
 async def show_force_join_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2654,9 +2744,11 @@ async def cb_global_button_gate(update: Update, context: ContextTypes.DEFAULT_TY
     instead of each of 100+ individual callback handlers needing its own
     check (which is exactly how it stayed half-enforced before: some
     screens checked, most didn't). is_admin() inside require_gate() exempts
-    admins as usual. The two callbacks that ARE the gate itself
-    (agree_terms, check_force_join) must fall through untouched, or the
-    user would have no way to ever pass the gate."""
+    admins as usual. The callbacks that ARE the gate itself — agree_terms,
+    check_force_join, and setlang:* (language is now picked BEFORE the
+    disclaimer, so it must work even though the user hasn't agreed to
+    terms yet) — must fall through untouched, or the user would have no
+    way to ever pass the gate."""
     query = update.callback_query
     if not query:
         return
@@ -2673,7 +2765,7 @@ async def cb_global_button_gate(update: Update, context: ContextTypes.DEFAULT_TY
         except Exception:
             pass
         raise ApplicationHandlerStop
-    if data in ("agree_terms", "check_force_join"):
+    if data in ("agree_terms", "check_force_join") or data.startswith("setlang:"):
         return
     if not await require_gate(update, context):
         try:
@@ -2688,6 +2780,29 @@ LANG_NAMES = {
     "fr": "🇫🇷 Français", "ar": "🇸🇦 العربية", "pt": "🇵🇹 Português",
     "id": "🇮🇩 Indonesia", "bn": "🇧🇩 বাংলা", "ur": "🇵🇰 اردو", "ru": "🇷🇺 Русский",
 }
+
+
+async def _send_language_picker(context: ContextTypes.DEFAULT_TYPE, chat_id: int, existing_message=None):
+    """Shared 'choose your language' screen — shown at the very start of
+    onboarding, before the disclaimer. Edits existing_message in place when
+    given (so a button tap replaces the same message), otherwise sends a
+    fresh one (e.g. the very first prompt during /start)."""
+    text = (
+        "🌐 <b>" + to_small_caps("Language Selection") + "</b>\n\n"
+        "<blockquote>"
+        "<u>➤ " + to_small_caps("Welcome!") + "</u>\n\n"
+        + to_small_caps("Please select your preferred language to continue.") + "\n\n"
+        "<u>➤ " + to_small_caps("Select Language") + "</u>\n"
+        + to_small_caps("Choose one of the languages below.") +
+        "</blockquote>"
+    )
+    kb = build_language_keyboard()
+    if existing_message is not None:
+        try:
+            return await existing_message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+        except Exception:
+            pass
+    return await context.bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=kb)
 
 
 def build_language_keyboard() -> InlineKeyboardMarkup:
@@ -2710,33 +2825,18 @@ def build_language_keyboard() -> InlineKeyboardMarkup:
 
 
 async def show_post_onboarding(context: ContextTypes.DEFAULT_TYPE, chat_id: int, uid: str):
-    """#1 — one-time language picker, shown before the welcome menu only the
-    very first time a user reaches here (and only if the admin has actually
-    configured extra languages — otherwise there's nothing to pick and we
-    just fall through to the normal start menu). Shared by /start and by the
-    disclaimer's 'I Agree & Continue' button so both paths land the user in
-    the same place."""
+    """Lands the user on the start menu once both onboarding gates
+    (language selection, then disclaimer — see require_disclaimer()) are
+    already satisfied. The language-prompt branch that used to live here
+    was moved earlier in the flow, ahead of the disclaimer, so language
+    selection always happens first. This is kept as a safety fallback: if
+    some caller ever reaches here with lang_prompted still unset, it shows
+    the picker instead of skipping straight to start."""
     user = BOT_DATA["users"].get(uid, {})
-    # Every private user must choose a language before the main menu is shown.
-    # The flag prevents the selector from interrupting normal navigation after
-    # the first successful selection, while /start can still restore it if the
-    # stored preference is missing.
     if not user.get("lang_prompted"):
         user["lang_prompted"] = True
         save_data()
-        text = (
-            "🌐 <b>" + to_small_caps("Language Selection") + "</b>\n\n"
-            "<blockquote>"
-            "<u>➤ " + to_small_caps("Welcome!") + "</u>\n\n"
-            + to_small_caps("Please select your preferred language to continue.") + "\n\n"
-            "<u>➤ " + to_small_caps("Select Language") + "</u>\n"
-            + to_small_caps("Choose one of the languages below.") +
-            "</blockquote>"
-        )
-        sent = await context.bot.send_message(
-            chat_id, text, parse_mode="HTML", reply_markup=build_language_keyboard()
-        )
-        return sent
+        return await _send_language_picker(context, chat_id)
     sent = await render_menu(context, chat_id, "start")
     if not BOT_DATA["users"].get(uid, {}).get("reply_kb_sent"):
         try:
@@ -2886,15 +2986,12 @@ async def cmd_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await require_gate(update, context):
         await delete_incoming(update)
         return
-    langs = BOT_DATA["settings"].get("languages", [])
     menu = BOT_DATA["menus"].get("language", {})
     banner = menu.get("text") or DEFAULT_MENUS["language"]["text"]
-    if not langs:
-        await _replace_rkb_screen(
-            context, update.effective_chat.id, "language",
-            to_small_caps("no extra languages are configured yet."),
-        )
-        return
+    # build_language_keyboard() always includes at least English + Default
+    # (Hinglish), whether or not the owner has added any extra languages in
+    # Settings > Languages — so the picker should always be shown, never
+    # blocked behind an "extra languages" check.
     await _replace_rkb_screen(
         context, update.effective_chat.id, "language",
         banner, reply_markup=build_language_keyboard(), parse_mode=menu.get("parse_mode"),
@@ -2906,12 +3003,21 @@ async def cb_setlang(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     code = query.data.split(":", 1)[1]
     uid = str(update.effective_user.id)
+    lang_value = None if code == "default" else code
     if uid in BOT_DATA["users"]:
-        BOT_DATA["users"][uid]["lang"] = None if code == "default" else code
+        BOT_DATA["users"][uid]["lang"] = lang_value
         # Belt-and-suspenders: a selection from any source means the picker
         # has now been shown/handled for this user.
         BOT_DATA["users"][uid]["lang_prompted"] = True
         save_data()
+    # Onboarding order: language is picked BEFORE the disclaimer. So if this
+    # user hasn't agreed to the terms yet, the next screen is the disclaimer
+    # — now shown in whichever language they just picked — not the start
+    # menu. Returning users who change their language later (already past
+    # the disclaimer) still land straight on start, same as before.
+    if not BOT_DATA["users"].get(uid, {}).get("accepted_terms"):
+        await render_menu(context, query.message.chat_id, "disclaimer", existing_message=query.message, lang=lang_value)
+        return
     await render_menu(context, query.message.chat_id, "start", existing_message=query.message)
 
 
@@ -5514,11 +5620,7 @@ async def cb_run_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         elif key == "language":
             await query.answer("✅ " + to_small_caps("running /language..."))
-            langs = BOT_DATA["settings"].get("languages", [])
-            if not langs:
-                await send(to_small_caps("no extra languages configured yet — add some in settings > languages."))
-            else:
-                await send("🌐 " + to_small_caps("choose a language:"), reply_markup=build_language_keyboard())
+            await send("🌐 " + to_small_caps("choose a language:"), reply_markup=build_language_keyboard())
 
         elif key == "admin":
             await query.answer("✅ " + to_small_caps("running /admin..."))
