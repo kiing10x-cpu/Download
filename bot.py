@@ -86,9 +86,33 @@ PLUGIN_DIR = "plugins"
 MAX_LOCAL_BACKUPS = 10
 BACKUP_KEY_FILE = "backup.key"  # local Fernet key — never put this in the repo/git
 
+# ----------------------------------------------------------------------------
+# 🗄 Mongo Plugin — lets the owner paste a MongoDB URI live from the Admin
+# Panel (Feature Plugins > 🗄 Mongo Plugin) instead of only via the
+# MONGO_URI env var. Precedence: MONGO_URI env var ALWAYS wins if set (it's
+# the infra-managed path) — the panel-set URI is only used when no env var
+# is present. Whatever is set via the panel is persisted to this small
+# local file (separate from bot_data.json) so it survives a restart even
+# before BOT_DATA itself has loaded — same pattern as BACKUP_KEY_FILE.
+# ----------------------------------------------------------------------------
+MONGO_CONFIG_FILE = "mongo_config.json"
+MONGO_URI_SOURCE = "env" if MONGO_URI else None   # "env" | "admin_panel" | None
+MONGO_CONNECTED_AT = None   # ISO timestamp of when this URI was first attached
+if not MONGO_URI and os.path.exists(MONGO_CONFIG_FILE):
+    try:
+        with open(MONGO_CONFIG_FILE, "r", encoding="utf-8") as _f:
+            _mc = json.load(_f)
+        if _mc.get("uri"):
+            MONGO_URI = _mc["uri"].strip()
+            MONGO_URI_SOURCE = "admin_panel"
+            MONGO_CONNECTED_AT = _mc.get("connected_at")
+    except Exception:
+        pass  # corrupt/unreadable file — just start unconfigured, never fatal
+
 os.makedirs(BACKUP_DIR, exist_ok=True)
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 os.makedirs(PLUGIN_DIR, exist_ok=True)
+
 
 # ffmpeg is only needed when yt-dlp has to MERGE separate video+audio streams.
 # Most Instagram reels are already a single muxed file, so we don't strictly
@@ -834,9 +858,10 @@ ERROR_KIND_INFO = {
     "mongo": (
         "🗄 Database",
         "Couldn't reach or sync with MongoDB.",
-        "Check MONGO_URI is correct and the database allows connections "
-        "from this server's IP. The bot keeps working on local storage "
-        "meanwhile, so nothing is lost.",
+        "Check the connection string is correct (via Admin Panel > Feature "
+        "Plugins > 🗄 Mongo Plugin, or the MONGO_URI env var) and that the "
+        "database allows connections from this server's IP. The bot keeps "
+        "working on local storage meanwhile, so nothing is lost.",
     ),
     "download": (
         "⬇️ Download",
@@ -1377,6 +1402,7 @@ BOT_DATA = {}
 _mongo_client = None
 _mongo_collection = None
 _mongo_last_error = None
+_mongo_last_checked_at = None   # ISO timestamp of the most recent ping attempt
 _rate_state = {}  # in-memory only, not persisted
 _caption_cache = {}  # (chat_id, message_id) -> {"caption": str, "url": str}, in-memory only
 CAPTION_CACHE_MAX = 500
@@ -1400,18 +1426,23 @@ def _deep_merge_defaults(data: dict) -> dict:
     return merged
 
 
-def get_mongo_collection():
-    global _mongo_client, _mongo_collection, _mongo_last_error
+def get_mongo_collection(force: bool = False):
+    """Returns the live 'bot_data' collection, or None if MongoDB isn't
+    configured/reachable. Caches the connection — pass force=True to make
+    it actually re-ping right now (used by /mongodb and the Mongo Plugin
+    admin screen so their status is always live, never stale)."""
+    global _mongo_client, _mongo_collection, _mongo_last_error, _mongo_last_checked_at
     if not MONGO_URI:
         return None
-    if _mongo_collection is not None:
+    if _mongo_collection is not None and not force:
         return _mongo_collection
     try:
         from pymongo import MongoClient
 
-        _mongo_client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
-        _mongo_client.admin.command("ping")
-        db = _mongo_client.get_default_database() or _mongo_client["bot_db"]
+        client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
+        client.admin.command("ping")
+        db = client.get_default_database() or client["bot_db"]
+        _mongo_client = client
         _mongo_collection = db["bot_data"]
         _mongo_last_error = None
         return _mongo_collection
@@ -1419,6 +1450,109 @@ def get_mongo_collection():
         _mongo_last_error = str(e)
         _mongo_collection = None
         return None
+    finally:
+        _mongo_last_checked_at = datetime.utcnow().isoformat()
+
+
+def _save_mongo_config(uri: str, connected_at: str) -> None:
+    """Persists an admin-panel-set Mongo URI to its own local file so it
+    survives a bot restart even without MONGO_URI being set in the
+    environment. Never touches bot_data.json / MongoDB itself."""
+    try:
+        with open(MONGO_CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump({"uri": uri, "connected_at": connected_at}, f)
+    except Exception as e:
+        log.warning("Could not persist %s: %s", MONGO_CONFIG_FILE, e)
+
+
+def _clear_mongo_config() -> None:
+    try:
+        if os.path.exists(MONGO_CONFIG_FILE):
+            os.remove(MONGO_CONFIG_FILE)
+    except Exception as e:
+        log.warning("Could not remove %s: %s", MONGO_CONFIG_FILE, e)
+
+
+def set_mongo_uri(new_uri: str):
+    """🗄 Mongo Plugin — test-connects to a freshly pasted URI and, only on
+    success, activates it live (no restart needed) and persists it. On
+    success also immediately pushes the bot's current in-memory data into
+    the new database, so switching storage never starts the bot on an
+    empty slate. Returns (ok: bool, message: str)."""
+    global MONGO_URI, MONGO_URI_SOURCE, MONGO_CONNECTED_AT
+    global _mongo_client, _mongo_collection, _mongo_last_error, _mongo_last_checked_at
+    new_uri = (new_uri or "").strip()
+    if not new_uri:
+        return False, "Empty URI."
+    try:
+        from pymongo import MongoClient
+    except ImportError:
+        return False, "pymongo isn't installed on this server. Run: pip install pymongo"
+    try:
+        test_client = MongoClient(new_uri, serverSelectionTimeoutMS=5000)
+        test_client.admin.command("ping")
+        db = test_client.get_default_database() or test_client["bot_db"]
+        col = db["bot_data"]
+    except Exception as e:  # noqa: BLE001
+        return False, str(e)
+
+    MONGO_URI = new_uri
+    MONGO_URI_SOURCE = "admin_panel"
+    MONGO_CONNECTED_AT = datetime.utcnow().isoformat()
+    _mongo_client = test_client
+    _mongo_collection = col
+    _mongo_last_error = None
+    _mongo_last_checked_at = MONGO_CONNECTED_AT
+    _save_mongo_config(new_uri, MONGO_CONNECTED_AT)
+    try:
+        col.update_one({"_id": "bot_data"}, {"$set": BOT_DATA}, upsert=True)
+    except Exception as e:  # noqa: BLE001
+        return True, f"Connected, but the initial data copy failed: {e}. It will sync on the next save."
+    return True, "Connected — this bot's data is now saved to MongoDB."
+
+
+def disconnect_mongo():
+    """Deactivates an admin-panel-set Mongo URI and reverts to the local
+    bot_data.json file. Only ever called when MONGO_URI_SOURCE ==
+    'admin_panel' — a URI coming from the MONGO_URI env var can't be
+    disconnected from inside the bot (it's infra-managed; unset the env
+    var and restart instead)."""
+    global MONGO_URI, MONGO_URI_SOURCE, MONGO_CONNECTED_AT
+    global _mongo_client, _mongo_collection, _mongo_last_error
+    MONGO_URI = ""
+    MONGO_URI_SOURCE = None
+    MONGO_CONNECTED_AT = None
+    _mongo_client = None
+    _mongo_collection = None
+    _mongo_last_error = None
+    _clear_mongo_config()
+    save_data()  # now falls through to the local JSON file
+
+
+def get_mongo_status() -> dict:
+    """Single source of truth for /mongodb and the 🗄 Mongo Plugin admin
+    screen — always re-pings live so the status shown is never stale."""
+    col = get_mongo_collection(force=True)
+    masked_uri = None
+    if MONGO_URI:
+        m = re.match(r"^(mongodb(?:\+srv)?://)([^@/]+)@(.+)$", MONGO_URI)
+        masked_uri = f"{m.group(1)}***:***@{m.group(3)}" if m else MONGO_URI
+    doc_count = None
+    if col is not None:
+        try:
+            doc_count = col.count_documents({})
+        except Exception:
+            pass
+    return {
+        "configured": bool(MONGO_URI),
+        "connected": col is not None,
+        "source": MONGO_URI_SOURCE,
+        "masked_uri": masked_uri,
+        "connected_at": MONGO_CONNECTED_AT,
+        "last_checked_at": _mongo_last_checked_at,
+        "last_error": _mongo_last_error,
+        "doc_count": doc_count,
+    }
 
 
 def _apply_seed_files_if_present() -> bool:
@@ -5529,9 +5663,7 @@ async def cb_adm_fix_now(update: Update, context: ContextTypes.DEFAULT_TYPE):
             result = "\n".join(lines)
 
     elif kind == "mongo":
-        global _mongo_collection
-        _mongo_collection = None  # force a fresh connection attempt
-        col = get_mongo_collection()
+        col = get_mongo_collection(force=True)  # force a fresh connection attempt
         if col is not None:
             result = "✅ " + to_small_caps("reconnected to mongodb successfully.")
         else:
@@ -8618,6 +8750,23 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
         refreshed = await refresh_panel_after_save(context, "upi", _build_adm_upi_view)
         await update.message.reply_text(f"✅ UPI ID set: {text}" + ("" if refreshed else "\n(reopen the UPI panel to confirm)"))
 
+    elif awaiting == "mongo_uri":
+        context.user_data.pop("awaiting", None)
+        uri = text.strip()
+        if not uri.startswith(("mongodb://", "mongodb+srv://")):
+            await update.message.reply_text(
+                "❌ " + to_small_caps("that doesn't look like a mongodb connection string — it should start with mongodb:// or mongodb+srv://. nothing was changed.")
+            )
+        else:
+            status_msg = await update.message.reply_text("🔎 " + to_small_caps("testing connection..."))
+            ok, msg = await asyncio.get_running_loop().run_in_executor(None, set_mongo_uri, uri)
+            if ok:
+                await log_event(context, "🗄 MongoDB connected by admin " + str(update.effective_user.id) + ".")
+                await status_msg.edit_text("✅ " + to_small_caps(msg))
+            else:
+                await status_msg.edit_text("❌ " + to_small_caps("connection failed") + f":\n{html.escape(msg[:300])}")
+            await refresh_panel_after_save(context, "mongo_plugin", _build_mongo_plugin_view, parse_mode="HTML")
+
     elif awaiting == "developer_id":
         context.user_data.pop("awaiting", None)
         raw = text.strip()
@@ -8958,6 +9107,17 @@ async def cmd_dbstatus(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = "ℹ️ MongoDB not configured — using local JSON file."
     text += f"\n\nUsers: {len(BOT_DATA['users'])} | Groups: {len(BOT_DATA['groups'])} | Admins: {len(BOT_DATA['admins'])}"
     await update.message.reply_text(text)
+
+
+async def cmd_mongodb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/mongodb — full 🗄 Mongo Plugin status card, admin-only. Same data
+    (and same live re-ping) as the admin-panel screen, for a quick check
+    straight from the command line without opening the panel."""
+    if not is_admin(update.effective_user.id):
+        return
+    status_msg = await update.message.reply_text("🔎 " + to_small_caps("checking mongodb status..."))
+    text, kb = _build_mongo_plugin_view()
+    await status_msg.edit_text(text, parse_mode="HTML", reply_markup=kb)
 
 
 def build_health_text() -> str:
@@ -9815,7 +9975,10 @@ async def _render_adm_plugins(update: Update, context: ContextTypes.DEFAULT_TYPE
         lines.append("")
         lines.append(to_small_caps("uploaded a new file? restart the bot to load it — plugins are only scanned at startup."))
         body = "\n".join(lines)
-    kb = InlineKeyboardMarkup([back_row(), home_row()])
+    kb = InlineKeyboardMarkup([
+        [styled_button("🗄 Mongo Plugin", callback_data="adm_mongo_plugin", style="primary")],
+        back_row(), home_row(),
+    ])
     await query.edit_message_text(body, reply_markup=kb)
 
 
@@ -9833,6 +9996,138 @@ async def cb_adm_plugins(update: Update, context: ContextTypes.DEFAULT_TYPE):
 SCREEN_RENDERERS["adm_plugins"] = _render_adm_plugins
 
 
+# ----------------------------------------------------------------------------
+# 🗄 Mongo Plugin — live MongoDB connect/disconnect from the Admin Panel,
+# no env var or restart required. See set_mongo_uri()/disconnect_mongo()/
+# get_mongo_status() near the top of the file for the actual logic.
+# ----------------------------------------------------------------------------
+
+def _format_mongo_status_text(explain: bool = True) -> str:
+    st = get_mongo_status()
+    lbl = to_title_small_caps
+    if st["connected"]:
+        state_line = "✅ " + to_small_caps("connected & live")
+    elif st["configured"]:
+        state_line = "❌ " + to_small_caps("configured but not reachable")
+    else:
+        state_line = "⚪ " + to_small_caps("not configured — using local json file")
+
+    source_map = {
+        "env": to_small_caps("environment variable (MONGO_URI)"),
+        "admin_panel": to_small_caps("set from this admin panel"),
+    }
+    lines = [
+        "🗄 <b>" + to_small_caps("mongo plugin") + "</b>",
+        "",
+        "<blockquote>",
+        f"{lbl('Status')} : {state_line}",
+        f"{lbl('Backend In Use')} : {to_small_caps('mongodb') if st['connected'] else to_small_caps('local json file')}",
+    ]
+    if st["configured"]:
+        lines.append(f"{lbl('Source')} : {source_map.get(st['source'], to_small_caps('unknown'))}")
+        lines.append(f"{lbl('Database')} : {html.escape(st['masked_uri'] or '—')}")
+        lines.append(f"{lbl('Attached Since')} : " + (iso_to_ist_str(st['connected_at'], '%d %b %Y, %H:%M') + ' IST' if st['connected_at'] else '—'))
+        lines.append(f"{lbl('Last Checked')} : " + (iso_to_ist_str(st['last_checked_at'], '%d %b %Y, %H:%M:%S') + ' IST' if st['last_checked_at'] else '—'))
+        if st["connected"] and st["doc_count"] is not None:
+            lines.append(f"{lbl('Documents Stored')} : {st['doc_count']}")
+        if not st["connected"] and st["last_error"]:
+            lines.append(f"{lbl('Last Error')} : {html.escape(str(st['last_error'])[:200])}")
+    lines.append("</blockquote>")
+
+    if explain:
+        lines += [
+            "",
+            "<u>➤ " + to_small_caps("how this works") + "</u>",
+            "<blockquote>" + to_small_caps(
+                "attach a mongodb connection string below and this bot's entire "
+                "database — every user, setting, menu and ticket — switches over "
+                "to it immediately, live, with no restart needed. all existing "
+                "data is copied across automatically the moment you connect."
+            ) + "\n\n" + to_small_caps(
+                "if you never attach one, the bot keeps working exactly as "
+                "before, saving everything to a local file on this server "
+                "instead — nothing breaks either way."
+            ) + "</blockquote>",
+        ]
+    return "\n".join(lines)
+
+
+def _build_mongo_plugin_view():
+    text = _format_mongo_status_text()
+    rows = [[styled_button("🔄 Refresh Status", callback_data="adm_mongo_plugin", style="secondary")]]
+    if MONGO_URI_SOURCE == "env":
+        rows.append([styled_button("🧪 Test Connection", callback_data="adm_mongo_test")])
+    else:
+        rows.append([styled_button(
+            "🔌 " + ("Update" if MONGO_URI else "Connect") + " URI",
+            callback_data="adm_mongo_set", style="success",
+        )])
+        if MONGO_URI:
+            rows.append([styled_button("🗑 Disconnect", callback_data="adm_mongo_disconnect_confirm", style="danger")])
+    rows.append(back_row())
+    rows.append(home_row())
+    return text, InlineKeyboardMarkup(rows)
+
+
+async def _render_adm_mongo_plugin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    text, kb = _build_mongo_plugin_view()
+    await query.edit_message_text(text, parse_mode="HTML", reply_markup=kb)
+
+
+async def cb_adm_mongo_plugin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    if not is_admin(update.effective_user.id):
+        return
+    await _render_adm_mongo_plugin(update, context)
+
+
+async def cb_adm_mongo_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer("🔎 " + to_small_caps("checking..."))
+    await _render_adm_mongo_plugin(update, context)
+
+
+async def cb_adm_mongo_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    remember_panel_message(context, query, "mongo_plugin")
+    context.user_data["awaiting"] = "mongo_uri"
+    await query.message.reply_text(
+        "🗄 " + to_small_caps("send the mongodb connection string now") + "\n"
+        + to_small_caps("(starts with mongodb:// or mongodb+srv://)") + "\n\n"
+        + to_small_caps("it will be tested before anything is switched over — if it fails, nothing changes.")
+        + "\n\n/cancel " + to_small_caps("to abort.")
+    )
+
+
+async def cb_adm_mongo_disconnect_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    kb = InlineKeyboardMarkup([
+        [styled_button("✅ Yes, disconnect", callback_data="adm_mongo_disconnect_do", style="danger"),
+         styled_button("❌ Cancel", callback_data="adm_mongo_plugin")],
+    ])
+    await query.edit_message_text(
+        "⚠️ " + to_small_caps("disconnect mongodb?") + "\n\n"
+        + to_small_caps("the bot will switch back to saving everything in a local file on this server. your mongodb data itself is not deleted — you can reconnect the same uri again anytime.") ,
+        reply_markup=kb,
+    )
+
+
+async def cb_adm_mongo_disconnect_do(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    disconnect_mongo()
+    await log_event(context, "🗄 MongoDB disconnected by admin " + str(update.effective_user.id) + " — reverted to local JSON file.")
+    await _render_adm_mongo_plugin(update, context)
+
+
+SCREEN_RENDERERS["adm_mongo_plugin"] = _render_adm_mongo_plugin
+
+
+
+
 def build_app() -> Application:
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
@@ -9848,6 +10143,7 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("admin", cmd_admin))
     app.add_handler(CommandHandler("broadcast", cmd_broadcast))
     app.add_handler(CommandHandler("dbstatus", cmd_dbstatus))
+    app.add_handler(CommandHandler("mongodb", cmd_mongodb))
     app.add_handler(CommandHandler("health", cmd_health))
     app.add_handler(CommandHandler("database", cmd_database))
     app.add_handler(CommandHandler("updatebackup", cmd_updatebackup))
@@ -9921,6 +10217,11 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(cb_adm_fix_now, pattern="^adm_fix:"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_selftest")(cb_adm_selftest), pattern="^adm_selftest$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_plugins")(cb_adm_plugins), pattern="^adm_plugins$"))
+    app.add_handler(CallbackQueryHandler(nav_tracked("adm_mongo_plugin")(cb_adm_mongo_plugin), pattern="^adm_mongo_plugin$"))
+    app.add_handler(CallbackQueryHandler(cb_adm_mongo_test, pattern="^adm_mongo_test$"))
+    app.add_handler(CallbackQueryHandler(cb_adm_mongo_set, pattern="^adm_mongo_set$"))
+    app.add_handler(CallbackQueryHandler(cb_adm_mongo_disconnect_confirm, pattern="^adm_mongo_disconnect_confirm$"))
+    app.add_handler(CallbackQueryHandler(cb_adm_mongo_disconnect_do, pattern="^adm_mongo_disconnect_do$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_cmdtest")(cb_adm_cmdtest), pattern="^adm_cmdtest$"))
     app.add_handler(CallbackQueryHandler(cb_run_cmd, pattern="^run_cmd:"))
     app.add_handler(CallbackQueryHandler(cb_adm_back, pattern="^adm_back$"))
