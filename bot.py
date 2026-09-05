@@ -2186,7 +2186,7 @@ def build_keyboard_from_buttons(buttons, menu_id):
             style = b.get("style")
             btype = b.get("type")
             if btype == "url":
-                row_widgets.append(styled_button(b["label"], url=b["value"]))
+                row_widgets.append(styled_button(b["label"], url=b["value"], style=style or "primary"))
             elif btype == "menu":
                 row_widgets.append(styled_button(b["label"], callback_data=f"nav:{b['value']}", style=style or "primary"))
             elif btype == "toggle":
@@ -2196,7 +2196,7 @@ def build_keyboard_from_buttons(buttons, menu_id):
                     styled_button(toggle_label(b["label"], current), callback_data=f"tgl:{b['value']}:{menu_id}", style=st)
                 )
             elif btype == "callback":
-                row_widgets.append(styled_button(b["label"], callback_data=b["value"], style=style))
+                row_widgets.append(styled_button(b["label"], callback_data=b["value"], style=style or "primary"))
             else:
                 continue
         if row_widgets:
@@ -2287,7 +2287,7 @@ async def render_menu(context: ContextTypes.DEFAULT_TYPE, chat_id: int, menu_id:
                     pass
             else:
                 url = f"https://t.me/{owner_id_str.lstrip('@')}"
-            owner_row = [styled_button(label, url=url)]
+            owner_row = [styled_button(label, url=url, style="primary")]
             kb = InlineKeyboardMarkup((kb.inline_keyboard if kb else []) + [owner_row])
 
     # #4 — global forwarding/sharing lock applies to every menu the bot sends.
@@ -2583,7 +2583,7 @@ async def show_force_join_prompt(update: Update, context: ContextTypes.DEFAULT_T
     kb_rows = []
     for i, link in enumerate(links, 1):
         label = "📢 Join Channel" if len(links) == 1 else f"📢 Join Channel {i}"
-        kb_rows.append([styled_button(label, url=link)])
+        kb_rows.append([styled_button(label, url=link, style="primary")])
     kb_rows.append([styled_button("✅ I'VE JOINED / SENT REQUEST", callback_data="check_force_join", style="success")])
     text = "🔒 " + to_small_caps("please join all required channels to use this bot.")
     if not links:
@@ -2812,9 +2812,9 @@ async def cb_global_button_gate(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 LANG_NAMES = {
-    "en": "🇬🇧 English", "hi": "🇮🇳 हिन्दी", "es": "🇪🇸 Español",
-    "fr": "🇫🇷 Français", "ar": "🇸🇦 العربية", "pt": "🇵🇹 Português",
-    "id": "🇮🇩 Indonesia", "bn": "🇧🇩 বাংলা", "ur": "🇵🇰 اردو", "ru": "🇷🇺 Русский",
+    "en": "English", "es": "Español",
+    "fr": "Français", "ar": "العربية", "pt": "Português",
+    "id": "Indonesia", "bn": "বাংলা", "ur": "اردو", "ru": "Русский",
 }
 
 
@@ -2846,7 +2846,7 @@ def build_language_keyboard() -> InlineKeyboardMarkup:
     # Keep the layout compact and consistent with the existing button styling.
     configured = BOT_DATA["settings"].get("languages", [])
     codes = []
-    for code in ("en", "hi", "es", "fr", "ar", "ru", "pt", "id", "bn", "ur"):
+    for code in ("en", "es", "fr", "ar", "ru", "pt", "id", "bn", "ur"):
         if code not in codes and (code in configured or code == "en"):
             codes.append(code)
     # If an admin has configured additional supported languages, include them.
@@ -2855,8 +2855,8 @@ def build_language_keyboard() -> InlineKeyboardMarkup:
             codes.append(code)
     rows = []
     for i in range(0, len(codes), 2):
-        rows.append([styled_button(to_small_caps(LANG_NAMES.get(c, c)), callback_data=f"setlang:{c}") for c in codes[i:i+2]])
-    rows.append([styled_button("✨ " + to_small_caps("Default (Hinglish)"), callback_data="setlang:default")])
+        rows.append([styled_button(to_small_caps(LANG_NAMES.get(c, c)), callback_data=f"setlang:{c}", style="primary") for c in codes[i:i+2]])
+    rows.append([styled_button("✨ " + to_small_caps("Default"), callback_data="setlang:default", style="success")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -3561,13 +3561,20 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # of the user-facing UI.
         if ig_caption:
             if len(ig_caption) <= 256:
-                copy_btn = InlineKeyboardButton(
-                    to_small_caps("📋 Caption"),
-                    copy_text=CopyTextButton(text=ig_caption),
-                )
+                try:
+                    copy_btn = InlineKeyboardButton(
+                        to_small_caps("Caption"),
+                        copy_text=CopyTextButton(text=ig_caption),
+                        **({"style": "primary"} if SUPPORTS_BUTTON_STYLE else {}),
+                    )
+                except TypeError:
+                    copy_btn = InlineKeyboardButton(
+                        to_small_caps("Caption"),
+                        copy_text=CopyTextButton(text=ig_caption),
+                    )
             else:
                 copy_btn = styled_button(
-                    to_small_caps("📋 Caption"),
+                    to_small_caps("Caption"),
                     callback_data="copy_caption", style="primary"
                 )
         else:
@@ -4528,7 +4535,7 @@ async def show_usage_screen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = None
     if BOT_DATA["settings"].get("share_enabled", True):
         share_url = await resolve_share_url(context)
-        kb = InlineKeyboardMarkup([[styled_button("📤 " + to_small_caps("Share Bot"), url=share_url)]])
+        kb = InlineKeyboardMarkup([[styled_button("📤 " + to_small_caps("Share Bot"), url=share_url, style="primary")]])
     await _replace_rkb_screen(context, update.effective_chat.id, "usage", text, reply_markup=kb, parse_mode="HTML")
 
 
@@ -4584,7 +4591,7 @@ async def show_developer_button(update: Update, context: ContextTypes.DEFAULT_TY
     if not url:
         await context.bot.send_message(update.effective_chat.id, to_small_caps("developer contact not set up yet."))
         return
-    kb = InlineKeyboardMarkup([[styled_button("👨‍💻 " + to_small_caps("message developer"), url=url)]])
+    kb = InlineKeyboardMarkup([[styled_button("👨‍💻 " + to_small_caps("message developer"), url=url, style="primary")]])
     menu = BOT_DATA["menus"].get("developer", {})
     banner = menu.get("text") or DEFAULT_MENUS["developer"]["text"]
     await _replace_rkb_screen(
@@ -4621,7 +4628,7 @@ async def show_gift_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if BOT_DATA["settings"].get("leaderboard_enabled"):
         text += "\n\n" + build_leaderboard_text(limit=3)
-        kb_rows.append([styled_button("🏆 Full Leaderboard", callback_data="view_leaderboard")])
+        kb_rows.append([styled_button("🏆 Full Leaderboard", callback_data="view_leaderboard", style="primary")])
     await _replace_rkb_screen(
         context, update.effective_chat.id, "gift", text, reply_markup=InlineKeyboardMarkup(kb_rows),
         parse_mode=menu.get("parse_mode") or "HTML",
@@ -7958,8 +7965,9 @@ def _build_adm_premium_view():
             lines.append(f"• {p['name']} — {price_str} — {p.get('days', 30)}d — {state}")
             kb_rows.append([
                 styled_button(f"{'🔴 Turn Off' if p.get('enabled') else '🟢 Turn On'} · {p['name']}",
-                              callback_data=f"adm_plan_toggle:{p['id']}"),
-                styled_button("🗑", callback_data=f"adm_plan_del:{p['id']}"),
+                              callback_data=f"adm_plan_toggle:{p['id']}",
+                              style="success" if p.get("enabled") else "danger"),
+                styled_button("🗑", callback_data=f"adm_plan_del:{p['id']}", style="danger"),
             ])
     # Keep all Add actions together at the bottom.
     kb_rows.append([styled_button("➕ Add Premium User (By ID)", callback_data="adm_premium_grant")])
@@ -9691,7 +9699,7 @@ def require_premium(handler):
         if is_premium_active(uid) or is_admin(update.effective_user.id):
             return await handler(update, context, *a, **kw)
         text = "💎 " + to_small_caps("this feature is for premium users only.")
-        kb = InlineKeyboardMarkup([[styled_button("🎁 Upgrade to Premium", callback_data="gift_menu")]])
+        kb = InlineKeyboardMarkup([[styled_button("🎁 Upgrade to Premium", callback_data="gift_menu", style="success")]])
         if update.callback_query:
             await update.callback_query.answer()
             await update.callback_query.message.reply_text(text, reply_markup=kb)
