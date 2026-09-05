@@ -3035,8 +3035,7 @@ def build_language_keyboard(current_lang: str = None) -> InlineKeyboardMarkup:
     user's own saved preference, or "en" if they haven't picked yet), and
     marks it with a ✅ too so it's unambiguous even without colour.
 
-    Layout: one language per row (full width), as requested, instead of a
-    2-per-row grid — easier to scan on a phone.
+    Layout: 2 languages per row (grid), as requested.
     """
     pack_names = _load_language_pack().get("languages", {})
     enabled = list(BOT_DATA.get("settings", {}).get("languages", []) or [])
@@ -3046,14 +3045,15 @@ def build_language_keyboard(current_lang: str = None) -> InlineKeyboardMarkup:
     def _label(code: str) -> str:
         return pack_names.get(code) or LANG_NAMES.get(code) or code.upper()
 
-    rows = []
+    buttons = []
     for code in codes:
         is_selected = (code == cur)
         label = ("✅ " if is_selected else "") + _label(code)
-        rows.append([styled_button(
+        buttons.append(styled_button(
             label, callback_data=f"setlang:{code}",
             style="success" if is_selected else "primary",
-        )])
+        ))
+    rows = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
     return InlineKeyboardMarkup(rows)
 
 
