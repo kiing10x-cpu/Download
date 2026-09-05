@@ -5969,7 +5969,7 @@ async def cb_adm_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def _render_adm_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    mem = get_memory_mb()
+    mem = get_memory_usage_mb()
     backend = "MongoDB" if get_mongo_collection() is not None else "Local JSON File"
     uptime = human_uptime()
     text = (
@@ -6443,7 +6443,7 @@ async def do_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             copied = await context.bot.copy_message(
                 chat_id=int(uid), from_chat_id=msg.chat_id, message_id=msg.message_id,
-                protect_content=protect, reply_markup=start_kb,
+                protect_content=protect,
             )
         except RetryAfter as e:
             # Flood control — Telegram itself tells us exactly how long to
@@ -6453,7 +6453,7 @@ async def do_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try:
                 copied = await context.bot.copy_message(
                     chat_id=int(uid), from_chat_id=msg.chat_id, message_id=msg.message_id,
-                    protect_content=protect, reply_markup=start_kb,
+                    protect_content=protect,
                 )
                 recovered += 1
             except Exception:
