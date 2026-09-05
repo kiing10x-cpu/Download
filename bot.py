@@ -2841,18 +2841,33 @@ async def _send_language_picker(context: ContextTypes.DEFAULT_TYPE, chat_id: int
 
 
 def build_language_keyboard() -> InlineKeyboardMarkup:
-    """Show only हिन्दी and English side-by-side.
+    """Dynamic language picker — shows every language enabled in
+    Settings > Languages (which is pre-filled from language_pack.json),
+    not just English/Hindi. English is always included first since it's
+    the bot's built-in/default language.
 
-    English is the bot's built-in/default language: selecting it stores
-    ``en`` explicitly so the existing English text and functionality are
-    used everywhere. There is intentionally no separate Default button.
+    FIX: this used to be hardcoded to only हिन्दी + English, so even
+    though language_pack.json ships 10 languages and Settings > Languages
+    was pre-populated with all of them, the actual picker shown to users
+    never reflected that. Now it reads BOT_DATA["settings"]["languages"]
+    (admin-editable) and looks up each code's display name from
+    language_pack.json's "languages" map — with flag emojis — falling
+    back to LANG_NAMES/the bare code if a name isn't found.
     """
-    return InlineKeyboardMarkup([
-        [
-            styled_button("हिन्दी", callback_data="setlang:hi", style="primary"),
-            styled_button("English", callback_data="setlang:en", style="success"),
-        ]
-    ])
+    pack_names = _load_language_pack().get("languages", {})
+    enabled = list(BOT_DATA.get("settings", {}).get("languages", []) or [])
+    codes = ["en"] + [c for c in enabled if c != "en"]
+
+    def _label(code: str) -> str:
+        return pack_names.get(code) or LANG_NAMES.get(code) or code.upper()
+
+    buttons = [
+        styled_button(_label(code), callback_data=f"setlang:{code}",
+                      style="success" if code == "en" else "primary")
+        for code in codes
+    ]
+    rows = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
+    return InlineKeyboardMarkup(rows)
 
 
 async def show_post_onboarding(context: ContextTypes.DEFAULT_TYPE, chat_id: int, uid: str):
@@ -7572,7 +7587,8 @@ async def cb_adm_lang_manage(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer()
     langs = BOT_DATA["settings"].get("languages", [])
-    text = "🌐 Enabled Languages\n\n" + ("\n".join(f"• {LANG_NAMES.get(c, c)}" for c in langs) if langs else to_small_caps("none — default language only."))
+    pack_names = _load_language_pack().get("languages", {})
+    text = "🌐 Enabled Languages\n\n" + ("\n".join(f"• {pack_names.get(c) or LANG_NAMES.get(c, c)}" for c in langs) if langs else to_small_caps("none — default language only."))
     kb = InlineKeyboardMarkup(
         [
             [styled_button("➕ Add Language", callback_data="adm_lang_add")],
@@ -7586,11 +7602,13 @@ async def cb_adm_lang_manage(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def cb_adm_lang_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    available = [c for c in LANG_NAMES if c not in BOT_DATA["settings"].get("languages", [])]
+    pack_names = _load_language_pack().get("languages", {})
+    all_known = {**LANG_NAMES, **pack_names}
+    available = [c for c in all_known if c not in BOT_DATA["settings"].get("languages", []) and c != "en"]
     if not available:
-        await query.message.reply_text("Saari suggested languages already add ho chuki hain.")
+        await query.message.reply_text(to_small_caps("all available languages are already added."))
         return
-    rows = [[styled_button(LANG_NAMES[c], callback_data=f"adm_lang_add_do:{c}")] for c in available]
+    rows = [[styled_button(all_known[c], callback_data=f"adm_lang_add_do:{c}")] for c in available]
     await query.message.reply_text(to_small_caps("which language would you like to add?"), reply_markup=InlineKeyboardMarkup(rows))
 
 
@@ -7598,10 +7616,11 @@ async def cb_adm_lang_add_do(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer()
     code = query.data.split(":", 1)[1]
+    pack_names = _load_language_pack().get("languages", {})
     if code not in BOT_DATA["settings"]["languages"]:
         BOT_DATA["settings"]["languages"].append(code)
         save_data()
-    await query.edit_message_text(to_small_caps(f"✅ {LANG_NAMES.get(code, code)} added. you can now add text for it via 🌐 translations in any menu."))
+    await query.edit_message_text(to_small_caps(f"✅ {pack_names.get(code) or LANG_NAMES.get(code, code)} added. you can now add text for it via 🌐 translations in any menu."))
 
 
 async def cb_adm_lang_remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -7611,7 +7630,8 @@ async def cb_adm_lang_remove(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not langs:
         await query.message.reply_text(to_small_caps("no languages have been added yet."))
         return
-    rows = [[styled_button(LANG_NAMES.get(c, c), callback_data=f"adm_lang_remove_do:{c}")] for c in langs]
+    pack_names = _load_language_pack().get("languages", {})
+    rows = [[styled_button(pack_names.get(c) or LANG_NAMES.get(c, c), callback_data=f"adm_lang_remove_do:{c}")] for c in langs]
     await query.message.reply_text(to_small_caps("which language would you like to remove?"), reply_markup=InlineKeyboardMarkup(rows))
 
 
@@ -9569,9 +9589,39 @@ async def cmd_unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user and BOT_DATA["settings"].get("maintenance") and not is_admin(user.id):
         await send_maintenance_notice(context, update.effective_chat.id)
         return
-    await update.message.reply_text(
-        "Hey that command format doesn't work\nJust send /start 🚀"
+    text = (
+        "⚠️ <b>" + to_small_caps("unknown command") + "</b>\n\n"
+        "<blockquote>"
+        + to_small_caps("that command doesn't exist or isn't formatted correctly.") + "\n\n"
+        + to_small_caps("tap the button below (or send /start) to go back to the main menu.")
+        + "</blockquote>"
     )
+    kb = InlineKeyboardMarkup([[styled_button("🚀 /start", callback_data="go_start")]])
+    sent = await update.message.reply_text(text, parse_mode="HTML", reply_markup=kb)
+    # Self-cleaning: this is just noise once the user has moved on, so it
+    # always disappears shortly after — independent of the global
+    # auto-delete setting (which may be 0 / off for real menu content).
+    await schedule_delete(context, sent.chat_id, sent.message_id, 15)
+
+
+async def cb_go_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """One-tap '🚀 /start' button attached to the unknown-command fallback,
+    so a confused user doesn't have to type the command themselves."""
+    query = update.callback_query
+    await query.answer()
+    try:
+        await query.message.delete()
+    except Exception:
+        pass
+    chat_id = update.effective_chat.id
+    uid = str(update.effective_user.id)
+    if not BOT_DATA["users"].get(uid, {}).get("lang_prompted"):
+        BOT_DATA["users"].setdefault(uid, {})["lang_prompted"] = True
+        save_data()
+        await _send_language_picker(context, chat_id)
+        return
+    sent = await show_post_onboarding(context, chat_id, uid)
+    await track_and_refresh_panel(context, chat_id, "start", sent)
 
 
 async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -9791,6 +9841,7 @@ def build_app() -> Application:
     # agree + join" — see cb_global_button_gate's docstring.
     app.add_handler(CallbackQueryHandler(cb_global_button_gate), group=-1)
 
+    app.add_handler(CallbackQueryHandler(cb_go_start, pattern="^go_start$"))
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("language", cmd_language))
