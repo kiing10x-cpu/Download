@@ -942,7 +942,7 @@ DEFAULT_MENUS = {
             f"<u>➤ {to_small_caps('get it in best quality')}</u>\n"
             f"<u>➤ {to_small_caps('tap get caption for a short quote')}</u>"
         ),
-        "parse_mode": None,
+        "parse_mode": "HTML",
         "image_file_id": None,
         "buttons": [],
         "auto_delete_seconds": None,
@@ -1131,7 +1131,7 @@ DEFAULT_MENUS = {
     },
     "language": {
         "text": "🌐 <u>" + to_small_caps("choose your language:") + "</u>",
-        "parse_mode": None,
+        "parse_mode": "HTML",
         "image_file_id": None,
         "buttons": [],
         "auto_delete_seconds": None,
@@ -1141,7 +1141,7 @@ DEFAULT_MENUS = {
     },
     "developer": {
         "text": "<u>➤ " + to_small_caps("tap below to message the developer:") + "</u>",
-        "parse_mode": None,
+        "parse_mode": "HTML",
         "image_file_id": None,
         "buttons": [],
         "auto_delete_seconds": None,
@@ -2853,10 +2853,16 @@ def build_language_keyboard() -> InlineKeyboardMarkup:
     for code in configured:
         if code not in codes and code in LANG_NAMES:
             codes.append(code)
-    rows = []
-    for i in range(0, len(codes), 2):
-        rows.append([styled_button(to_small_caps(LANG_NAMES.get(c, c)), callback_data=f"setlang:{c}", style="primary") for c in codes[i:i+2]])
-    rows.append([styled_button("✨ " + to_small_caps("Default"), callback_data="setlang:default", style="success")])
+    # Build every button (languages + the trailing "Default" entry) as one
+    # flat list first, then pair them up two-per-row — this way "Default"
+    # fills in next to the last odd-one-out language instead of always
+    # getting its own lonely full-width row.
+    buttons = [
+        styled_button(to_small_caps(LANG_NAMES.get(c, c)), callback_data=f"setlang:{c}", style="primary")
+        for c in codes
+    ]
+    buttons.append(styled_button("✨ " + to_small_caps("Default"), callback_data="setlang:default", style="success"))
+    rows = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
     return InlineKeyboardMarkup(rows)
 
 
@@ -4297,11 +4303,16 @@ async def handle_admin_ticket_reply(update: Update, context: ContextTypes.DEFAUL
         )
 
 
-def get_support_prompt_text() -> str:
+def get_support_prompt_text(uid: str = None) -> str:
     """v10 — sourced from BOT_DATA['menus']['support'] so the admin can edit
-    this from Menu & UI, falling back to the original default copy."""
+    this from Menu & UI, falling back to the original default copy.
+    v11 — now also respects the user's saved language, same lookup
+    render_menu() uses, so Support shows the translated text instead of
+    always falling back to the base/English copy."""
     menu = BOT_DATA["menus"].get("support", {})
-    return menu.get("text") or DEFAULT_MENUS["support"]["text"]
+    lang = BOT_DATA["users"].get(str(uid), {}).get("lang") if uid else None
+    translation = menu.get("translations", {}).get(lang) if lang else None
+    return (translation or {}).get("text") or menu.get("text") or DEFAULT_MENUS["support"]["text"]
 
 
 async def support_button_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4319,7 +4330,7 @@ async def support_button_entry(update: Update, context: ContextTypes.DEFAULT_TYP
     branch of handle_user_awaiting_input."""
     chat_id = update.effective_chat.id
     context.user_data["awaiting"] = "support_message"
-    await _replace_rkb_screen(context, chat_id, "support", get_support_prompt_text(), parse_mode="HTML")
+    await _replace_rkb_screen(context, chat_id, "support", get_support_prompt_text(uid=chat_id), parse_mode="HTML")
 
 
 async def cb_ticket_close(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4593,7 +4604,9 @@ async def show_developer_button(update: Update, context: ContextTypes.DEFAULT_TY
         return
     kb = InlineKeyboardMarkup([[styled_button("👨‍💻 " + to_small_caps("message developer"), url=url, style="primary")]])
     menu = BOT_DATA["menus"].get("developer", {})
-    banner = menu.get("text") or DEFAULT_MENUS["developer"]["text"]
+    lang = BOT_DATA["users"].get(str(update.effective_chat.id), {}).get("lang")
+    translation = menu.get("translations", {}).get(lang) if lang else None
+    banner = (translation or {}).get("text") or menu.get("text") or DEFAULT_MENUS["developer"]["text"]
     await _replace_rkb_screen(
         context, update.effective_chat.id, "developer",
         banner, reply_markup=kb, parse_mode=menu.get("parse_mode"),
@@ -4623,8 +4636,13 @@ async def show_gift_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # admin can edit it from Menu & UI like any other menu, instead of it
     # being hardcoded here. The Stars/UPI buttons above stay code-driven
     # since they carry real payment logic.
+    # v11 — also respects the user's saved language (same lookup
+    # render_menu() uses), so Send A Gift shows the translated text
+    # instead of always falling back to the base/English copy.
     menu = BOT_DATA["menus"].get("gift", {})
-    text = menu.get("text") or DEFAULT_MENUS["gift"]["text"]
+    lang = BOT_DATA["users"].get(str(update.effective_chat.id), {}).get("lang")
+    translation = menu.get("translations", {}).get(lang) if lang else None
+    text = (translation or {}).get("text") or menu.get("text") or DEFAULT_MENUS["gift"]["text"]
 
     if BOT_DATA["settings"].get("leaderboard_enabled"):
         text += "\n\n" + build_leaderboard_text(limit=3)
@@ -5110,7 +5128,7 @@ async def cb_support_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     context.user_data["awaiting"] = "support_message"
-    await query.message.reply_text(get_support_prompt_text(), parse_mode="HTML")
+    await query.message.reply_text(get_support_prompt_text(uid=update.effective_user.id), parse_mode="HTML")
 
 
 async def handle_user_awaiting_input(update: Update, context: ContextTypes.DEFAULT_TYPE, awaiting: str):
