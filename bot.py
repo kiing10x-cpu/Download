@@ -73,6 +73,13 @@ MONGO_URI = os.environ.get("MONGO_URI", "").strip()
 BACKUP_INTERVAL_HOURS = int(os.environ.get("BACKUP_INTERVAL_HOURS", "12"))
 
 DATA_FILE = "bot_data.json"
+# "Update Backup" seed files — see _apply_seed_files_if_present() and the
+# 📦 Update Backup admin-panel button. Drop both, with these EXACT names,
+# next to bot.py in the GitHub repo before pushing a code update. If the
+# host wipes local storage on deploy (no bot_data.json, empty MongoDB),
+# the bot auto-loads these back in on startup — no manual restore needed.
+SEED_SETTINGS_FILE = "bot_settings_seed.json"
+SEED_USERS_FILE = "bot_users_seed.json"
 BACKUP_DIR = "backups"
 DOWNLOAD_DIR = "downloads"
 PLUGIN_DIR = "plugins"
@@ -1035,18 +1042,22 @@ DEFAULT_MENUS = {
     },
     "help_admin": {
         "text": (
-            to_small_caps("❓ admin help") + "\n\n"
-            + to_small_caps("📊 stats & activity — view the bot's live numbers") + "\n"
-            + to_small_caps("👥 users & groups — list or message any user") + "\n"
-            + to_small_caps("📢 broadcast — message everyone, with forward-lock") + "\n"
-            + to_small_caps("🎨 menu & ui — edit any menu's text, image or buttons") + "\n"
-            + to_small_caps("⚙️ settings & admins — welcome, admins, maintenance, languages") + "\n"
-            + to_small_caps("🛑 danger zone — destructive, irreversible actions")
+            "<blockquote>"
+            "<u>❓ " + to_small_caps("admin help") + "</u>\n\n"
+            "<u>➤ " + to_small_caps("📊 stats & activity — view the bot's live numbers") + "</u>\n\n"
+            "<u>➤ " + to_small_caps("👥 users & groups — list or message any user") + "</u>\n\n"
+            "<u>➤ " + to_small_caps("📢 broadcast — message everyone, with forward-lock") + "</u>\n\n"
+            "<u>➤ " + to_small_caps("🎨 menu & ui — edit any menu's text, image or buttons") + "</u>\n\n"
+            "<u>➤ " + to_small_caps("⚙️ settings & admins — welcome, admins, maintenance, languages") + "</u>\n\n"
+            "<u>➤ " + to_small_caps("📦 update backup — save every live setting + all users to 2 files, so a code update on github never wipes them") + "</u>\n\n"
+            "<u>➤ " + to_small_caps("🛑 danger zone — destructive, irreversible actions") + "</u>"
+            "</blockquote>"
         ),
-        "parse_mode": None,
+        "parse_mode": "HTML",
         "image_file_id": None,
         "buttons": [
-            {"label": "🔙 Admin Panel", "type": "callback", "value": "adm_home", "row": 1, "style": "primary"}
+            {"label": "📦 " + to_small_caps("update backup — how it works"), "type": "callback", "value": "help_update_backup_info", "row": 1, "style": "primary"},
+            {"label": "🔙 Admin Panel", "type": "callback", "value": "adm_home", "row": 2, "style": "primary"},
         ],
         "auto_delete_seconds": None,
         "updated_by": None,
@@ -1173,6 +1184,12 @@ DEFAULT_DATA = {
     "users": {},
     "groups": {},
     "admins": [OWNER_ID] if OWNER_ID else [],
+    # Granular admin access — str(admin_id) -> [permission_key, ...]. An
+    # admin with NO entry here (i.e. added before this feature existed) is
+    # treated as full-access, so nobody already trusted silently loses
+    # access. Only admins added from now on get an explicit, owner-chosen
+    # list. See ADMIN_PERMISSIONS / get_admin_perms() / has_admin_perm().
+    "admin_permissions": {},
     "blocked": [],
     "menus": json.loads(json.dumps(DEFAULT_MENUS)),
     "settings": {
@@ -1312,6 +1329,40 @@ def get_mongo_collection():
         return None
 
 
+def _apply_seed_files_if_present() -> bool:
+    """Part of the 📦 Update Backup system (see SEED_SETTINGS_FILE /
+    SEED_USERS_FILE and send_update_backup()). Only ever called from
+    load_data() in the branch where NO existing data was found (fresh
+    Mongo, or no local bot_data.json) — so on a host with persistent
+    storage this never runs and never clobbers live data. It exists
+    specifically for hosts that wipe the filesystem on every redeploy:
+    export the two seed files from the admin panel, commit them into the
+    repo next to bot.py with these exact names, push the update — the
+    bot then reconstructs its previous settings/menus/users right here,
+    automatically, on the very first startup after the deploy."""
+    global BOT_DATA
+    seed = {}
+    if os.path.exists(SEED_SETTINGS_FILE):
+        try:
+            with open(SEED_SETTINGS_FILE, "r", encoding="utf-8") as f:
+                seed.update(json.load(f))
+            log.info("Update Backup: found %s — seeding settings/menus from it.", SEED_SETTINGS_FILE)
+        except Exception as e:
+            log.warning("Update Backup: could not read %s: %s", SEED_SETTINGS_FILE, e)
+    if os.path.exists(SEED_USERS_FILE):
+        try:
+            with open(SEED_USERS_FILE, "r", encoding="utf-8") as f:
+                users_payload = json.load(f)
+            seed["users"] = users_payload.get("users", users_payload)
+            log.info("Update Backup: found %s — seeding users from it.", SEED_USERS_FILE)
+        except Exception as e:
+            log.warning("Update Backup: could not read %s: %s", SEED_USERS_FILE, e)
+    if seed:
+        BOT_DATA = _deep_merge_defaults(seed)
+        return True
+    return False
+
+
 def load_data():
     global BOT_DATA
     col = get_mongo_collection()
@@ -1331,6 +1382,7 @@ def load_data():
                 log.info("Migrated local JSON data into MongoDB.")
             else:
                 BOT_DATA = json.loads(json.dumps(DEFAULT_DATA))
+                _apply_seed_files_if_present()
                 col.update_one({"_id": "bot_data"}, {"$set": BOT_DATA}, upsert=True)
         return
 
@@ -1340,6 +1392,7 @@ def load_data():
         log.info("Loaded data from local JSON file.")
     else:
         BOT_DATA = json.loads(json.dumps(DEFAULT_DATA))
+        _apply_seed_files_if_present()
         save_data()
 
 
@@ -1421,6 +1474,61 @@ def is_owner(user_id: int) -> bool:
 
 def is_admin(user_id: int) -> bool:
     return is_owner(user_id) or user_id in BOT_DATA.get("admins", [])
+
+
+# ----------------------------------------------------------------------------
+# Granular admin permissions — every grantable Admin Panel section. Keys
+# match the panel's callback_data with the "adm_" prefix stripped (see
+# _perm_key_for_screen). 📦 Update Backup, ☠️ Danger Zone, and 👤 Manage
+# Admins are intentionally NOT in this list — they stay owner-only no
+# matter what, since they can export all data, do irreversible damage, or
+# hand out access, respectively.
+# ----------------------------------------------------------------------------
+ADMIN_PERMISSIONS = [
+    ("stats", "📊 Statistics"),
+    ("users", "👥 Users & Groups"),
+    ("live", "🕵️ Live User Feed"),
+    ("broadcast", "📢 Broadcast"),
+    ("premium", "💎 Premium"),
+    ("leaderboard", "🏆 Leaderboard"),
+    ("share", "📤 Share Settings"),
+    ("devsettings", "👨‍💻 Developer Settings"),
+    ("support_settings", "🎧 Support Settings"),
+    ("tickets", "🎫 Tickets"),
+    ("menu_ui", "🎨 Menu & UI"),
+    ("plugins", "🧩 Feature Plugins"),
+    ("notifications", "🔔 Notifications"),
+    ("activity", "📜 Activity Log"),
+    ("selftest", "🩺 Self-Test"),
+    ("cmdtest", "🧪 Test Commands"),
+    ("ai_check", "🤖 AI Check"),
+    ("settings", "⚙️ Settings"),
+]
+ADMIN_PERMISSION_KEYS = [k for k, _ in ADMIN_PERMISSIONS]
+ADMIN_PERMISSION_LABELS = dict(ADMIN_PERMISSIONS)
+
+
+def _perm_key_for_screen(screen_key: str) -> str:
+    return screen_key[4:] if screen_key.startswith("adm_") else screen_key
+
+
+def get_admin_perms(user_id: int) -> set:
+    """Owner -> every permission. An admin with NO explicit entry in
+    admin_permissions (i.e. added before this feature existed) also gets
+    every permission, so upgrading the bot never silently locks out an
+    already-trusted admin. Only admins added AFTER this feature exists get
+    the exact list the owner picked for them at add-time (can be empty)."""
+    if is_owner(user_id):
+        return set(ADMIN_PERMISSION_KEYS)
+    uid = str(user_id)
+    perms_map = BOT_DATA.get("admin_permissions", {})
+    if uid not in perms_map:
+        return set(ADMIN_PERMISSION_KEYS)  # legacy admin, added before permissions existed
+    return set(perms_map.get(uid) or [])
+
+
+def has_admin_perm(user_id: int, perm_key: str) -> bool:
+    return is_owner(user_id) or perm_key in get_admin_perms(user_id)
 
 
 def touch_user(update: Update) -> bool:
@@ -1714,7 +1822,8 @@ def build_join_details(update: Update, is_new: bool) -> str:
     chat = update.effective_chat
     lbl = to_title_small_caps
     username_display = f"@{user.username}" if user.username else "Not Set"
-    lang_code = (user.language_code or "").lower()
+    saved_lang = BOT_DATA.get("users", {}).get(str(user.id), {}).get("lang")
+    lang_code = (saved_lang or user.language_code or "").lower()
     lang_display = _LANGUAGE_NAME_MAP.get(lang_code, user.language_code or "Unknown")
 
     lines = [
@@ -2577,15 +2686,26 @@ async def cb_global_button_gate(update: Update, context: ContextTypes.DEFAULT_TY
 LANG_NAMES = {
     "en": "🇬🇧 English", "hi": "🇮🇳 हिन्दी", "es": "🇪🇸 Español",
     "fr": "🇫🇷 Français", "ar": "🇸🇦 العربية", "pt": "🇵🇹 Português",
-    "id": "🇮🇩 Indonesia", "bn": "🇧🇩 বাংলা", "ur": "🇵🇰 اردو",
+    "id": "🇮🇩 Indonesia", "bn": "🇧🇩 বাংলা", "ur": "🇵🇰 اردو", "ru": "🇷🇺 Русский",
 }
 
 
 def build_language_keyboard() -> InlineKeyboardMarkup:
-    langs = BOT_DATA["settings"].get("languages", [])
-    rows = [[styled_button("✨ Default (Hinglish)", callback_data="setlang:default")]]
-    for code in langs:
-        rows.append([styled_button(LANG_NAMES.get(code, code), callback_data=f"setlang:{code}")])
+    # Show every language configured by the bot, plus the built-in default.
+    # Keep the layout compact and consistent with the existing button styling.
+    configured = BOT_DATA["settings"].get("languages", [])
+    codes = []
+    for code in ("en", "hi", "es", "fr", "ar", "ru", "pt", "id", "bn", "ur"):
+        if code not in codes and (code in configured or code == "en"):
+            codes.append(code)
+    # If an admin has configured additional supported languages, include them.
+    for code in configured:
+        if code not in codes and code in LANG_NAMES:
+            codes.append(code)
+    rows = []
+    for i in range(0, len(codes), 2):
+        rows.append([styled_button(to_small_caps(LANG_NAMES.get(c, c)), callback_data=f"setlang:{c}") for c in codes[i:i+2]])
+    rows.append([styled_button("✨ " + to_small_caps("Default (Hinglish)"), callback_data="setlang:default")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -2597,12 +2717,24 @@ async def show_post_onboarding(context: ContextTypes.DEFAULT_TYPE, chat_id: int,
     disclaimer's 'I Agree & Continue' button so both paths land the user in
     the same place."""
     user = BOT_DATA["users"].get(uid, {})
-    langs = BOT_DATA["settings"].get("languages", [])
-    if not user.get("lang_prompted") and langs:
+    # Every private user must choose a language before the main menu is shown.
+    # The flag prevents the selector from interrupting normal navigation after
+    # the first successful selection, while /start can still restore it if the
+    # stored preference is missing.
+    if not user.get("lang_prompted"):
         user["lang_prompted"] = True
         save_data()
+        text = (
+            "🌐 <b>" + to_small_caps("Language Selection") + "</b>\n\n"
+            "<blockquote>"
+            "<u>➤ " + to_small_caps("Welcome!") + "</u>\n\n"
+            + to_small_caps("Please select your preferred language to continue.") + "\n\n"
+            "<u>➤ " + to_small_caps("Select Language") + "</u>\n"
+            + to_small_caps("Choose one of the languages below.") +
+            "</blockquote>"
+        )
         sent = await context.bot.send_message(
-            chat_id, "🌐 Welcome! Pick your language to get started:", reply_markup=build_language_keyboard()
+            chat_id, text, parse_mode="HTML", reply_markup=build_language_keyboard()
         )
         return sent
     sent = await render_menu(context, chat_id, "start")
@@ -4216,7 +4348,7 @@ async def show_usage_screen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     remaining = "Unlimited" if assigned_premium else str(max(0, limit - used))
 
     lines = [
-        to_title_small_caps("My Usage"), "",
+        "<u>" + to_title_small_caps("My Usage") + "</u>", "",
         f"Nᴀᴍᴇ : {html.escape(user.full_name)}",
         f"Uꜱᴇʀɴᴀᴍᴇ : {html.escape(username)}",
         f"Uꜱᴇʀ Iᴅ : {user.id}",
@@ -5035,44 +5167,59 @@ def get_admin_panel_title() -> str:
     return menu.get("text") or DEFAULT_MENUS["admin"]["text"]
 
 
-def admin_panel_keyboard():
-    # v6 — 2-per-row grid layout: every top-level Admin Panel entry is now
-    # arranged two buttons per row instead of one, so the whole panel fits
-    # on screen with far less scrolling, and related tools sit side by
-    # side for a cleaner, more predictable control flow. Grouped by
-    # purpose: money & plans, growth & sharing, people-facing ops,
-    # communication tools, content/config, then diagnostics.
-    # UPI Settings now lives inside 💎 Premium (it's payment config for
-    # premium plans, so it belongs with them, not as its own top-level
-    # button) and 🕵️ Live User Feed is paired with 👥 Users & Groups since
-    # both are user-monitoring tools — nothing sits alone on its own row.
-    # v10 — per request, every Admin Panel button is colorless/neutral
-    # (no `style`) — colors were only wanted on the user-facing bottom
-    # keyboard, not inside the admin tools. Category emojis are kept so
-    # buttons stay easy to tell apart at a glance without relying on color.
-    return InlineKeyboardMarkup(
-        [
-            [styled_button("💎 Premium", callback_data="adm_premium"),
-             styled_button("🏆 Leaderboard", callback_data="adm_leaderboard")],
-            [styled_button("📤 Share Settings", callback_data="adm_share"),
-             styled_button("📢 Broadcast", callback_data="adm_broadcast")],
-            [styled_button("👨‍💻 Developer Settings", callback_data="adm_devsettings"),
-             styled_button("🎧 Support Settings", callback_data="adm_support_settings")],
-            [styled_button("🎫 Tickets", callback_data="adm_tickets"),
-             styled_button("📊 Statistics", callback_data="adm_stats")],
-            [styled_button("👥 Users & Groups", callback_data="adm_users"),
-             styled_button("🕵️ Live User Feed", callback_data="adm_live")],
-            [styled_button("🎨 Menu & UI", callback_data="adm_menu_ui"),
-             styled_button("🧪 Test Commands", callback_data="adm_cmdtest")],
-            [styled_button("🤖 AI Check", callback_data="ai_check"),
-             styled_button("🔔 Notifications", callback_data="adm_notifications")],
-            [styled_button("📜 Activity Log", callback_data="adm_activity"),
-             styled_button("🩺 Self-Test", callback_data="adm_selftest")],
-            [styled_button("🧩 Feature Plugins", callback_data="adm_plugins"),
-             styled_button("⚙️ Settings", callback_data="adm_settings")],
-            [styled_button("☠️ Danger Zone", callback_data="adm_danger")],
-        ]
-    )
+def admin_panel_keyboard(user_id: int = None):
+    """Buttons are filtered per-caller: the owner sees everything; an admin
+    only sees the sections they've actually been granted (see
+    ADMIN_PERMISSIONS / get_admin_perms). 📦 Update Backup and ☠️ Danger
+    Zone are owner-only and are never shown to admins at all, no matter
+    what permissions they hold. Passing user_id=None shows every button
+    (kept for any legacy caller that hasn't been updated to pass it)."""
+    perms = get_admin_perms(user_id) if user_id is not None else set(ADMIN_PERMISSION_KEYS)
+
+    def allowed(perm_key):
+        return user_id is None or perm_key in perms
+
+    all_buttons = [
+        ("premium", styled_button("💎 Premium", callback_data="adm_premium")),
+        ("leaderboard", styled_button("🏆 Leaderboard", callback_data="adm_leaderboard")),
+        ("share", styled_button("📤 Share Settings", callback_data="adm_share")),
+        ("broadcast", styled_button("📢 Broadcast", callback_data="adm_broadcast")),
+        ("devsettings", styled_button("👨‍💻 Developer Settings", callback_data="adm_devsettings")),
+        ("support_settings", styled_button("🎧 Support Settings", callback_data="adm_support_settings")),
+        ("tickets", styled_button("🎫 Tickets", callback_data="adm_tickets")),
+        ("stats", styled_button("📊 Statistics", callback_data="adm_stats")),
+        ("users", styled_button("👥 Users & Groups", callback_data="adm_users")),
+        ("live", styled_button("🕵️ Live User Feed", callback_data="adm_live")),
+        ("menu_ui", styled_button("🎨 Menu & UI", callback_data="adm_menu_ui")),
+        ("cmdtest", styled_button("🧪 Test Commands", callback_data="adm_cmdtest")),
+        ("ai_check", styled_button("🤖 AI Check", callback_data="ai_check")),
+        ("notifications", styled_button("🔔 Notifications", callback_data="adm_notifications")),
+        ("activity", styled_button("📜 Activity Log", callback_data="adm_activity")),
+        ("selftest", styled_button("🩺 Self-Test", callback_data="adm_selftest")),
+        ("plugins", styled_button("🧩 Feature Plugins", callback_data="adm_plugins")),
+        ("settings", styled_button("⚙️ Settings", callback_data="adm_settings")),
+    ]
+
+    rows, row = [], []
+    for perm_key, btn in all_buttons:
+        if not allowed(perm_key):
+            continue
+        row.append(btn)
+        if len(row) == 2:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+
+    # Owner-only, always — never granted to admins via permissions.
+    if user_id is None or is_owner(user_id):
+        rows.append([styled_button("📦 Update Backup", callback_data="adm_update_backup"),
+                     styled_button("☠️ Danger Zone", callback_data="adm_danger")])
+
+    if not rows:
+        rows = [[styled_button("ℹ️ No Sections Granted Yet", callback_data="adm_home")]]
+
+    return InlineKeyboardMarkup(rows)
 
 
 def back_row(cb="adm_back", label="🔙 Back"):
@@ -5092,13 +5239,13 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await _clear_ephemeral(context, update.effective_chat.id)
     context.user_data["adm_nav_stack"] = ["adm_home"]
-    sent = await update.message.reply_text(get_admin_panel_title(), reply_markup=admin_panel_keyboard())
+    sent = await update.message.reply_text(get_admin_panel_title(), reply_markup=admin_panel_keyboard(update.effective_user.id))
     await track_and_refresh_panel(context, update.effective_chat.id, "admin", sent)
     await delete_incoming(update)
 
 
 async def _render_adm_home(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.edit_message_text(get_admin_panel_title(), reply_markup=admin_panel_keyboard())
+    await update.callback_query.edit_message_text(get_admin_panel_title(), reply_markup=admin_panel_keyboard(update.effective_user.id))
 
 
 async def cb_adm_home(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -5375,7 +5522,7 @@ async def cb_run_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         elif key == "admin":
             await query.answer("✅ " + to_small_caps("running /admin..."))
-            await send(get_admin_panel_title(), reply_markup=admin_panel_keyboard())
+            await send(get_admin_panel_title(), reply_markup=admin_panel_keyboard(admin_id))
 
         elif key == "ping":
             # Same live status data/format as the real /ping command.
@@ -5607,9 +5754,22 @@ SCREEN_RENDERERS = {}  # populated just above build_app, once every screen fn ex
 def nav_tracked(screen_key):
     """Wraps a screen's callback handler so entering it gets pushed onto the
     per-admin nav stack, so 'Back' can unwind through however many screens
-    were visited, not just to a single hardcoded parent."""
+    were visited, not just to a single hardcoded parent.
+
+    Also doubles as the enforcement point for granular admin permissions:
+    if screen_key maps to a key in ADMIN_PERMISSIONS, the caller must have
+    that permission (owner always does). Nested/utility screens that
+    aren't in the catalog (e.g. a broadcast sub-step) are left ungated
+    here since reaching them already required passing the gated top-level
+    screen first."""
     def deco(fn):
         async def wrapped(update, context):
+            perm_key = _perm_key_for_screen(screen_key)
+            if perm_key in ADMIN_PERMISSION_KEYS and not has_admin_perm(update.effective_user.id, perm_key):
+                await update.callback_query.answer(
+                    "🔒 " + to_small_caps("you don't have access to this section."), show_alert=True,
+                )
+                return
             stack = context.user_data.setdefault("adm_nav_stack", ["adm_home"])
             if not stack or stack[-1] != screen_key:
                 stack.append(screen_key)
@@ -6667,34 +6827,39 @@ async def _render_adm_settings(update: Update, context: ContextTypes.DEFAULT_TYP
     s = BOT_DATA["settings"]
     # v6 — same 2-per-row grid treatment as the top-level Admin Panel, so
     # deep submenus stay just as easy to scan and control.
-    kb = InlineKeyboardMarkup(
-        [
-            [styled_button("🔒 Maintenance", callback_data="adm_maintenance")],
-            [styled_button(f"⏱ Global Auto-Delete: {s.get('global_auto_delete_seconds', 0)}s", callback_data="adm_set_autodelete"),
-             styled_button("💬 Auto-Replies", callback_data="adm_autoreply_list")],
-            [styled_button("👤 Manage Admins", callback_data="adm_manage_admins"),
-             styled_button("📥 Restore Backup", callback_data="adm_restore_info")],
-            [styled_button(
-                 toggle_label("🔐 Lock All Forwarding", s.get('lock_all_content')),
-                 callback_data="stgl:lock_all_content:adm_settings",
-             ),
-             styled_button("👑 Owner/Developer Contact", callback_data="adm_owner_contact")],
-            [styled_button("📋 Logger Channel", callback_data="adm_logger_channel"),
-             styled_button("📣 Activity Channel", callback_data="adm_activity_channel")],
-            [styled_button(f"📢 Force-Join: {s.get('force_join_channel') or 'OFF'}", callback_data="adm_force_join")],
-            [styled_button(
-                toggle_label("📄 Send As Document", s.get('send_as_document')),
-                callback_data="stgl:send_as_document:adm_settings",
-            )],
-            [styled_button(
-                 toggle_label("🌟 Premium Emoji Greeting", s.get('premium_emoji_enabled')),
-                 callback_data="stgl:premium_emoji_enabled:adm_settings",
-             ),
-             styled_button("✏️ Set Premium Emoji", callback_data="adm_set_premium_emoji")],
-            back_row(),
-            home_row(),
-        ]
-    )
+    rows = [
+        [styled_button("🔒 Maintenance", callback_data="adm_maintenance")],
+        [styled_button(f"⏱ Global Auto-Delete: {s.get('global_auto_delete_seconds', 0)}s", callback_data="adm_set_autodelete"),
+         styled_button("💬 Auto-Replies", callback_data="adm_autoreply_list")],
+    ]
+    # 👤 Manage Admins and 📥 Restore Backup can hand out or restore access
+    # to everything, so — like 📦 Update Backup / ☠️ Danger Zone — they stay
+    # owner-only even though "settings" itself is a grantable permission.
+    if is_owner(update.effective_user.id):
+        rows.append([styled_button("👤 Manage Admins", callback_data="adm_manage_admins"),
+                     styled_button("📥 Restore Backup", callback_data="adm_restore_info")])
+    rows += [
+        [styled_button(
+             toggle_label("🔐 Lock All Forwarding", s.get('lock_all_content')),
+             callback_data="stgl:lock_all_content:adm_settings",
+         ),
+         styled_button("👑 Owner/Developer Contact", callback_data="adm_owner_contact")],
+        [styled_button("📋 Logger Channel", callback_data="adm_logger_channel"),
+         styled_button("📣 Activity Channel", callback_data="adm_activity_channel")],
+        [styled_button(f"📢 Force-Join: {s.get('force_join_channel') or 'OFF'}", callback_data="adm_force_join")],
+        [styled_button(
+            toggle_label("📄 Send As Document", s.get('send_as_document')),
+            callback_data="stgl:send_as_document:adm_settings",
+        )],
+        [styled_button(
+             toggle_label("🌟 Premium Emoji Greeting", s.get('premium_emoji_enabled')),
+             callback_data="stgl:premium_emoji_enabled:adm_settings",
+         ),
+         styled_button("✏️ Set Premium Emoji", callback_data="adm_set_premium_emoji")],
+        back_row(),
+        home_row(),
+    ]
+    kb = InlineKeyboardMarkup(rows)
     await query.edit_message_text(
         "⚙️ " + to_small_caps("settings") + "\n"
         + to_small_caps("configure core bot behaviour below."),
@@ -7334,19 +7499,51 @@ async def cb_adm_autoreply_del(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.message.reply_text(to_small_caps("send the keyword you want to remove."))
 
 
+def _perm_summary_text(selected: set) -> str:
+    if not selected:
+        return to_small_caps("no sections selected — this admin won't see anything in the panel yet.")
+    lines = [f"• {ADMIN_PERMISSION_LABELS[k]}" for k in ADMIN_PERMISSION_KEYS if k in selected]
+    return to_small_caps("access granted") + ":\n" + "\n".join(lines)
+
+
+def _perm_picker_keyboard(selected: set, confirm_cb: str, cancel_cb: str, toggle_prefix: str) -> InlineKeyboardMarkup:
+    """Shared toggle-grid used both when adding a new admin and when
+    editing an existing one's access. ✅/⬜ next to each grantable section
+    (see ADMIN_PERMISSIONS) — 📦 Update Backup, ☠️ Danger Zone, and 👤
+    Manage Admins are deliberately absent: they're owner-only forever."""
+    rows, row = [], []
+    for key, label in ADMIN_PERMISSIONS:
+        mark = "✅" if key in selected else "⬜"
+        row.append(styled_button(f"{mark} {label}", callback_data=f"{toggle_prefix}:{key}"))
+        if len(row) == 2:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    rows.append([styled_button("✅ Select All", callback_data=f"{toggle_prefix}_all"),
+                 styled_button("⬜ Clear All", callback_data=f"{toggle_prefix}_none")])
+    rows.append([styled_button("💾 Save", callback_data=confirm_cb),
+                 styled_button("🚫 Cancel", callback_data=cancel_cb)])
+    return InlineKeyboardMarkup(rows)
+
+
 async def cb_adm_manage_admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    if not is_owner(update.effective_user.id):
+        await query.answer("🔒 " + to_small_caps("only the owner can access this."), show_alert=True)
+        return
     admins = BOT_DATA.get("admins", [])
-    text = "👤 Current Admins\n\n" + "\n".join(f"• {a}" for a in admins)
-    kb = InlineKeyboardMarkup(
-        [
-            [styled_button("➕ Add Admin", callback_data="adm_add_admin")],
-            [styled_button("➖ Remove Admin", callback_data="adm_remove_admin")],
-            [styled_button("🔙 Back", callback_data="adm_settings")],
-        ]
-    )
-    await query.edit_message_text(text, reply_markup=kb)
+    lines = ["👤 " + to_small_caps("current admins") + "\n"]
+    rows = []
+    for a in admins:
+        n_perms = len(get_admin_perms(a))
+        lines.append(f"• {a} — {n_perms}/{len(ADMIN_PERMISSION_KEYS)} " + to_small_caps("sections"))
+        rows.append([styled_button(f"✏️ {to_small_caps('edit access')} — {a}", callback_data=f"admperm_edit:{a}")])
+    rows.append([styled_button("➕ Add Admin", callback_data="adm_add_admin")])
+    rows.append([styled_button("➖ Remove Admin", callback_data="adm_remove_admin")])
+    rows.append([styled_button("🔙 Back", callback_data="adm_settings")])
+    await query.edit_message_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(rows))
 
 
 async def cb_adm_add_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -7369,9 +7566,187 @@ async def cb_adm_remove_admin(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.message.reply_text(to_small_caps("send the user id of the admin to remove."))
 
 
+# ---- New-admin access picker: shown right after /add_admin_id is entered ----
+
+async def _render_newadmin_picker(query, context):
+    draft = context.user_data.setdefault("newadmin_perms_draft", set())
+    new_id = context.user_data.get("newadmin_id_draft")
+    text = (
+        "➕ " + to_small_caps(f"choose access for admin {new_id}") + "\n\n"
+        + to_small_caps("tap a section to toggle it, then save. only what you tick here is what they'll be able to open.") + "\n\n"
+        + _perm_summary_text(draft)
+    )
+    await query.edit_message_text(text, reply_markup=_perm_picker_keyboard(draft, "newadmin_confirm", "newadmin_cancel", "newadmin_perm"))
+
+
+async def cb_newadmin_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if not is_owner(update.effective_user.id):
+        return
+    key = query.data.split(":", 1)[1]
+    draft = context.user_data.setdefault("newadmin_perms_draft", set())
+    draft.symmetric_difference_update({key})
+    await _render_newadmin_picker(query, context)
+
+
+async def cb_newadmin_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if not is_owner(update.effective_user.id):
+        return
+    context.user_data["newadmin_perms_draft"] = set(ADMIN_PERMISSION_KEYS)
+    await _render_newadmin_picker(query, context)
+
+
+async def cb_newadmin_none(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if not is_owner(update.effective_user.id):
+        return
+    context.user_data["newadmin_perms_draft"] = set()
+    await _render_newadmin_picker(query, context)
+
+
+async def cb_newadmin_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if not is_owner(update.effective_user.id):
+        return
+    new_id = context.user_data.pop("newadmin_id_draft", None)
+    draft = context.user_data.pop("newadmin_perms_draft", set())
+    if new_id is None:
+        await query.edit_message_text(to_small_caps("this expired — please try adding the admin again."))
+        return
+    if new_id not in BOT_DATA["admins"]:
+        BOT_DATA["admins"].append(new_id)
+    BOT_DATA.setdefault("admin_permissions", {})[str(new_id)] = sorted(draft)
+    save_data()
+    await query.edit_message_text("✅ " + to_small_caps(f"{new_id} is now an admin.") + "\n\n" + _perm_summary_text(draft))
+    await log_event(context, f"👤 Admin added: {new_id} — {len(draft)}/{len(ADMIN_PERMISSION_KEYS)} section(s) (by {update.effective_user.id})")
+
+
+async def cb_newadmin_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    context.user_data.pop("newadmin_id_draft", None)
+    context.user_data.pop("newadmin_perms_draft", None)
+    await query.edit_message_text(to_small_caps("cancelled — no admin was added."))
+
+
+# ---- Edit-existing-admin access picker (from Manage Admins ✏️) -------------
+
+async def _render_editperm_picker(query, context):
+    draft = context.user_data.setdefault("editperm_draft", set())
+    target_id = context.user_data.get("editperm_target_id")
+    text = (
+        "✏️ " + to_small_caps(f"editing access for admin {target_id}") + "\n\n"
+        + to_small_caps("tap a section to toggle it, then save.") + "\n\n"
+        + _perm_summary_text(draft)
+    )
+    await query.edit_message_text(text, reply_markup=_perm_picker_keyboard(draft, "editperm_confirm", "editperm_cancel", "editperm_perm"))
+
+
+async def cb_admperm_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if not is_owner(update.effective_user.id):
+        return
+    target_id = int(query.data.split(":", 1)[1])
+    context.user_data["editperm_target_id"] = target_id
+    context.user_data["editperm_draft"] = get_admin_perms(target_id)
+    await _render_editperm_picker(query, context)
+
+
+async def cb_editperm_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if not is_owner(update.effective_user.id):
+        return
+    key = query.data.split(":", 1)[1]
+    draft = context.user_data.setdefault("editperm_draft", set())
+    draft.symmetric_difference_update({key})
+    await _render_editperm_picker(query, context)
+
+
+async def cb_editperm_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if not is_owner(update.effective_user.id):
+        return
+    context.user_data["editperm_draft"] = set(ADMIN_PERMISSION_KEYS)
+    await _render_editperm_picker(query, context)
+
+
+async def cb_editperm_none(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if not is_owner(update.effective_user.id):
+        return
+    context.user_data["editperm_draft"] = set()
+    await _render_editperm_picker(query, context)
+
+
+async def cb_editperm_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if not is_owner(update.effective_user.id):
+        return
+    target_id = context.user_data.pop("editperm_target_id", None)
+    draft = context.user_data.pop("editperm_draft", set())
+    if target_id is None:
+        await query.edit_message_text(to_small_caps("this expired — please try again."))
+        return
+    BOT_DATA.setdefault("admin_permissions", {})[str(target_id)] = sorted(draft)
+    save_data()
+    await query.edit_message_text("✅ " + to_small_caps(f"access updated for {target_id}.") + "\n\n" + _perm_summary_text(draft))
+    await log_event(context, f"🔧 Admin access updated: {target_id} -> {len(draft)}/{len(ADMIN_PERMISSION_KEYS)} section(s) (by {update.effective_user.id})")
+
+
+async def cb_editperm_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    context.user_data.pop("editperm_target_id", None)
+    context.user_data.pop("editperm_draft", None)
+    await query.edit_message_text(to_small_caps("cancelled — no changes made."))
+
+
+async def cb_help_update_backup_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    is_own = is_owner(update.effective_user.id)
+    text = (
+        "<blockquote expandable>"
+        "<u>📦 " + to_small_caps("update backup — how it works") + "</u>\n\n"
+        + to_small_caps("normally, pushing a new bot.py to github wipes the live data — every setting, every menu edit, every saved user — because most free hosts start from a clean, empty disk on every deploy.") + "\n\n"
+        "<u>➤ " + to_small_caps("step 1 — export") + "</u>\n"
+        + to_small_caps("before you push a code update, run 📦 update backup from the admin panel (or /updatebackup). the bot sends you 2 files:") + "\n"
+        "  • <code>" + SEED_SETTINGS_FILE + "</code> — " + to_small_caps("every setting, menu, admin, group, ticket etc. (no users)") + "\n"
+        "  • <code>" + SEED_USERS_FILE + "</code> — " + to_small_caps("the full user list") + "\n\n"
+        "<u>➤ " + to_small_caps("step 2 — commit") + "</u>\n"
+        + to_small_caps("add both files into your github repo, in the same folder as bot.py, using those exact names, then push your updated code.") + "\n\n"
+        "<u>➤ " + to_small_caps("step 3 — auto-restore") + "</u>\n"
+        + to_small_caps("on the next startup, if the host has no existing data (fresh/wiped disk), the bot automatically reads both files and restores everything by itself — no restore command, no manual upload.") + "\n\n"
+        "<u>➤ " + to_small_caps("safety") + "</u>\n"
+        + to_small_caps("if the bot already has live data (a host with persistent storage), the seed files are ignored — your current live data is never overwritten automatically.")
+        + ("\n\n🔒 " + to_small_caps("only the owner can actually run the export (📦 update backup / /updatebackup) — this help screen is visible to every admin.") if not is_own else "")
+        + "</blockquote>"
+    )
+    kb = InlineKeyboardMarkup(
+        [[styled_button("🔙 Back", callback_data="nav:help_admin")]]
+        if not is_own else
+        [[styled_button("📦 Run Update Backup Now", callback_data="adm_update_backup")],
+         [styled_button("🔙 Back", callback_data="nav:help_admin")]]
+    )
+    await query.edit_message_text(text, parse_mode="HTML", reply_markup=kb)
+
+
 async def cb_adm_restore_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    if not is_owner(update.effective_user.id):
+        await query.answer("🔒 " + to_small_caps("only the owner can restore a backup."), show_alert=True)
+        return
     await query.message.reply_text(
         to_small_caps("📥 restore backup") + "\n\n"
         + to_small_caps("send me the .json or .json.enc backup file directly in this dm (the one exported via /database). ")
@@ -7889,11 +8264,19 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
             await update.message.reply_text(to_small_caps("please send a valid numeric user id."))
             return
         new_id = int(text)
-        if new_id not in BOT_DATA["admins"]:
-            BOT_DATA["admins"].append(new_id)
-            save_data()
-        await update.message.reply_text(to_small_caps(f"✅ {new_id} is now an admin."))
-        await log_event(context, f"👤 Admin added: {new_id} (by {update.effective_user.id})")
+        if new_id in BOT_DATA["admins"]:
+            await update.message.reply_text(to_small_caps(f"{new_id} is already an admin — use ✏️ edit access instead."))
+            return
+        context.user_data["newadmin_id_draft"] = new_id
+        context.user_data["newadmin_perms_draft"] = set()
+        text_out = (
+            "➕ " + to_small_caps(f"choose access for admin {new_id}") + "\n\n"
+            + to_small_caps("tap a section to toggle it, then save. only what you tick here is what they'll be able to open.") + "\n\n"
+            + _perm_summary_text(set())
+        )
+        await update.message.reply_text(
+            text_out, reply_markup=_perm_picker_keyboard(set(), "newadmin_confirm", "newadmin_cancel", "newadmin_perm")
+        )
 
     elif awaiting == "remove_admin_id":
         context.user_data.pop("awaiting", None)
@@ -7903,6 +8286,7 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
         rem_id = int(text)
         if rem_id in BOT_DATA["admins"]:
             BOT_DATA["admins"].remove(rem_id)
+            BOT_DATA.get("admin_permissions", {}).pop(str(rem_id), None)
             save_data()
         await update.message.reply_text(f"✅ {rem_id} admin list se hata diya.")
         await log_event(context, f"👤 Admin removed: {rem_id} (by {update.effective_user.id})")
@@ -8457,6 +8841,66 @@ async def cmd_database(update: Update, context: ContextTypes.DEFAULT_TYPE):
     os.remove(path)
 
 
+async def send_update_backup(bot, chat_id):
+    """The 📦 Update Backup system. Sends TWO plain (never encrypted) JSON
+    files, with fixed names so they can be committed straight into the
+    GitHub repo next to bot.py, unchanged:
+
+      • bot_settings_seed.json — everything EXCEPT users (menus, settings,
+        admins, groups, tickets, broadcast log, metrics, etc.)
+      • bot_users_seed.json    — just the full user list/info.
+
+    Workflow: before pushing a code update, run this (📦 Update Backup in
+    the admin panel, or /updatebackup) → download both files → add/commit
+    them into the repo with these exact names → push. On the next deploy,
+    if the host has no existing data (see _apply_seed_files_if_present in
+    load_data()), the bot auto-restores everything from these two files —
+    no manual DM-restore step needed."""
+    settings_data = {k: v for k, v in BOT_DATA.items() if k != "users"}
+    users_data = {"users": BOT_DATA.get("users", {})}
+
+    ts = int(time.time())
+    settings_path = os.path.join(tempfile.gettempdir(), f"update_backup_settings_{ts}.json")
+    users_path = os.path.join(tempfile.gettempdir(), f"update_backup_users_{ts}.json")
+    with open(settings_path, "w", encoding="utf-8") as f:
+        json.dump(settings_data, f, ensure_ascii=False, indent=2)
+    with open(users_path, "w", encoding="utf-8") as f:
+        json.dump(users_data, f, ensure_ascii=False, indent=2)
+
+    intro = to_small_caps(
+        "📦 update backup — 2 files, exact names required. put both next to "
+        "bot.py in your github repo and commit them BEFORE pushing a new "
+        f"version:\n\n• {SEED_SETTINGS_FILE}\n• {SEED_USERS_FILE}\n\n"
+        "on the next deploy, if the host has no existing data, the bot "
+        "auto-loads these back in on startup. no manual restore needed."
+    )
+    await bot.send_message(chat_id, intro)
+    with open(settings_path, "rb") as f:
+        await bot.send_document(chat_id, document=f, filename=SEED_SETTINGS_FILE)
+    with open(users_path, "rb") as f:
+        await bot.send_document(
+            chat_id, document=f, filename=SEED_USERS_FILE,
+            caption=f"👥 {to_small_caps('users in this file')}: {len(BOT_DATA.get('users', {}))}",
+        )
+    os.remove(settings_path)
+    os.remove(users_path)
+
+
+async def cmd_updatebackup(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_owner(update.effective_user.id):
+        return
+    await send_update_backup(context.bot, update.effective_chat.id)
+
+
+async def cb_adm_update_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not is_owner(update.effective_user.id):
+        await query.answer("🔒 " + to_small_caps("owner only."), show_alert=True)
+        return
+    await query.answer("✅ " + to_small_caps("building update backup..."))
+    await send_update_backup(context.bot, update.effective_chat.id)
+
+
 async def cmd_exportusers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """CSV export of users."""
     if not is_owner(update.effective_user.id):
@@ -8849,6 +9293,17 @@ async def handle_restore_upload(update: Update, context: ContextTypes.DEFAULT_TY
         os.remove(raw_path)
         return
 
+    # 📦 Update Backup split files — sent one at a time, each merges into
+    # the CURRENT live data instead of replacing everything (unlike a full
+    # combined /database backup, which replaces it all).
+    if fname == SEED_SETTINGS_FILE:
+        incoming = dict(incoming)
+        incoming["users"] = BOT_DATA.get("users", {})
+    elif fname == SEED_USERS_FILE:
+        merged_incoming = json.loads(json.dumps(BOT_DATA))
+        merged_incoming["users"] = incoming.get("users", incoming)
+        incoming = merged_incoming
+
     if not set(DEFAULT_DATA.keys()).issubset(set(incoming.keys())):
         await update.message.reply_text(to_small_caps("❌ this doesn't look like a valid backup file. restore cancelled."))
         os.remove(raw_path)
@@ -9177,6 +9632,7 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("dbstatus", cmd_dbstatus))
     app.add_handler(CommandHandler("health", cmd_health))
     app.add_handler(CommandHandler("database", cmd_database))
+    app.add_handler(CommandHandler("updatebackup", cmd_updatebackup))
     app.add_handler(CommandHandler("export", cmd_export))
     app.add_handler(CommandHandler("exportusers", cmd_exportusers))
     app.add_handler(CommandHandler("exportpdf", cmd_exportpdf))
@@ -9252,7 +9708,7 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(cb_adm_back, pattern="^adm_back$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_stats")(cb_adm_stats), pattern="^adm_stats$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_notifications")(cb_adm_notifications), pattern="^adm_notifications$"))
-    app.add_handler(CallbackQueryHandler(cb_ai_check, pattern="^ai_check$"))
+    app.add_handler(CallbackQueryHandler(nav_tracked("ai_check")(cb_ai_check), pattern="^ai_check$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_users")(cb_adm_users), pattern="^adm_users$"))
     app.add_handler(CallbackQueryHandler(cb_adm_users_list, pattern="^adm_users_list$"))
     app.add_handler(CallbackQueryHandler(cb_adm_groups_list, pattern="^adm_groups_list$"))
@@ -9307,7 +9763,20 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(cb_adm_manage_admins, pattern="^adm_manage_admins$"))
     app.add_handler(CallbackQueryHandler(cb_adm_add_admin, pattern="^adm_add_admin$"))
     app.add_handler(CallbackQueryHandler(cb_adm_remove_admin, pattern="^adm_remove_admin$"))
+    app.add_handler(CallbackQueryHandler(cb_newadmin_toggle, pattern="^newadmin_perm:"))
+    app.add_handler(CallbackQueryHandler(cb_newadmin_all, pattern="^newadmin_perm_all$"))
+    app.add_handler(CallbackQueryHandler(cb_newadmin_none, pattern="^newadmin_perm_none$"))
+    app.add_handler(CallbackQueryHandler(cb_newadmin_confirm, pattern="^newadmin_confirm$"))
+    app.add_handler(CallbackQueryHandler(cb_newadmin_cancel, pattern="^newadmin_cancel$"))
+    app.add_handler(CallbackQueryHandler(cb_admperm_edit, pattern="^admperm_edit:"))
+    app.add_handler(CallbackQueryHandler(cb_editperm_toggle, pattern="^editperm_perm:"))
+    app.add_handler(CallbackQueryHandler(cb_editperm_all, pattern="^editperm_perm_all$"))
+    app.add_handler(CallbackQueryHandler(cb_editperm_none, pattern="^editperm_perm_none$"))
+    app.add_handler(CallbackQueryHandler(cb_editperm_confirm, pattern="^editperm_confirm$"))
+    app.add_handler(CallbackQueryHandler(cb_editperm_cancel, pattern="^editperm_cancel$"))
     app.add_handler(CallbackQueryHandler(cb_adm_restore_info, pattern="^adm_restore_info$"))
+    app.add_handler(CallbackQueryHandler(cb_help_update_backup_info, pattern="^help_update_backup_info$"))
+    app.add_handler(CallbackQueryHandler(cb_adm_update_backup, pattern="^adm_update_backup$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_owner_contact")(cb_adm_owner_contact), pattern="^adm_owner_contact$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_logger_channel")(cb_adm_logger_channel), pattern="^adm_logger_channel$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_activity_channel")(cb_adm_activity_channel), pattern="^adm_activity_channel$"))

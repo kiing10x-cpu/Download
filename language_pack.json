@@ -1,0 +1,148 @@
+{
+  "version": "1.0",
+  "default": "en",
+  "languages": {
+    "en": "🇬🇧 English",
+    "hi": "🇮🇳 हिन्दी",
+    "es": "🇪🇸 Español",
+    "fr": "🇫🇷 Français",
+    "ar": "🇸🇦 العربية",
+    "pt": "🇵🇹 Português",
+    "id": "🇮🇩 Indonesia",
+    "bn": "🇧🇩 বাংলা",
+    "ur": "🇵🇰 اردو",
+    "ru": "🇷🇺 Русский"
+  },
+  "menus": {
+    "start": {
+      "en": {
+        "text": "<blockquote>Hᴇʟʟᴏ, {username}!\n\n𝐖𝐄𝐋𝐂𝐎𝐌𝐄 ᴛᴏ {bot_link}\n\nYᴏᴜʀ ᴘᴇʀsᴏɴᴀʟ Iɴsᴛᴀɢʀᴀᴍ Rᴇᴇʟ ᴀssɪsᴛᴀɴᴛ.\n\n𝐓𝐇𝐈𝐒 𝐁𝐎𝐓 𝐂𝐀𝐍\n\n<u>➤ Dᴏᴡɴʟᴏᴀᴅ Iɴsᴛᴀɢʀᴀᴍ Rᴇᴇʟs</u>\n\n<u>➤ Gᴇᴛ Rᴇᴇʟ Cᴀᴘᴛɪᴏɴs</u>\n\n<u>➤ Gᴇᴛ Rᴇᴇʟ Aᴜᴅɪᴏ</u>\n\n𝐖𝐇𝐘 𝐂𝐇𝐎𝐎𝐒𝐄 𝐔𝐒?\n\n<u>➤ Nᴏ Wᴀᴛᴇʀᴍᴀʀᴋs</u>\n\n<u>➤ Hɪɢʜ-Qᴜᴀʟɪᴛʏ Rᴇᴇʟ Dᴏᴡɴʟᴏᴀᴅs</u>\n\n<u>➤ Fᴀsᴛ ᴀɴᴅ Sᴍᴏᴏᴛʜ Sᴇʀᴠɪᴄᴇ</u>\n\n<u>➤ Hᴀssʟᴇ-Fʀᴇᴇ ᴀɴᴅ Eᴀsʏ ᴛᴏ Uꜱᴇ</u>\n\n<u>➤ Sᴀᴠᴇs Tɪᴍᴇ ᴀɴᴅ Eғғᴏʀᴛ</u>\n\n<u>➤ Rᴇᴇʟ, Cᴀᴘᴛɪᴏɴ ᴀɴᴅ Aᴜᴅɪᴏ ɪɴ Oɴᴇ Pʟᴀᴄᴇ</u>\n\n<u>➤ Nᴏ Exᴛʀᴀ Tᴏᴏʟs ᴏʀ Cᴏᴍᴘʟɪᴄᴀᴛᴇᴅ Sᴛᴇᴘs</u></blockquote>"
+      },
+      "hi": {
+        "text": "<blockquote>Hᴇʟʟᴏ, {username}!\n\n𝐖𝐄𝐋𝐂𝐎𝐌𝐄 ᴛᴏ {bot_link}\n\nAᴘᴋᴀ Pᴇʀsᴏɴᴀʟ Iɴsᴛᴀɢʀᴀᴍ Rᴇᴇʟ Aꜱꜱɪꜱᴛᴀɴᴛ.\n\n𝐘𝐄 𝐁𝐎𝐓 𝐊𝐘𝐀 𝐊𝐀𝐑 𝐒𝐀𝐊𝐓𝐀 𝐇𝐀𝐈\n\n<u>➤ Iɴsᴛᴀɢʀᴀᴍ Rᴇᴇʟ Dᴏᴡɴʟᴏᴀᴅ Kᴀʀᴇɴ</u>\n\n<u>➤ Rᴇᴇʟ Cᴀᴘᴛɪᴏɴ Pʀᴀᴘᴛ Kᴀʀᴇɴ</u>\n\n<u>➤ Rᴇᴇʟ Aᴜᴅɪᴏ Nɪᴋᴀʟᴇɴ</u>\n\n𝐇𝐀𝐌𝐄𝐍 𝐊𝐘𝐔𝐍 𝐂𝐇𝐎𝐎𝐒𝐄 𝐊𝐀𝐑𝐄𝐍?\n\n<u>➤ Nᴏ Wᴀᴛᴇʀᴍᴀʀᴋ</u>\n\n<u>➤ Hɪɢʜ-Qᴜᴀʟɪᴛʏ Rᴇᴇʟ Dᴏᴡɴʟᴏᴀᴅs</u>\n\n<u>➤ Fᴀsᴛ ᴀɴᴅ Sᴍᴏᴏᴛʜ Sᴇʀᴠɪᴄᴇ</u>\n\n<u>➤ Eᴀsʏ ᴀɴᴅ Hᴀssʟᴇ-Fʀᴇᴇ Uꜱᴇ</u>\n\n<u>➤ Tɪᴍᴇ ᴀɴᴅ Eғғᴏʀᴛ Bᴀᴄʜᴀᴇɴ</u>\n\n<u>➤ Rᴇᴇʟ, Cᴀᴘᴛɪᴏɴ ᴀᴜʀ Aᴜᴅɪᴏ Eᴋ Jᴀɢᴀʜ</u>\n\n<u>➤ Kᴏɪ Exᴛʀᴀ Tᴏᴏʟ Nᴀʜɪ Cʜᴀʜɪʏᴇ</u></blockquote>"
+      },
+      "es": {
+        "text": "<blockquote>Hᴏʟᴀ, {username}!\n\n𝐁𝐈𝐄𝐍𝐕𝐄𝐍𝐈𝐃𝐎 ᴀ {bot_link}\n\nTᴜ ᴀsɪsᴛᴇɴᴛᴇ ᴘᴇʀsᴏɴᴀʟ ᴘᴀʀᴀ Rᴇᴇʟs ᴅᴇ Iɴsᴛᴀɢʀᴀᴍ.\n\n<u>➤ Dᴇsᴄᴀʀɢᴀʀ Rᴇᴇʟs ᴅᴇ Iɴsᴛᴀɢʀᴀᴍ</u>\n\n<u>➤ Oʙᴛᴇɴᴇʀ Cᴀᴘᴛᴜʀᴀs ᴅᴇʟ Rᴇᴇʟ</u>\n\n<u>➤ Oʙᴛᴇɴᴇʀ Aᴜᴅɪᴏ ᴅᴇʟ Rᴇᴇʟ</u>\n\n<u>➤ Sɪɴ Mᴀʀᴄᴀ ᴅᴇ Aɢᴜᴀ</u>\n\n<u>➤ Aʟᴛᴀ Cᴀʟɪᴅᴀᴅ</u>\n\n<u>➤ Rᴀ́ᴘɪᴅᴏ ʏ Sᴇɴᴄɪʟʟᴏ</u></blockquote>"
+      },
+      "fr": {
+        "text": "<blockquote>Bᴏɴᴊᴏᴜʀ, {username} !\n\n𝐁𝐈𝐄𝐍𝐕𝐄𝐍𝐔ᴇ sᴜʀ {bot_link}\n\nVᴏᴛʀᴇ ᴀssɪsᴛᴀɴᴛ ᴘᴇʀsᴏɴɴᴇʟ ᴘᴏᴜʀ ʟᴇs Rᴇᴇʟs Iɴsᴛᴀɢʀᴀᴍ.\n\n<u>➤ Tᴇ́ʟᴇ́ᴄʜᴀʀɢᴇʀ ʟᴇs Rᴇᴇʟs</u>\n\n<u>➤ Oʙᴛᴇɴɪʀ ʟᴀ ʟᴇ́ɢᴇɴᴅᴇ</u>\n\n<u>➤ Oʙᴛᴇɴɪʀ ʟ’ᴀᴜᴅɪᴏ</u>\n\n<u>➤ Sᴀɴs ғɪʟɪɢʀᴀɴᴇ</u>\n\n<u>➤ Hᴀᴜᴛᴇ ǫᴜᴀʟɪᴛᴇ́</u>\n\n<u>➤ Rᴀᴘɪᴅᴇ ᴇᴛ sɪᴍᴘʟᴇ</u></blockquote>"
+      },
+      "ar": {
+        "text": "<blockquote>مʀʜʙᴀً، {username}!\n\n𝐖𝐄𝐋𝐂𝐎𝐌𝐄 ᴛᴏ {bot_link}\n\n<u>➤ Tɴᴢɪʟ Rᴇᴇʟs Iɴsᴛᴀɢʀᴀᴍ</u>\n\n<u>➤ Gᴇᴛ Cᴀᴘᴛɪᴏɴ</u>\n\n<u>➤ Gᴇᴛ Aᴜᴅɪᴏ</u>\n\n<u>➤ Bᴅᴏɴ Mᴀʀᴋᴇᴢ Mɪʏᴀʜ</u>\n\n<u>➤ Jᴏᴜᴅᴀʜ ᴀʟɪʏᴀʜ</u>\n\n<u>➤ Sʀɪᴇʜ ᴡᴍᴜᴍᴛᴀᴢ</u></blockquote>"
+      },
+      "pt": {
+        "text": "<blockquote>Oʟᴀ, {username}!\n\n𝐁𝐄𝐌-𝐕𝐈𝐍𝐃ᴏ ᴀ {bot_link}\n\nSᴇᴜ ᴀssɪsᴛᴇɴᴛᴇ ᴘᴀʀᴀ Rᴇᴇʟs ᴅᴏ Iɴsᴛᴀɢʀᴀᴍ.\n\n<u>➤ Bᴀɪxᴀʀ Rᴇᴇʟs ᴅᴏ Iɴsᴛᴀɢʀᴀᴍ</u>\n\n<u>➤ Oʙᴛᴇʀ ᴀ ʟᴇɢᴇɴᴅᴀ</u>\n\n<u>➤ Oʙᴛᴇʀ ᴏ ᴀ́ᴜᴅɪᴏ</u>\n\n<u>➤ Sᴇᴍ ᴍᴀʀᴄᴀ ᴅ’ᴀ́ɢᴜᴀ</u>\n\n<u>➤ Aʟᴛᴀ ǫᴜᴀʟɪᴅᴀᴅᴇ</u>\n\n<u>➤ Rᴀ́ᴘɪᴅᴏ ᴇ sɪᴍᴘʟᴇs</u></blockquote>"
+      },
+      "id": {
+        "text": "<blockquote>Hᴀʟᴏ, {username}!\n\n𝐒𝐄𝐋𝐀𝐌ᴀᴛ ᴅᴀᴛᴀɴɢ ᴅɪ {bot_link}\n\n<u>➤ Uɴᴅᴜʜ Rᴇᴇʟ Iɴsᴛᴀɢʀᴀᴍ</u>\n\n<u>➤ Dᴀᴘᴀᴛᴋᴀɴ Kᴀᴘsʏᴇɴ Rᴇᴇʟ</u>\n\n<u>➤ Dᴀᴘᴀᴛᴋᴀɴ Aᴜᴅɪᴏ Rᴇᴇʟ</u>\n\n<u>➤ Tᴀɴᴘᴀ Wᴀᴛᴇʀᴍᴀʀᴋ</u>\n\n<u>➤ Kᴜᴀʟɪᴛᴀs Tɪɴɢɢɪ</u>\n\n<u>➤ Cᴇᴘᴀᴛ ᴅᴀɴ Mᴜᴅᴀʜ</u></blockquote>"
+      },
+      "bn": {
+        "text": "<blockquote>Hᴇʟʟᴏ, {username}!\n\n𝐖𝐄𝐋𝐂𝐎𝐌𝐄 ᴛᴏ {bot_link}\n\n<u>➤ Iɴsᴛᴀɢʀᴀᴍ Rᴇᴇʟ Dᴏᴡɴʟᴏᴀᴅ</u>\n\n<u>➤ Rᴇᴇʟ Cᴀᴘᴛɪᴏɴ ᴘᴇᴛᴇ ᴘᴀʙᴇɴ</u>\n\n<u>➤ Rᴇᴇʟ Aᴜᴅɪᴏ ᴘᴇᴛᴇ ᴘᴀʙᴇɴ</u>\n\n<u>➤ Wᴀᴛᴇʀᴍᴀʀᴋ ᴄʜᴀʀᴀ</u>\n\n<u>➤ Hɪɢʜ Qᴜᴀʟɪᴛʏ</u>\n\n<u>➤ Fᴀsᴛ ᴀɴᴅ Eᴀsʏ</u></blockquote>"
+      },
+      "ur": {
+        "text": "<blockquote>Hᴇʟʟᴏ, {username}!\n\n𝐖𝐄𝐋𝐂𝐎𝐌𝐄 ᴛᴏ {bot_link}\n\n<u>➤ Iɴsᴛᴀɢʀᴀᴍ Rᴇᴇʟ Dᴏᴡɴʟᴏᴀᴅ Kᴀʀᴇɴ</u>\n\n<u>➤ Rᴇᴇʟ Cᴀᴘᴛɪᴏɴ Hᴀsɪʟ Kᴀʀᴇɴ</u>\n\n<u>➤ Rᴇᴇʟ Aᴜᴅɪᴏ Hᴀsɪʟ Kᴀʀᴇɴ</u>\n\n<u>➤ Wᴀᴛᴇʀᴍᴀʀᴋ Kᴇ Bᴀɢʜᴀɪʀ</u>\n\n<u>➤ Bᴇʜᴛᴀʀ Qᴜᴀʟɪᴛʏ</u>\n\n<u>➤ Tᴇᴢ ᴀᴜʀ Aᴀsᴀɴ</u></blockquote>"
+      },
+      "ru": {
+        "text": "<blockquote>Пʀɪᴠᴇᴛ, {username}!\n\n𝐃𝐎𝐁𝐑𝐎 ᴘᴏᴢʜᴀʟᴏᴠᴀᴛь ᴠ {bot_link}\n\nVᴀsʜ ᴘᴇʀsᴏɴᴀʟьɴʏᴊ ᴀssɪsᴛᴇɴᴛ ᴅʟʏᴀ Iɴsᴛᴀɢʀᴀᴍ Rᴇᴇʟs.\n\n<u>➤ Sᴋᴀᴄʜɪᴠᴀᴛь Iɴsᴛᴀɢʀᴀᴍ Rᴇᴇʟs</u>\n\n<u>➤ Pᴏʟᴜᴄʜᴀᴛь Pᴏᴅᴘɪsɪ Rᴇᴇʟs</u>\n\n<u>➤ Pᴏʟᴜᴄʜᴀᴛь Aᴜᴅɪᴏ Rᴇᴇʟs</u>\n\n<u>➤ Bᴇᴢ Vᴏᴅʏᴀɴʏᴋʜ Zɴᴀᴋᴏᴠ</u>\n\n<u>➤ Vʏsᴏᴋᴏᴇ Kᴀᴄʜᴇsᴛᴠᴏ</u>\n\n<u>➤ Bʏsᴛʀᴏ ɪ Uᴅᴏʙɴᴏ</u></blockquote>"
+      }
+    },
+    "howto": {
+      "en": {
+        "text": "<blockquote><u>➤ Cᴏᴘʏ ᴀɴʏ Iɴsᴛᴀɢʀᴀᴍ Rᴇᴇʟ ʟɪɴᴋ</u>\n\n<u>➤ Pᴀsᴛᴇ ᴛʜᴇ ʟɪɴᴋ ʜᴇʀᴇ ɪɴ ᴄʜᴀᴛ</u>\n\n<u>➤ Wᴀɪᴛ ᴀ ғᴇᴡ sᴇᴄᴏɴᴅs</u>\n\n<u>➤ Gᴇᴛ ʏᴏᴜʀ Rᴇᴇʟ ᴅᴏᴡɴʟᴏᴀᴅᴇᴅ ɪɴsᴛᴀɴᴛʟʏ</u></blockquote>"
+      },
+      "hi": {
+        "text": "<blockquote><u>➤ Kɪsɪ ʙʜɪ Iɴsᴛᴀɢʀᴀᴍ Rᴇᴇʟ ʟɪɴᴋ Cᴏᴘʏ Kᴀʀᴇɴ</u>\n\n<u>➤ Lɪɴᴋ Yᴀʜᴀɴ Cʜᴀᴛ Mᴇɪɴ Sᴇɴᴅ Kᴀʀᴇɴ</u>\n\n<u>➤ Kᴜᴄʜ Sᴇᴄᴏɴᴅ Iɴᴛᴇᴢᴀʀ Kᴀʀᴇɴ</u>\n\n<u>➤ Aᴘɴɪ Rᴇᴇʟ Fᴀᴜʀᴀɴ Dᴏᴡɴʟᴏᴀᴅ Kᴀʀᴇɴ</u></blockquote>"
+      },
+      "ru": {
+        "text": "<blockquote><u>➤ Sᴋᴏᴘɪʀᴜᴊᴛᴇ sᴏʙʏᴛᴛʏᴜ Sʜᴛᴀɢʀᴀᴍ Rᴇᴇʟ</u>\n\n<u>➤ Oᴛᴘʀᴀᴠьᴛᴇ ssʏʟᴋᴜ ᴠ ᴄʜᴀᴛ</u>\n\n<u>➤ Pᴏᴅᴏᴢʜᴅɪᴛᴇ ɴᴇsᴋᴏʟьᴋᴏ sᴇᴋᴜɴᴅ</u>\n\n<u>➤ Pᴏʟᴜᴄʜɪᴛᴇ Rᴇᴇʟ ᴍᴏᴍᴇɴᴛᴀʟьɴᴏ</u></blockquote>"
+      }
+    },
+    "gift": {
+      "en": {
+        "text": "<blockquote>🎁 <u>Sᴇɴᴅ A Gɪғᴛ</u>\n\n<u>➤ Sᴜᴘᴘᴏʀᴛ Tʜᴇ Bᴏᴛ</u>\n\nYᴏᴜʀ sᴜᴘᴘᴏʀᴛ ʜᴇʟᴘs ᴋᴇᴇᴘ ᴛʜᴇ ʙᴏᴛ ғᴀsᴛ ᴀɴᴅ ʀᴇʟɪᴀʙʟᴇ.</blockquote>"
+      },
+      "hi": {
+        "text": "<blockquote>🎁 <u>Sᴇɴᴅ A Gɪғᴛ</u>\n\n<u>➤ Bᴏᴛ Kᴏ Sᴜᴘᴘᴏʀᴛ Kᴀʀᴇɴ</u>\n\nAᴘᴋᴀ Sᴜᴘᴘᴏʀᴛ Bᴏᴛ Kᴏ Fᴀsᴛ ᴀᴜʀ Rᴇʟɪᴀʙʟᴇ Rᴀᴋʜɴᴇ Mᴇɪɴ Mᴀᴅᴀᴅ Kᴀʀᴛᴀ Hᴀɪ.</blockquote>"
+      },
+      "ru": {
+        "text": "<blockquote>🎁 <u>Sᴇɴᴅ A Gɪғᴛ</u>\n\n<u>➤ Pᴏᴅᴅᴇʀᴢʜᴀᴛь Bᴏᴛᴀ</u>\n\nVᴀsʜᴀ Pᴏᴅᴅᴇʀᴢʜᴋᴀ Pᴏᴍᴏɢᴀᴇᴛ sᴏᴋʜʀᴀɴʏᴀᴛь Bᴏᴛᴀ Bʏsᴛʀʏᴍ ɪ Nᴀᴅᴇᴢʜɴʏᴍ.</blockquote>"
+      }
+    },
+    "language": {
+      "en": {
+        "text": "🌐 <u>➤ Cʜᴏᴏsᴇ Yᴏᴜʀ Lᴀɴɢᴜᴀɢᴇ</u>"
+      },
+      "hi": {
+        "text": "🌐 <u>➤ Aᴘɴɪ Lᴀɴɢᴜᴀɢᴇ Cʜᴜɴᴇɪɴ</u>"
+      },
+      "es": {
+        "text": "🌐 <u>➤ Eʟɪɢᴇ Tᴜ Iᴅɪᴏᴍᴀ</u>"
+      },
+      "fr": {
+        "text": "🌐 <u>➤ Cʜᴏɪsɪssᴇᴢ Vᴏᴛʀᴇ Lᴀɴɢᴜᴇ</u>"
+      },
+      "ar": {
+        "text": "🌐 <u>➤ Iᴋʜᴛᴀʀ Lᴜɢʜᴀᴛᴀᴋ</u>"
+      },
+      "pt": {
+        "text": "🌐 <u>➤ Ésᴄᴏʟʜᴀ Sᴜᴀ Lɪ́ɴɢᴜᴀ</u>"
+      },
+      "id": {
+        "text": "🌐 <u>➤ Pɪʟɪʜ Bᴀʜᴀsᴀ Aɴᴅᴀ</u>"
+      },
+      "bn": {
+        "text": "🌐 <u>➤ Aᴘɴᴀʀ Bʜᴀsʜᴀ Bᴀᴄʜʜᴜɴ</u>"
+      },
+      "ur": {
+        "text": "🌐 <u>➤ Aᴘɴɪ Zᴀʙᴀɴ Mᴜɴᴛᴀᴋʜɪʙ Kᴀʀᴇɴ</u>"
+      },
+      "ru": {
+        "text": "🌐 <blockquote><u>➤ Vʏʙᴇʀɪᴛᴇ Yᴀᴢʏᴋ</u>\n\nVʏʙᴇʀɪᴛᴇ Pʀᴇᴅᴘᴏᴄʜᴛɪᴛᴀᴇᴍʏᴊ Yᴀᴢʏᴋ Nɪᴢʜᴇ.</blockquote>"
+      }
+    },
+    "support": {
+      "en": {
+        "text": "<blockquote>🆘 <u>Sᴜᴘᴘᴏʀᴛ</u>\n\n<u>➤ Rᴇᴘᴏʀᴛ A Pʀᴏʙʟᴇᴍ</u>\n\n<u>➤ Sᴇɴᴅ Fᴇᴇᴅʙᴀᴄᴋ</u>\n\n<u>➤ Aᴄᴋɴᴏᴡʟᴇᴅɢᴇ ᴀɴᴅ Gᴇᴛ Hᴇʟᴘ</u></blockquote>"
+      },
+      "hi": {
+        "text": "<blockquote>🆘 <u>Sᴜᴘᴘᴏʀᴛ</u>\n\n<u>➤ Pʀᴏʙʟᴇᴍ Rᴇᴘᴏʀᴛ Kᴀʀᴇɴ</u>\n\n<u>➤ Fᴇᴇᴅʙᴀᴄᴋ Bʜᴇᴊᴇɴ</u>\n\n<u>➤ Aᴘɴɪ Pʀᴏʙʟᴇᴍ Kɪ Dᴇᴛᴀɪʟ Bᴀᴛᴀᴇɴ</u></blockquote>"
+      },
+      "ru": {
+        "text": "<blockquote>🆘 <u>Pᴏᴅᴅᴇʀᴢʜᴋᴀ</u>\n\n<u>➤ Sᴏᴏʙsʜᴄʜɪᴛь ᴏ Pʀᴏʙʟᴇᴍᴇ</u>\n\n<u>➤ Oᴛᴘʀᴀᴠɪᴛь Oᴛᴢʏᴠ</u>\n\n<u>➤ Pᴏʟᴜᴄʜɪᴛь Pᴏᴍᴏsʜᴄʜь</u></blockquote>"
+      }
+    },
+    "developer": {
+      "en": {
+        "text": "<blockquote>👨‍💻 <u>Dᴇᴠᴇʟᴏᴘᴇʀ</u>\n\n<u>➤ Cᴏɴᴛᴀᴄᴛ Dᴇᴠᴇʟᴏᴘᴇʀ</u>\n\n<u>➤ Gᴇᴛ Hᴇʟᴘ Wɪᴛʜ Tʜᴇ Bᴏᴛ</u></blockquote>"
+      },
+      "hi": {
+        "text": "<blockquote>👨‍💻 <u>Dᴇᴠᴇʟᴏᴘᴇʀ</u>\n\n<u>➤ Dᴇᴠᴇʟᴏᴘᴇʀ Sᴇ Cᴏɴᴛᴀᴄᴛ Kᴀʀᴇɴ</u>\n\n<u>➤ Bᴏᴛ Sᴇ Rᴇʟᴀᴛᴇᴅ Hᴇʟᴘ Lᴇɴ</u></blockquote>"
+      },
+      "ru": {
+        "text": "<blockquote>👨‍💻 <u>Rᴀᴢʀᴀʙᴏᴛᴄʜɪᴋ</u>\n\n<u>➤ Sᴠʏᴀᴢᴀᴛьsʏᴀ s Rᴀᴢʀᴀʙᴏᴛᴄʜɪᴋᴏᴍ</u>\n\n<u>➤ Pᴏʟᴜᴄʜɪᴛь Pᴏᴍᴏsʜᴄʜь ᴘᴏ Bᴏᴛᴜ</u></blockquote>"
+      }
+    },
+    "download": {
+      "en": {
+        "text": "<blockquote>📥 <u>Dᴏᴡɴʟᴏᴀᴅ Rᴇᴇʟ</u>\n\n<u>➤ Sᴇɴᴅ A Pᴜʙʟɪᴄ Iɴsᴛᴀɢʀᴀᴍ Rᴇᴇʟ Lɪɴᴋ</u></blockquote>"
+      },
+      "hi": {
+        "text": "<blockquote>📥 <u>Dᴏᴡɴʟᴏᴀᴅ Rᴇᴇʟ</u>\n\n<u>➤ Pᴜʙʟɪᴄ Iɴsᴛᴀɢʀᴀᴍ Rᴇᴇʟ Kᴀ Lɪɴᴋ Sᴇɴᴅ Kᴀʀᴇɴ</u></blockquote>"
+      },
+      "ru": {
+        "text": "<blockquote>📥 <u>Sᴋᴀᴄʜᴀᴛь Rᴇᴇʟ</u>\n\n<u>➤ Oᴛᴘʀᴀᴠьᴛᴇ ssʏʟᴋᴜ ɴᴀ Pᴜʙʟɪᴄʜɴʏᴊ Iɴsᴛᴀɢʀᴀᴍ Rᴇᴇʟ</u></blockquote>"
+      }
+    },
+    "disclaimer": {
+      "en": {
+        "text": "<blockquote><u>𝐃𝐈𝐒𝐂𝐋𝐀𝐈𝐌𝐄𝐑 &amp; 𝐓𝐄𝐑𝐌𝐒 𝐎𝐅 𝐔𝐒𝐄</u>\n\nPʟᴇᴀsᴇ ᴜsᴇ ᴛʜɪs sᴇʀᴠɪᴄᴇ ʀᴇsᴘᴏɴsɪʙʟʏ ᴀɴᴅ ᴏɴʟʏ ғᴏʀ ᴄᴏɴᴛᴇɴᴛ ʏᴏᴜ ᴀʀᴇ ᴀᴜᴛʜᴏʀɪᴢᴇᴅ ᴛᴏ ᴜsᴇ.</blockquote>"
+      },
+      "hi": {
+        "text": "<blockquote><u>𝐃𝐈𝐒𝐂𝐋𝐀𝐈𝐌𝐄𝐑 &amp; 𝐓𝐄𝐑𝐌𝐒 𝐎𝐅 𝐔𝐒𝐄</u>\n\nKʀɪᴘʏᴀ Iꜱ Sᴇʀᴠɪᴄᴇ Kᴀ Iꜱᴛᴇᴍᴀʟ Kᴀʀᴇɴ ᴀᴜʀ Sɪʀғ Uꜱ Cᴏɴᴛᴇɴᴛ Kᴇ Lɪʏᴇ Jɪꜱᴋᴀ Aᴘᴋᴏ Aᴅʜɪᴋᴀʀ Hᴀɪ.</blockquote>"
+      },
+      "ru": {
+        "text": "<blockquote><u>𝐃𝐈𝐒𝐂𝐋𝐀𝐈𝐌𝐄𝐑 &amp; 𝐓𝐄𝐑𝐌𝐒 𝐎𝐅 𝐔𝐒𝐄</u>\n\nPᴏᴢʜᴀʟᴜᴊsᴛᴀ, ɪsᴘᴏʟьᴢᴜᴊᴛᴇ sᴇʀᴠɪs ᴏᴛᴠᴇᴛsᴛᴠᴇɴɴᴏ ɪ ᴛᴏʟьᴋᴏ ᴅʟʏᴀ Kᴏɴᴛᴇɴᴛᴀ, ᴋᴏᴛᴏʀʏᴊ ᴠᴀᴍ ʀᴀᴢʀᴇsʜᴇɴᴏ ɪsᴘᴏʟьᴢᴏᴠᴀᴛь.</blockquote>"
+      }
+    }
+  }
+}

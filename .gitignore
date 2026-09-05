@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.env
+
+# runtime data — auto-created by the bot, don't commit
+bot_data.json
+backup.key
+backups/
+downloads/
+plugins/
