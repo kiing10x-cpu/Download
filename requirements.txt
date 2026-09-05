@@ -1,5 +1,5 @@
 # Core (required — bot won't start without these)
-python-telegram-bot[job-queue]>=21.7,<22
+python-telegram-bot[job-queue]>=22.7
 yt-dlp>=2024.8.6
 
 # Optional (bot runs fine without these — features auto-disable gracefully)
