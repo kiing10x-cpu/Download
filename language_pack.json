@@ -1,5 +1,5 @@
 {
-  "version": "1.0",
+  "version": "2.0",
   "default": "en",
   "languages": {
     "en": "🇬🇧 English",
@@ -16,133 +16,1021 @@
   "menus": {
     "start": {
       "en": {
-        "text": "<blockquote>Hᴇʟʟᴏ, {username}!\n\n𝐖𝐄𝐋𝐂𝐎𝐌𝐄 ᴛᴏ {bot_link}\n\nYᴏᴜʀ ᴘᴇʀsᴏɴᴀʟ Iɴsᴛᴀɢʀᴀᴍ Rᴇᴇʟ ᴀssɪsᴛᴀɴᴛ.\n\n𝐓𝐇𝐈𝐒 𝐁𝐎𝐓 𝐂𝐀𝐍\n\n<u>➤ Dᴏᴡɴʟᴏᴀᴅ Iɴsᴛᴀɢʀᴀᴍ Rᴇᴇʟs</u>\n\n<u>➤ Gᴇᴛ Rᴇᴇʟ Cᴀᴘᴛɪᴏɴs</u>\n\n<u>➤ Gᴇᴛ Rᴇᴇʟ Aᴜᴅɪᴏ</u>\n\n𝐖𝐇𝐘 𝐂𝐇𝐎𝐎𝐒𝐄 𝐔𝐒?\n\n<u>➤ Nᴏ Wᴀᴛᴇʀᴍᴀʀᴋs</u>\n\n<u>➤ Hɪɢʜ-Qᴜᴀʟɪᴛʏ Rᴇᴇʟ Dᴏᴡɴʟᴏᴀᴅs</u>\n\n<u>➤ Fᴀsᴛ ᴀɴᴅ Sᴍᴏᴏᴛʜ Sᴇʀᴠɪᴄᴇ</u>\n\n<u>➤ Hᴀssʟᴇ-Fʀᴇᴇ ᴀɴᴅ Eᴀsʏ ᴛᴏ Uꜱᴇ</u>\n\n<u>➤ Sᴀᴠᴇs Tɪᴍᴇ ᴀɴᴅ Eғғᴏʀᴛ</u>\n\n<u>➤ Rᴇᴇʟ, Cᴀᴘᴛɪᴏɴ ᴀɴᴅ Aᴜᴅɪᴏ ɪɴ Oɴᴇ Pʟᴀᴄᴇ</u>\n\n<u>➤ Nᴏ Exᴛʀᴀ Tᴏᴏʟs ᴏʀ Cᴏᴍᴘʟɪᴄᴀᴛᴇᴅ Sᴛᴇᴘs</u></blockquote>"
+        "text": "<blockquote>Hello, {username}!\n\n<b>WELCOME</b> to {bot_link}\n\nYour personal Instagram Reel assistant.\n\n<b>THIS BOT CAN</b>\n\n<u>➤ Download Instagram Reels</u>\n\n<u>➤ Get Reel Captions</u>\n\n<u>➤ Get Reel Audio</u>\n\n<b>WHY CHOOSE US?</b>\n\n<u>➤ No Watermarks</u>\n\n<u>➤ High-Quality Reel Downloads</u>\n\n<u>➤ Fast and Smooth Service</u>\n\n<u>➤ Hassle-Free and Easy to Use</u>\n\n<u>➤ Saves Time and Effort</u>\n\n<u>➤ Reel, Caption and Audio in One Place</u>\n\n<u>➤ No Extra Tools or Complicated Steps</u></blockquote>"
       },
       "hi": {
-        "text": "<blockquote>Hᴇʟʟᴏ, {username}!\n\n𝐖𝐄𝐋𝐂𝐎𝐌𝐄 ᴛᴏ {bot_link}\n\nAᴘᴋᴀ Pᴇʀsᴏɴᴀʟ Iɴsᴛᴀɢʀᴀᴍ Rᴇᴇʟ Aꜱꜱɪꜱᴛᴀɴᴛ.\n\n𝐘𝐄 𝐁𝐎𝐓 𝐊𝐘𝐀 𝐊𝐀𝐑 𝐒𝐀𝐊𝐓𝐀 𝐇𝐀𝐈\n\n<u>➤ Iɴsᴛᴀɢʀᴀᴍ Rᴇᴇʟ Dᴏᴡɴʟᴏᴀᴅ Kᴀʀᴇɴ</u>\n\n<u>➤ Rᴇᴇʟ Cᴀᴘᴛɪᴏɴ Pʀᴀᴘᴛ Kᴀʀᴇɴ</u>\n\n<u>➤ Rᴇᴇʟ Aᴜᴅɪᴏ Nɪᴋᴀʟᴇɴ</u>\n\n𝐇𝐀𝐌𝐄𝐍 𝐊𝐘𝐔𝐍 𝐂𝐇𝐎𝐎𝐒𝐄 𝐊𝐀𝐑𝐄𝐍?\n\n<u>➤ Nᴏ Wᴀᴛᴇʀᴍᴀʀᴋ</u>\n\n<u>➤ Hɪɢʜ-Qᴜᴀʟɪᴛʏ Rᴇᴇʟ Dᴏᴡɴʟᴏᴀᴅs</u>\n\n<u>➤ Fᴀsᴛ ᴀɴᴅ Sᴍᴏᴏᴛʜ Sᴇʀᴠɪᴄᴇ</u>\n\n<u>➤ Eᴀsʏ ᴀɴᴅ Hᴀssʟᴇ-Fʀᴇᴇ Uꜱᴇ</u>\n\n<u>➤ Tɪᴍᴇ ᴀɴᴅ Eғғᴏʀᴛ Bᴀᴄʜᴀᴇɴ</u>\n\n<u>➤ Rᴇᴇʟ, Cᴀᴘᴛɪᴏɴ ᴀᴜʀ Aᴜᴅɪᴏ Eᴋ Jᴀɢᴀʜ</u>\n\n<u>➤ Kᴏɪ Exᴛʀᴀ Tᴏᴏʟ Nᴀʜɪ Cʜᴀʜɪʏᴇ</u></blockquote>"
+        "text": "<blockquote>नमस्ते, {username}!\n\n<b>{bot_link} में आपका स्वागत है</b>\n\nआपका व्यक्तिगत Instagram Reel सहायक।\n\n<b>यह बॉट क्या कर सकता है</b>\n\n<u>➤ Instagram Reels डाउनलोड करें</u>\n\n<u>➤ Reel के कैप्शन प्राप्त करें</u>\n\n<u>➤ Reel का ऑडियो प्राप्त करें</u>\n\n<b>हमें क्यों चुनें?</b>\n\n<u>➤ बिना वॉटरमार्क</u>\n\n<u>➤ उच्च गुणवत्ता में Reel डाउनलोड</u>\n\n<u>➤ तेज़ और आसान सेवा</u>\n\n<u>➤ सरल और परेशानी-मुक्त उपयोग</u>\n\n<u>➤ समय और मेहनत की बचत</u>\n\n<u>➤ Reel, कैप्शन और ऑडियो एक ही जगह</u>\n\n<u>➤ किसी अतिरिक्त टूल या जटिल प्रक्रिया की जरूरत नहीं</u></blockquote>"
       },
       "es": {
-        "text": "<blockquote>Hᴏʟᴀ, {username}!\n\n𝐁𝐈𝐄𝐍𝐕𝐄𝐍𝐈𝐃𝐎 ᴀ {bot_link}\n\nTᴜ ᴀsɪsᴛᴇɴᴛᴇ ᴘᴇʀsᴏɴᴀʟ ᴘᴀʀᴀ Rᴇᴇʟs ᴅᴇ Iɴsᴛᴀɢʀᴀᴍ.\n\n<u>➤ Dᴇsᴄᴀʀɢᴀʀ Rᴇᴇʟs ᴅᴇ Iɴsᴛᴀɢʀᴀᴍ</u>\n\n<u>➤ Oʙᴛᴇɴᴇʀ Cᴀᴘᴛᴜʀᴀs ᴅᴇʟ Rᴇᴇʟ</u>\n\n<u>➤ Oʙᴛᴇɴᴇʀ Aᴜᴅɪᴏ ᴅᴇʟ Rᴇᴇʟ</u>\n\n<u>➤ Sɪɴ Mᴀʀᴄᴀ ᴅᴇ Aɢᴜᴀ</u>\n\n<u>➤ Aʟᴛᴀ Cᴀʟɪᴅᴀᴅ</u>\n\n<u>➤ Rᴀ́ᴘɪᴅᴏ ʏ Sᴇɴᴄɪʟʟᴏ</u></blockquote>"
+        "text": "<blockquote>¡Hola, {username}!\n\n<b>BIENVENIDO</b> a {bot_link}\n\nTu asistente personal para Reels de Instagram.\n\n<b>ESTE BOT PUEDE</b>\n\n<u>➤ Descargar Reels de Instagram</u>\n\n<u>➤ Obtener subtítulos de los Reels</u>\n\n<u>➤ Obtener el audio de los Reels</u>\n\n<b>¿POR QUÉ ELEGIRNOS?</b>\n\n<u>➤ Sin marcas de agua</u>\n\n<u>➤ Descargas de Reels en alta calidad</u>\n\n<u>➤ Servicio rápido y fluido</u>\n\n<u>➤ Fácil de usar y sin complicaciones</u>\n\n<u>➤ Ahorra tiempo y esfuerzo</u>\n\n<u>➤ Reel, subtítulo y audio en un solo lugar</u>\n\n<u>➤ Sin herramientas adicionales ni pasos complicados</u></blockquote>"
       },
       "fr": {
-        "text": "<blockquote>Bᴏɴᴊᴏᴜʀ, {username} !\n\n𝐁𝐈𝐄𝐍𝐕𝐄𝐍𝐔ᴇ sᴜʀ {bot_link}\n\nVᴏᴛʀᴇ ᴀssɪsᴛᴀɴᴛ ᴘᴇʀsᴏɴɴᴇʟ ᴘᴏᴜʀ ʟᴇs Rᴇᴇʟs Iɴsᴛᴀɢʀᴀᴍ.\n\n<u>➤ Tᴇ́ʟᴇ́ᴄʜᴀʀɢᴇʀ ʟᴇs Rᴇᴇʟs</u>\n\n<u>➤ Oʙᴛᴇɴɪʀ ʟᴀ ʟᴇ́ɢᴇɴᴅᴇ</u>\n\n<u>➤ Oʙᴛᴇɴɪʀ ʟ’ᴀᴜᴅɪᴏ</u>\n\n<u>➤ Sᴀɴs ғɪʟɪɢʀᴀɴᴇ</u>\n\n<u>➤ Hᴀᴜᴛᴇ ǫᴜᴀʟɪᴛᴇ́</u>\n\n<u>➤ Rᴀᴘɪᴅᴇ ᴇᴛ sɪᴍᴘʟᴇ</u></blockquote>"
+        "text": "<blockquote>Bonjour, {username} !\n\n<b>BIENVENUE</b> sur {bot_link}\n\nVotre assistant personnel pour les Reels Instagram.\n\n<b>CE BOT PEUT</b>\n\n<u>➤ Télécharger des Reels Instagram</u>\n\n<u>➤ Obtenir les légendes des Reels</u>\n\n<u>➤ Obtenir l’audio des Reels</u>\n\n<b>POURQUOI NOUS CHOISIR ?</b>\n\n<u>➤ Sans filigrane</u>\n\n<u>➤ Téléchargements de Reels en haute qualité</u>\n\n<u>➤ Service rapide et fluide</u>\n\n<u>➤ Simple et facile à utiliser</u>\n\n<u>➤ Gagnez du temps et des efforts</u>\n\n<u>➤ Reel, légende et audio au même endroit</u>\n\n<u>➤ Aucun outil supplémentaire ni étape compliquée</u></blockquote>"
       },
       "ar": {
-        "text": "<blockquote>مʀʜʙᴀً، {username}!\n\n𝐖𝐄𝐋𝐂𝐎𝐌𝐄 ᴛᴏ {bot_link}\n\n<u>➤ Tɴᴢɪʟ Rᴇᴇʟs Iɴsᴛᴀɢʀᴀᴍ</u>\n\n<u>➤ Gᴇᴛ Cᴀᴘᴛɪᴏɴ</u>\n\n<u>➤ Gᴇᴛ Aᴜᴅɪᴏ</u>\n\n<u>➤ Bᴅᴏɴ Mᴀʀᴋᴇᴢ Mɪʏᴀʜ</u>\n\n<u>➤ Jᴏᴜᴅᴀʜ ᴀʟɪʏᴀʜ</u>\n\n<u>➤ Sʀɪᴇʜ ᴡᴍᴜᴍᴛᴀᴢ</u></blockquote>"
+        "text": "<blockquote>مرحبًا، {username}!\n\n<b>مرحبًا بك في {bot_link}</b>\n\nمساعدك الشخصي لتنزيل Reels من Instagram.\n\n<b>ماذا يستطيع البوت أن يفعل؟</b>\n\n<u>➤ تنزيل Reels من Instagram</u>\n\n<u>➤ الحصول على وصف الـ Reel</u>\n\n<u>➤ الحصول على صوت الـ Reel</u>\n\n<b>لماذا تختارنا؟</b>\n\n<u>➤ بدون علامة مائية</u>\n\n<u>➤ تنزيل بجودة عالية</u>\n\n<u>➤ خدمة سريعة وسلسة</u>\n\n<u>➤ استخدام سهل وبدون تعقيد</u>\n\n<u>➤ توفير الوقت والجهد</u>\n\n<u>➤ الفيديو والوصف والصوت في مكان واحد</u>\n\n<u>➤ لا تحتاج إلى أدوات إضافية أو خطوات معقدة</u></blockquote>"
       },
       "pt": {
-        "text": "<blockquote>Oʟᴀ, {username}!\n\n𝐁𝐄𝐌-𝐕𝐈𝐍𝐃ᴏ ᴀ {bot_link}\n\nSᴇᴜ ᴀssɪsᴛᴇɴᴛᴇ ᴘᴀʀᴀ Rᴇᴇʟs ᴅᴏ Iɴsᴛᴀɢʀᴀᴍ.\n\n<u>➤ Bᴀɪxᴀʀ Rᴇᴇʟs ᴅᴏ Iɴsᴛᴀɢʀᴀᴍ</u>\n\n<u>➤ Oʙᴛᴇʀ ᴀ ʟᴇɢᴇɴᴅᴀ</u>\n\n<u>➤ Oʙᴛᴇʀ ᴏ ᴀ́ᴜᴅɪᴏ</u>\n\n<u>➤ Sᴇᴍ ᴍᴀʀᴄᴀ ᴅ’ᴀ́ɢᴜᴀ</u>\n\n<u>➤ Aʟᴛᴀ ǫᴜᴀʟɪᴅᴀᴅᴇ</u>\n\n<u>➤ Rᴀ́ᴘɪᴅᴏ ᴇ sɪᴍᴘʟᴇs</u></blockquote>"
+        "text": "<blockquote>Olá, {username}!\n\n<b>BEM-VINDO</b> ao {bot_link}\n\nSeu assistente pessoal para Reels do Instagram.\n\n<b>ESTE BOT PODE</b>\n\n<u>➤ Baixar Reels do Instagram</u>\n\n<u>➤ Obter legendas dos Reels</u>\n\n<u>➤ Obter o áudio dos Reels</u>\n\n<b>POR QUE NOS ESCOLHER?</b>\n\n<u>➤ Sem marcas d’água</u>\n\n<u>➤ Downloads de Reels em alta qualidade</u>\n\n<u>➤ Serviço rápido e estável</u>\n\n<u>➤ Fácil e simples de usar</u>\n\n<u>➤ Economiza tempo e esforço</u>\n\n<u>➤ Reel, legenda e áudio em um só lugar</u>\n\n<u>➤ Sem ferramentas extras ou etapas complicadas</u></blockquote>"
       },
       "id": {
-        "text": "<blockquote>Hᴀʟᴏ, {username}!\n\n𝐒𝐄𝐋𝐀𝐌ᴀᴛ ᴅᴀᴛᴀɴɢ ᴅɪ {bot_link}\n\n<u>➤ Uɴᴅᴜʜ Rᴇᴇʟ Iɴsᴛᴀɢʀᴀᴍ</u>\n\n<u>➤ Dᴀᴘᴀᴛᴋᴀɴ Kᴀᴘsʏᴇɴ Rᴇᴇʟ</u>\n\n<u>➤ Dᴀᴘᴀᴛᴋᴀɴ Aᴜᴅɪᴏ Rᴇᴇʟ</u>\n\n<u>➤ Tᴀɴᴘᴀ Wᴀᴛᴇʀᴍᴀʀᴋ</u>\n\n<u>➤ Kᴜᴀʟɪᴛᴀs Tɪɴɢɢɪ</u>\n\n<u>➤ Cᴇᴘᴀᴛ ᴅᴀɴ Mᴜᴅᴀʜ</u></blockquote>"
+        "text": "<blockquote>Halo, {username}!\n\n<b>SELAMAT DATANG di {bot_link}</b>\n\nAsisten pribadi Anda untuk Instagram Reels.\n\n<b>BOT INI DAPAT</b>\n\n<u>➤ Mengunduh Instagram Reels</u>\n\n<u>➤ Mendapatkan caption Reel</u>\n\n<u>➤ Mendapatkan audio Reel</u>\n\n<b>MENGAPA MEMILIH KAMI?</b>\n\n<u>➤ Tanpa watermark</u>\n\n<u>➤ Unduhan Reel berkualitas tinggi</u>\n\n<u>➤ Layanan cepat dan lancar</u>\n\n<u>➤ Mudah digunakan tanpa ribet</u>\n\n<u>➤ Menghemat waktu dan tenaga</u>\n\n<u>➤ Reel, caption, dan audio dalam satu tempat</u>\n\n<u>➤ Tanpa alat tambahan atau langkah rumit</u></blockquote>"
       },
       "bn": {
-        "text": "<blockquote>Hᴇʟʟᴏ, {username}!\n\n𝐖𝐄𝐋𝐂𝐎𝐌𝐄 ᴛᴏ {bot_link}\n\n<u>➤ Iɴsᴛᴀɢʀᴀᴍ Rᴇᴇʟ Dᴏᴡɴʟᴏᴀᴅ</u>\n\n<u>➤ Rᴇᴇʟ Cᴀᴘᴛɪᴏɴ ᴘᴇᴛᴇ ᴘᴀʙᴇɴ</u>\n\n<u>➤ Rᴇᴇʟ Aᴜᴅɪᴏ ᴘᴇᴛᴇ ᴘᴀʙᴇɴ</u>\n\n<u>➤ Wᴀᴛᴇʀᴍᴀʀᴋ ᴄʜᴀʀᴀ</u>\n\n<u>➤ Hɪɢʜ Qᴜᴀʟɪᴛʏ</u>\n\n<u>➤ Fᴀsᴛ ᴀɴᴅ Eᴀsʏ</u></blockquote>"
+        "text": "<blockquote>হ্যালো, {username}!\n\n<b>{bot_link}-এ আপনাকে স্বাগতম</b>\n\nআপনার ব্যক্তিগত Instagram Reel সহকারী।\n\n<b>এই বট যা করতে পারে</b>\n\n<u>➤ Instagram Reel ডাউনলোড করুন</u>\n\n<u>➤ Reel-এর ক্যাপশন নিন</u>\n\n<u>➤ Reel-এর অডিও নিন</u>\n\n<b>কেন আমাদের বেছে নেবেন?</b>\n\n<u>➤ কোনো ওয়াটারমার্ক নেই</u>\n\n<u>➤ উচ্চ মানের Reel ডাউনলোড</u>\n\n<u>➤ দ্রুত ও সহজ সেবা</u>\n\n<u>➤ ঝামেলাহীন ও সহজ ব্যবহার</u>\n\n<u>➤ সময় ও পরিশ্রম বাঁচায়</u>\n\n<u>➤ Reel, ক্যাপশন ও অডিও এক জায়গায়</u>\n\n<u>➤ অতিরিক্ত টুল বা জটিল ধাপের প্রয়োজন নেই</u></blockquote>"
       },
       "ur": {
-        "text": "<blockquote>Hᴇʟʟᴏ, {username}!\n\n𝐖𝐄𝐋𝐂𝐎𝐌𝐄 ᴛᴏ {bot_link}\n\n<u>➤ Iɴsᴛᴀɢʀᴀᴍ Rᴇᴇʟ Dᴏᴡɴʟᴏᴀᴅ Kᴀʀᴇɴ</u>\n\n<u>➤ Rᴇᴇʟ Cᴀᴘᴛɪᴏɴ Hᴀsɪʟ Kᴀʀᴇɴ</u>\n\n<u>➤ Rᴇᴇʟ Aᴜᴅɪᴏ Hᴀsɪʟ Kᴀʀᴇɴ</u>\n\n<u>➤ Wᴀᴛᴇʀᴍᴀʀᴋ Kᴇ Bᴀɢʜᴀɪʀ</u>\n\n<u>➤ Bᴇʜᴛᴀʀ Qᴜᴀʟɪᴛʏ</u>\n\n<u>➤ Tᴇᴢ ᴀᴜʀ Aᴀsᴀɴ</u></blockquote>"
+        "text": "<blockquote>السلام علیکم، {username}!\n\n<b>{bot_link} میں خوش آمدید</b>\n\nآپ کا ذاتی Instagram Reel اسسٹنٹ۔\n\n<b>یہ بوٹ کیا کر سکتا ہے؟</b>\n\n<u>➤ Instagram Reels ڈاؤن لوڈ کریں</u>\n\n<u>➤ Reel کا کیپشن حاصل کریں</u>\n\n<u>➤ Reel کی آڈیو حاصل کریں</u>\n\n<b>ہمیں کیوں منتخب کریں؟</b>\n\n<u>➤ بغیر واٹرمارک</u>\n\n<u>➤ اعلیٰ معیار میں Reel ڈاؤن لوڈ</u>\n\n<u>➤ تیز اور ہموار سروس</u>\n\n<u>➤ آسان اور بغیر کسی پیچیدگی کے استعمال</u>\n\n<u>➤ وقت اور محنت کی بچت</u>\n\n<u>➤ Reel، کیپشن اور آڈیو ایک ہی جگہ</u>\n\n<u>➤ اضافی ٹولز یا پیچیدہ مراحل کی ضرورت نہیں</u></blockquote>"
       },
       "ru": {
-        "text": "<blockquote>Пʀɪᴠᴇᴛ, {username}!\n\n𝐃𝐎𝐁𝐑𝐎 ᴘᴏᴢʜᴀʟᴏᴠᴀᴛь ᴠ {bot_link}\n\nVᴀsʜ ᴘᴇʀsᴏɴᴀʟьɴʏᴊ ᴀssɪsᴛᴇɴᴛ ᴅʟʏᴀ Iɴsᴛᴀɢʀᴀᴍ Rᴇᴇʟs.\n\n<u>➤ Sᴋᴀᴄʜɪᴠᴀᴛь Iɴsᴛᴀɢʀᴀᴍ Rᴇᴇʟs</u>\n\n<u>➤ Pᴏʟᴜᴄʜᴀᴛь Pᴏᴅᴘɪsɪ Rᴇᴇʟs</u>\n\n<u>➤ Pᴏʟᴜᴄʜᴀᴛь Aᴜᴅɪᴏ Rᴇᴇʟs</u>\n\n<u>➤ Bᴇᴢ Vᴏᴅʏᴀɴʏᴋʜ Zɴᴀᴋᴏᴠ</u>\n\n<u>➤ Vʏsᴏᴋᴏᴇ Kᴀᴄʜᴇsᴛᴠᴏ</u>\n\n<u>➤ Bʏsᴛʀᴏ ɪ Uᴅᴏʙɴᴏ</u></blockquote>"
+        "text": "<blockquote>Здравствуйте, {username}!\n\n<b>ДОБРО ПОЖАЛОВАТЬ в {bot_link}</b>\n\nВаш персональный помощник для Instagram Reels.\n\n<b>ЧТО УМЕЕТ БОТ</b>\n\n<u>➤ Скачивать Instagram Reels</u>\n\n<u>➤ Получать подписи к Reels</u>\n\n<u>➤ Получать аудио из Reels</u>\n\n<b>ПОЧЕМУ ВЫБИРАЮТ НАС?</b>\n\n<u>➤ Без водяных знаков</u>\n\n<u>➤ Скачивание Reels в высоком качестве</u>\n\n<u>➤ Быстрый и стабильный сервис</u>\n\n<u>➤ Просто и удобно использовать</u>\n\n<u>➤ Экономит время и усилия</u>\n\n<u>➤ Reel, подпись и аудио в одном месте</u>\n\n<u>➤ Без дополнительных инструментов и сложных действий</u></blockquote>"
       }
     },
     "howto": {
       "en": {
-        "text": "<blockquote><u>➤ Cᴏᴘʏ ᴀɴʏ Iɴsᴛᴀɢʀᴀᴍ Rᴇᴇʟ ʟɪɴᴋ</u>\n\n<u>➤ Pᴀsᴛᴇ ᴛʜᴇ ʟɪɴᴋ ʜᴇʀᴇ ɪɴ ᴄʜᴀᴛ</u>\n\n<u>➤ Wᴀɪᴛ ᴀ ғᴇᴡ sᴇᴄᴏɴᴅs</u>\n\n<u>➤ Gᴇᴛ ʏᴏᴜʀ Rᴇᴇʟ ᴅᴏᴡɴʟᴏᴀᴅᴇᴅ ɪɴsᴛᴀɴᴛʟʏ</u></blockquote>"
+        "text": "<blockquote><b>HOW TO USE</b>\n\n➤ Copy any Instagram Reel link\n\n➤ Paste the link here in chat\n\n➤ Wait a few seconds\n\n➤ Get your Reel downloaded instantly\n\n➤ <b>NOTE:</b> Only public Instagram Reel links are supported</blockquote>"
       },
       "hi": {
-        "text": "<blockquote><u>➤ Kɪsɪ ʙʜɪ Iɴsᴛᴀɢʀᴀᴍ Rᴇᴇʟ ʟɪɴᴋ Cᴏᴘʏ Kᴀʀᴇɴ</u>\n\n<u>➤ Lɪɴᴋ Yᴀʜᴀɴ Cʜᴀᴛ Mᴇɪɴ Sᴇɴᴅ Kᴀʀᴇɴ</u>\n\n<u>➤ Kᴜᴄʜ Sᴇᴄᴏɴᴅ Iɴᴛᴇᴢᴀʀ Kᴀʀᴇɴ</u>\n\n<u>➤ Aᴘɴɪ Rᴇᴇʟ Fᴀᴜʀᴀɴ Dᴏᴡɴʟᴏᴀᴅ Kᴀʀᴇɴ</u></blockquote>"
+        "text": "<blockquote><b>कैसे इस्तेमाल करें</b>\n\n➤ किसी भी Instagram Reel का लिंक कॉपी करें\n\n➤ लिंक यहाँ चैट में भेजें\n\n➤ कुछ सेकंड इंतज़ार करें\n\n➤ आपकी Reel तुरंत डाउनलोड हो जाएगी\n\n➤ <b>नोट:</b> केवल पब्लिक Instagram Reel लिंक समर्थित हैं</blockquote>"
+      },
+      "es": {
+        "text": "<blockquote><b>CÓMO USAR</b>\n\n➤ Copia cualquier enlace de un Reel de Instagram\n\n➤ Pega el enlace aquí en el chat\n\n➤ Espera unos segundos\n\n➤ Recibe tu Reel al instante\n\n➤ <b>NOTA:</b> Solo se admiten enlaces públicos de Reels de Instagram</blockquote>"
+      },
+      "fr": {
+        "text": "<blockquote><b>COMMENT UTILISER</b>\n\n➤ Copiez le lien d’un Reel Instagram\n\n➤ Collez le lien ici dans le chat\n\n➤ Attendez quelques secondes\n\n➤ Recevez votre Reel instantanément\n\n➤ <b>REMARQUE :</b> seuls les liens publics de Reels Instagram sont pris en charge</blockquote>"
+      },
+      "ar": {
+        "text": "<blockquote><b>طريقة الاستخدام</b>\n\n➤ انسخ رابط أي Reel من Instagram\n\n➤ أرسل الرابط هنا في الدردشة\n\n➤ انتظر بضع ثوانٍ\n\n➤ ستحصل على الـ Reel فورًا\n\n➤ <b>ملاحظة:</b> يتم دعم روابط Reels العامة فقط</blockquote>"
+      },
+      "pt": {
+        "text": "<blockquote><b>COMO USAR</b>\n\n➤ Copie o link de qualquer Reel do Instagram\n\n➤ Cole o link aqui no chat\n\n➤ Aguarde alguns segundos\n\n➤ Receba seu Reel instantaneamente\n\n➤ <b>OBSERVAÇÃO:</b> apenas links públicos de Reels do Instagram são compatíveis</blockquote>"
+      },
+      "id": {
+        "text": "<blockquote><b>CARA MENGGUNAKAN</b>\n\n➤ Salin tautan Instagram Reel apa pun\n\n➤ Tempel tautannya di chat ini\n\n➤ Tunggu beberapa detik\n\n➤ Reel Anda akan diunduh secara instan\n\n➤ <b>CATATAN:</b> Hanya tautan Instagram Reel publik yang didukung</blockquote>"
+      },
+      "bn": {
+        "text": "<blockquote><b>কীভাবে ব্যবহার করবেন</b>\n\n➤ যেকোনো Instagram Reel-এর লিংক কপি করুন\n\n➤ লিংকটি এখানে চ্যাটে পাঠান\n\n➤ কয়েক সেকেন্ড অপেক্ষা করুন\n\n➤ আপনার Reel সঙ্গে সঙ্গে ডাউনলোড হবে\n\n➤ <b>নোট:</b> শুধুমাত্র পাবলিক Instagram Reel লিংক সমর্থিত</blockquote>"
+      },
+      "ur": {
+        "text": "<blockquote><b>استعمال کا طریقہ</b>\n\n➤ کسی بھی Instagram Reel کا لنک کاپی کریں\n\n➤ لنک یہاں چیٹ میں بھیجیں\n\n➤ چند سیکنڈ انتظار کریں\n\n➤ آپ کی Reel فوراً ڈاؤن لوڈ ہو جائے گی\n\n➤ <b>نوٹ:</b> صرف عوامی Instagram Reel لنکس سپورٹ کیے جاتے ہیں</blockquote>"
       },
       "ru": {
-        "text": "<blockquote><u>➤ Sᴋᴏᴘɪʀᴜᴊᴛᴇ sᴏʙʏᴛᴛʏᴜ Sʜᴛᴀɢʀᴀᴍ Rᴇᴇʟ</u>\n\n<u>➤ Oᴛᴘʀᴀᴠьᴛᴇ ssʏʟᴋᴜ ᴠ ᴄʜᴀᴛ</u>\n\n<u>➤ Pᴏᴅᴏᴢʜᴅɪᴛᴇ ɴᴇsᴋᴏʟьᴋᴏ sᴇᴋᴜɴᴅ</u>\n\n<u>➤ Pᴏʟᴜᴄʜɪᴛᴇ Rᴇᴇʟ ᴍᴏᴍᴇɴᴛᴀʟьɴᴏ</u></blockquote>"
+        "text": "<blockquote><b>КАК ИСПОЛЬЗОВАТЬ</b>\n\n➤ Скопируйте ссылку на любой Instagram Reel\n\n➤ Отправьте ссылку сюда в чат\n\n➤ Подождите несколько секунд\n\n➤ Reel будет скачан мгновенно\n\n➤ <b>ПРИМЕЧАНИЕ:</b> поддерживаются только публичные ссылки на Instagram Reels</blockquote>"
       }
     },
     "gift": {
       "en": {
-        "text": "<blockquote>🎁 <u>Sᴇɴᴅ A Gɪғᴛ</u>\n\n<u>➤ Sᴜᴘᴘᴏʀᴛ Tʜᴇ Bᴏᴛ</u>\n\nYᴏᴜʀ sᴜᴘᴘᴏʀᴛ ʜᴇʟᴘs ᴋᴇᴇᴘ ᴛʜᴇ ʙᴏᴛ ғᴀsᴛ ᴀɴᴅ ʀᴇʟɪᴀʙʟᴇ.</blockquote>"
+        "text": "<blockquote><u>✨ <b>SUPPORT OUR BOT</b></u>\n\n<u>➤ This support is completely optional.</u>\n<u>➤ We never force anyone to send a payment.</u>\n\n<u>➤ If you enjoy using the bot and want to support it, you can contribute any amount you prefer.</u>\n\n<u>➤ Your support helps us keep working on the bot, improving existing features, adding new functions and bringing more useful upgrades.</u>\n\nWe sincerely appreciate every bit of support. ❤️</blockquote>"
       },
       "hi": {
-        "text": "<blockquote>🎁 <u>Sᴇɴᴅ A Gɪғᴛ</u>\n\n<u>➤ Bᴏᴛ Kᴏ Sᴜᴘᴘᴏʀᴛ Kᴀʀᴇɴ</u>\n\nAᴘᴋᴀ Sᴜᴘᴘᴏʀᴛ Bᴏᴛ Kᴏ Fᴀsᴛ ᴀᴜʀ Rᴇʟɪᴀʙʟᴇ Rᴀᴋʜɴᴇ Mᴇɪɴ Mᴀᴅᴀᴅ Kᴀʀᴛᴀ Hᴀɪ.</blockquote>"
+        "text": "<blockquote><u>✨ <b>हमारे बॉट को सपोर्ट करें</b></u>\n\n<u>➤ यह सपोर्ट पूरी तरह वैकल्पिक है।</u>\n<u>➤ हम किसी को भी भुगतान करने के लिए मजबूर नहीं करते।</u>\n\n<u>➤ अगर आपको बॉट पसंद है और आप इसे सपोर्ट करना चाहते हैं, तो अपनी इच्छा के अनुसार कोई भी राशि योगदान कर सकते हैं।</u>\n\n<u>➤ आपका सपोर्ट बॉट को बेहतर बनाने, मौजूदा फीचर्स सुधारने और नए उपयोगी फीचर्स जोड़ने में मदद करता है।</u>\n\nआपके हर सपोर्ट के लिए दिल से धन्यवाद। ❤️</blockquote>"
+      },
+      "es": {
+        "text": "<blockquote><u>✨ <b>APOYA NUESTRO BOT</b></u>\n\n<u>➤ Este apoyo es completamente opcional.</u>\n<u>➤ Nunca obligamos a nadie a realizar un pago.</u>\n\n<u>➤ Si te gusta usar el bot y quieres apoyarlo, puedes contribuir con la cantidad que prefieras.</u>\n\n<u>➤ Tu apoyo nos ayuda a mejorar el bot, mantener sus funciones y añadir nuevas mejoras útiles.</u>\n\nAgradecemos sinceramente todo vuestro apoyo. ❤️</blockquote>"
+      },
+      "fr": {
+        "text": "<blockquote><u>✨ <b>SOUTENEZ NOTRE BOT</b></u>\n\n<u>➤ Ce soutien est entièrement facultatif.</u>\n<u>➤ Nous ne forçons jamais personne à effectuer un paiement.</u>\n\n<u>➤ Si vous aimez utiliser le bot et souhaitez le soutenir, vous pouvez contribuer du montant de votre choix.</u>\n\n<u>➤ Votre soutien nous aide à améliorer le bot, ses fonctions et à ajouter de nouvelles améliorations utiles.</u>\n\nMerci sincèrement pour chaque soutien. ❤️</blockquote>"
+      },
+      "ar": {
+        "text": "<blockquote><u>✨ <b>ادعم البوت</b></u>\n\n<u>➤ الدعم اختياري تمامًا.</u>\n<u>➤ نحن لا نجبر أي شخص على الدفع.</u>\n\n<u>➤ إذا أعجبك استخدام البوت وترغب في دعمه، يمكنك المساهمة بأي مبلغ تريده.</u>\n\n<u>➤ يساعد دعمك في تطوير البوت وتحسين الميزات وإضافة وظائف مفيدة جديدة.</u>\n\nنقدّر دعمك كثيرًا. ❤️</blockquote>"
+      },
+      "pt": {
+        "text": "<blockquote><u>✨ <b>APOIE NOSSO BOT</b></u>\n\n<u>➤ Este apoio é totalmente opcional.</u>\n<u>➤ Nunca obrigamos ninguém a fazer um pagamento.</u>\n\n<u>➤ Se você gosta de usar o bot e quer apoiá-lo, pode contribuir com qualquer valor que preferir.</u>\n\n<u>➤ Seu apoio ajuda a melhorar o bot, aprimorar recursos e adicionar novas funções úteis.</u>\n\nAgradecemos sinceramente todo o apoio. ❤️</blockquote>"
+      },
+      "id": {
+        "text": "<blockquote><u>✨ <b>DUKUNG BOT KAMI</b></u>\n\n<u>➤ Dukungan ini sepenuhnya opsional.</u>\n<u>➤ Kami tidak pernah memaksa siapa pun untuk melakukan pembayaran.</u>\n\n<u>➤ Jika Anda menikmati bot ini dan ingin mendukungnya, Anda dapat memberikan kontribusi sesuai keinginan.</u>\n\n<u>➤ Dukungan Anda membantu kami meningkatkan bot, memperbaiki fitur, dan menambahkan fungsi baru yang bermanfaat.</u>\n\nKami sangat menghargai setiap dukungan. ❤️</blockquote>"
+      },
+      "bn": {
+        "text": "<blockquote><u>✨ <b>আমাদের বটকে সাপোর্ট করুন</b></u>\n\n<u>➤ এই সাপোর্ট সম্পূর্ণ ঐচ্ছিক।</u>\n<u>➤ আমরা কাউকে পেমেন্ট করতে বাধ্য করি না।</u>\n\n<u>➤ বটটি ভালো লাগলে এবং সাপোর্ট করতে চাইলে আপনার ইচ্ছামতো যেকোনো পরিমাণ দিতে পারেন।</u>\n\n<u>➤ আপনার সাপোর্ট বট উন্নত করতে, নতুন ফিচার যোগ করতে এবং আরও ভালো সেবা দিতে সাহায্য করে।</u>\n\nআপনার প্রতিটি সাপোর্টের জন্য আন্তরিক ধন্যবাদ। ❤️</blockquote>"
+      },
+      "ur": {
+        "text": "<blockquote><u>✨ <b>ہمارے بوٹ کو سپورٹ کریں</b></u>\n\n<u>➤ یہ سپورٹ مکمل طور پر اختیاری ہے۔</u>\n<u>➤ ہم کسی کو بھی ادائیگی کرنے پر مجبور نہیں کرتے۔</u>\n\n<u>➤ اگر آپ بوٹ استعمال کرنا پسند کرتے ہیں اور اسے سپورٹ کرنا چاہتے ہیں تو اپنی مرضی کی کوئی بھی رقم دے سکتے ہیں۔</u>\n\n<u>➤ آپ کا سپورٹ بوٹ کو بہتر بنانے، فیچرز کو اپ گریڈ کرنے اور نئی مفید سہولیات شامل کرنے میں مدد کرتا ہے۔</u>\n\nآپ کے ہر تعاون کی ہم دل سے قدر کرتے ہیں۔ ❤️</blockquote>"
       },
       "ru": {
-        "text": "<blockquote>🎁 <u>Sᴇɴᴅ A Gɪғᴛ</u>\n\n<u>➤ Pᴏᴅᴅᴇʀᴢʜᴀᴛь Bᴏᴛᴀ</u>\n\nVᴀsʜᴀ Pᴏᴅᴅᴇʀᴢʜᴋᴀ Pᴏᴍᴏɢᴀᴇᴛ sᴏᴋʜʀᴀɴʏᴀᴛь Bᴏᴛᴀ Bʏsᴛʀʏᴍ ɪ Nᴀᴅᴇᴢʜɴʏᴍ.</blockquote>"
+        "text": "<blockquote><u>✨ <b>ПОДДЕРЖИТЕ НАШ БОТ</b></u>\n\n<u>➤ Поддержка полностью добровольна.</u>\n<u>➤ Мы никогда не заставляем кого-либо платить.</u>\n\n<u>➤ Если вам нравится бот и вы хотите его поддержать, вы можете внести любую удобную сумму.</u>\n\n<u>➤ Ваша поддержка помогает улучшать бота, развивать функции и добавлять новые полезные возможности.</u>\n\nИскренне благодарим за любую поддержку. ❤️</blockquote>"
       }
     },
     "language": {
       "en": {
-        "text": "🌐 <u>➤ Cʜᴏᴏsᴇ Yᴏᴜʀ Lᴀɴɢᴜᴀɢᴇ</u>"
+        "text": "🌐 <u>Choose your language</u>"
       },
       "hi": {
-        "text": "🌐 <u>➤ Aᴘɴɪ Lᴀɴɢᴜᴀɢᴇ Cʜᴜɴᴇɪɴ</u>"
+        "text": "🌐 <u>अपनी भाषा चुनें</u>"
       },
       "es": {
-        "text": "🌐 <u>➤ Eʟɪɢᴇ Tᴜ Iᴅɪᴏᴍᴀ</u>"
+        "text": "🌐 <u>Elige tu idioma</u>"
       },
       "fr": {
-        "text": "🌐 <u>➤ Cʜᴏɪsɪssᴇᴢ Vᴏᴛʀᴇ Lᴀɴɢᴜᴇ</u>"
+        "text": "🌐 <u>Choisissez votre langue</u>"
       },
       "ar": {
-        "text": "🌐 <u>➤ Iᴋʜᴛᴀʀ Lᴜɢʜᴀᴛᴀᴋ</u>"
+        "text": "🌐 <u>اختر لغتك</u>"
       },
       "pt": {
-        "text": "🌐 <u>➤ Ésᴄᴏʟʜᴀ Sᴜᴀ Lɪ́ɴɢᴜᴀ</u>"
+        "text": "🌐 <u>Escolha seu idioma</u>"
       },
       "id": {
-        "text": "🌐 <u>➤ Pɪʟɪʜ Bᴀʜᴀsᴀ Aɴᴅᴀ</u>"
+        "text": "🌐 <u>Pilih bahasa Anda</u>"
       },
       "bn": {
-        "text": "🌐 <u>➤ Aᴘɴᴀʀ Bʜᴀsʜᴀ Bᴀᴄʜʜᴜɴ</u>"
+        "text": "🌐 <u>আপনার ভাষা নির্বাচন করুন</u>"
       },
       "ur": {
-        "text": "🌐 <u>➤ Aᴘɴɪ Zᴀʙᴀɴ Mᴜɴᴛᴀᴋʜɪʙ Kᴀʀᴇɴ</u>"
+        "text": "🌐 <u>اپنی زبان منتخب کریں</u>"
       },
       "ru": {
-        "text": "🌐 <blockquote><u>➤ Vʏʙᴇʀɪᴛᴇ Yᴀᴢʏᴋ</u>\n\nVʏʙᴇʀɪᴛᴇ Pʀᴇᴅᴘᴏᴄʜᴛɪᴛᴀᴇᴍʏᴊ Yᴀᴢʏᴋ Nɪᴢʜᴇ.</blockquote>"
+        "text": "🌐 <u>Выберите язык</u>"
       }
     },
     "support": {
       "en": {
-        "text": "<blockquote>🆘 <u>Sᴜᴘᴘᴏʀᴛ</u>\n\n<u>➤ Rᴇᴘᴏʀᴛ A Pʀᴏʙʟᴇᴍ</u>\n\n<u>➤ Sᴇɴᴅ Fᴇᴇᴅʙᴀᴄᴋ</u>\n\n<u>➤ Aᴄᴋɴᴏᴡʟᴇᴅɢᴇ ᴀɴᴅ Gᴇᴛ Hᴇʟᴘ</u></blockquote>"
+        "text": "<blockquote><u>🆘 SUPPORT</u>\n\n<u>🛠️ Report a problem</u>\n<u>💡 Share your feedback</u>\n<u>❓ Ask a question</u>\n💭 Suggest a feature\n\nWe’ll review your message and get back to you as soon as possible.</blockquote>"
       },
       "hi": {
-        "text": "<blockquote>🆘 <u>Sᴜᴘᴘᴏʀᴛ</u>\n\n<u>➤ Pʀᴏʙʟᴇᴍ Rᴇᴘᴏʀᴛ Kᴀʀᴇɴ</u>\n\n<u>➤ Fᴇᴇᴅʙᴀᴄᴋ Bʜᴇᴊᴇɴ</u>\n\n<u>➤ Aᴘɴɪ Pʀᴏʙʟᴇᴍ Kɪ Dᴇᴛᴀɪʟ Bᴀᴛᴀᴇɴ</u></blockquote>"
+        "text": "<blockquote><u>🆘 सहायता</u>\n\n<u>🛠️ समस्या की रिपोर्ट करें</u>\n<u>💡 अपना सुझाव दें</u>\n<u>❓ सवाल पूछें</u>\n💭 किसी फीचर का सुझाव दें\n\nहम आपके संदेश की समीक्षा करके जल्द से जल्द जवाब देंगे।</blockquote>"
+      },
+      "es": {
+        "text": "<blockquote><u>🆘 SOPORTE</u>\n\n<u>🛠️ Informar de un problema</u>\n<u>💡 Compartir comentarios</u>\n<u>❓ Hacer una pregunta</u>\n💭 Sugerir una función\n\nRevisaremos tu mensaje y responderemos lo antes posible.</blockquote>"
+      },
+      "fr": {
+        "text": "<blockquote><u>🆘 ASSISTANCE</u>\n\n<u>🛠️ Signaler un problème</u>\n<u>💡 Partager vos commentaires</u>\n<u>❓ Poser une question</u>\n💭 Suggérer une fonctionnalité\n\nNous examinerons votre message et vous répondrons dès que possible.</blockquote>"
+      },
+      "ar": {
+        "text": "<blockquote><u>🆘 الدعم</u>\n\n<u>🛠️ الإبلاغ عن مشكلة</u>\n<u>💡 مشاركة ملاحظاتك</u>\n<u>❓ طرح سؤال</u>\n💭 اقتراح ميزة\n\nسنراجع رسالتك ونرد عليك في أقرب وقت ممكن.</blockquote>"
+      },
+      "pt": {
+        "text": "<blockquote><u>🆘 SUPORTE</u>\n\n<u>🛠️ Relatar um problema</u>\n<u>💡 Compartilhar feedback</u>\n<u>❓ Fazer uma pergunta</u>\n💭 Sugerir um recurso\n\nVamos analisar sua mensagem e responder o mais rápido possível.</blockquote>"
+      },
+      "id": {
+        "text": "<blockquote><u>🆘 DUKUNGAN</u>\n\n<u>🛠️ Laporkan masalah</u>\n<u>💡 Bagikan masukan</u>\n<u>❓ Ajukan pertanyaan</u>\n💭 Sarankan fitur\n\nKami akan meninjau pesan Anda dan membalas sesegera mungkin.</blockquote>"
+      },
+      "bn": {
+        "text": "<blockquote><u>🆘 সাপোর্ট</u>\n\n<u>🛠️ সমস্যা রিপোর্ট করুন</u>\n<u>💡 মতামত জানান</u>\n<u>❓ প্রশ্ন করুন</u>\n💭 নতুন ফিচারের পরামর্শ দিন\n\nআমরা আপনার বার্তা দেখে যত দ্রুত সম্ভব উত্তর দেব।</blockquote>"
+      },
+      "ur": {
+        "text": "<blockquote><u>🆘 معاونت</u>\n\n<u>🛠️ مسئلے کی رپورٹ کریں</u>\n<u>💡 اپنی رائے دیں</u>\n<u>❓ سوال پوچھیں</u>\n💭 کسی فیچر کی تجویز دیں\n\nہم آپ کے پیغام کا جائزہ لے کر جلد از جلد جواب دیں گے۔</blockquote>"
       },
       "ru": {
-        "text": "<blockquote>🆘 <u>Pᴏᴅᴅᴇʀᴢʜᴋᴀ</u>\n\n<u>➤ Sᴏᴏʙsʜᴄʜɪᴛь ᴏ Pʀᴏʙʟᴇᴍᴇ</u>\n\n<u>➤ Oᴛᴘʀᴀᴠɪᴛь Oᴛᴢʏᴠ</u>\n\n<u>➤ Pᴏʟᴜᴄʜɪᴛь Pᴏᴍᴏsʜᴄʜь</u></blockquote>"
+        "text": "<blockquote><u>🆘 ПОДДЕРЖКА</u>\n\n<u>🛠️ Сообщить о проблеме</u>\n<u>💡 Оставить отзыв</u>\n<u>❓ Задать вопрос</u>\n💭 Предложить функцию\n\nМы рассмотрим ваше сообщение и ответим как можно скорее.</blockquote>"
       }
     },
     "developer": {
       "en": {
-        "text": "<blockquote>👨‍💻 <u>Dᴇᴠᴇʟᴏᴘᴇʀ</u>\n\n<u>➤ Cᴏɴᴛᴀᴄᴛ Dᴇᴠᴇʟᴏᴘᴇʀ</u>\n\n<u>➤ Gᴇᴛ Hᴇʟᴘ Wɪᴛʜ Tʜᴇ Bᴏᴛ</u></blockquote>"
+        "text": "<blockquote>👨‍💻 <u>DEVELOPER</u>\n\n<u>➤ Contact the developer</u>\n\n<u>➤ Get help with the bot</u></blockquote>"
       },
       "hi": {
-        "text": "<blockquote>👨‍💻 <u>Dᴇᴠᴇʟᴏᴘᴇʀ</u>\n\n<u>➤ Dᴇᴠᴇʟᴏᴘᴇʀ Sᴇ Cᴏɴᴛᴀᴄᴛ Kᴀʀᴇɴ</u>\n\n<u>➤ Bᴏᴛ Sᴇ Rᴇʟᴀᴛᴇᴅ Hᴇʟᴘ Lᴇɴ</u></blockquote>"
+        "text": "<blockquote>👨‍💻 <u>डेवलपर</u>\n\n<u>➤ डेवलपर से संपर्क करें</u>\n\n<u>➤ बॉट से जुड़ी सहायता लें</u></blockquote>"
+      },
+      "es": {
+        "text": "<blockquote>👨‍💻 <u>DESARROLLADOR</u>\n\n<u>➤ Contactar al desarrollador</u>\n\n<u>➤ Obtener ayuda con el bot</u></blockquote>"
+      },
+      "fr": {
+        "text": "<blockquote>👨‍💻 <u>DÉVELOPPEUR</u>\n\n<u>➤ Contacter le développeur</u>\n\n<u>➤ Obtenir de l’aide avec le bot</u></blockquote>"
+      },
+      "ar": {
+        "text": "<blockquote>👨‍💻 <u>المطور</u>\n\n<u>➤ التواصل مع المطور</u>\n\n<u>➤ الحصول على مساعدة بشأن البوت</u></blockquote>"
+      },
+      "pt": {
+        "text": "<blockquote>👨‍💻 <u>DESENVOLVEDOR</u>\n\n<u>➤ Falar com o desenvolvedor</u>\n\n<u>➤ Obter ajuda com o bot</u></blockquote>"
+      },
+      "id": {
+        "text": "<blockquote>👨‍💻 <u>PENGEMBANG</u>\n\n<u>➤ Hubungi pengembang</u>\n\n<u>➤ Dapatkan bantuan tentang bot</u></blockquote>"
+      },
+      "bn": {
+        "text": "<blockquote>👨‍💻 <u>ডেভেলপার</u>\n\n<u>➤ ডেভেলপারের সাথে যোগাযোগ করুন</u>\n\n<u>➤ বট সম্পর্কে সাহায্য নিন</u></blockquote>"
+      },
+      "ur": {
+        "text": "<blockquote>👨‍💻 <u>ڈویلپر</u>\n\n<u>➤ ڈویلپر سے رابطہ کریں</u>\n\n<u>➤ بوٹ کے بارے میں مدد حاصل کریں</u></blockquote>"
       },
       "ru": {
-        "text": "<blockquote>👨‍💻 <u>Rᴀᴢʀᴀʙᴏᴛᴄʜɪᴋ</u>\n\n<u>➤ Sᴠʏᴀᴢᴀᴛьsʏᴀ s Rᴀᴢʀᴀʙᴏᴛᴄʜɪᴋᴏᴍ</u>\n\n<u>➤ Pᴏʟᴜᴄʜɪᴛь Pᴏᴍᴏsʜᴄʜь ᴘᴏ Bᴏᴛᴜ</u></blockquote>"
+        "text": "<blockquote>👨‍💻 <u>РАЗРАБОТЧИК</u>\n\n<u>➤ Связаться с разработчиком</u>\n\n<u>➤ Получить помощь по боту</u></blockquote>"
       }
     },
     "download": {
       "en": {
-        "text": "<blockquote>📥 <u>Dᴏᴡɴʟᴏᴀᴅ Rᴇᴇʟ</u>\n\n<u>➤ Sᴇɴᴅ A Pᴜʙʟɪᴄ Iɴsᴛᴀɢʀᴀᴍ Rᴇᴇʟ Lɪɴᴋ</u></blockquote>"
+        "text": "<blockquote><b>DOWNLOAD REEL</b>\n\n➤ Copy the Reel link from Instagram\n\n➤ Paste the link here\n\nThat’s it — I’ll do the rest.</blockquote>"
       },
       "hi": {
-        "text": "<blockquote>📥 <u>Dᴏᴡɴʟᴏᴀᴅ Rᴇᴇʟ</u>\n\n<u>➤ Pᴜʙʟɪᴄ Iɴsᴛᴀɢʀᴀᴍ Rᴇᴇʟ Kᴀ Lɪɴᴋ Sᴇɴᴅ Kᴀʀᴇɴ</u></blockquote>"
+        "text": "<blockquote><b>रील डाउनलोड करें</b>\n\n➤ Instagram से Reel का लिंक कॉपी करें\n\n➤ लिंक यहाँ भेजें\n\nबस इतना ही — बाकी काम बॉट कर देगा।</blockquote>"
+      },
+      "es": {
+        "text": "<blockquote><b>DESCARGAR REEL</b>\n\n➤ Copia el enlace del Reel desde Instagram\n\n➤ Pega el enlace aquí\n\nEso es todo: yo haré el resto.</blockquote>"
+      },
+      "fr": {
+        "text": "<blockquote><b>TÉLÉCHARGER UN REEL</b>\n\n➤ Copiez le lien du Reel depuis Instagram\n\n➤ Collez le lien ici\n\nC’est tout — je m’occupe du reste.</blockquote>"
+      },
+      "ar": {
+        "text": "<blockquote><b>تنزيل الـ Reel</b>\n\n➤ انسخ رابط الـ Reel من Instagram\n\n➤ أرسل الرابط هنا\n\nهذا كل شيء — سأتولى الباقي.</blockquote>"
+      },
+      "pt": {
+        "text": "<blockquote><b>BAIXAR REEL</b>\n\n➤ Copie o link do Reel no Instagram\n\n➤ Cole o link aqui\n\nÉ só isso — eu cuido do resto.</blockquote>"
+      },
+      "id": {
+        "text": "<blockquote><b>UNDUH REEL</b>\n\n➤ Salin tautan Reel dari Instagram\n\n➤ Tempel tautannya di sini\n\nSelesai — kami akan menangani sisanya.</blockquote>"
+      },
+      "bn": {
+        "text": "<blockquote><b>রিল ডাউনলোড</b>\n\n➤ Instagram থেকে Reel-এর লিংক কপি করুন\n\n➤ লিংকটি এখানে পাঠান\n\nএতেই শেষ — বাকি কাজ বট করবে।</blockquote>"
+      },
+      "ur": {
+        "text": "<blockquote><b>ریِل ڈاؤن لوڈ کریں</b>\n\n➤ Instagram سے Reel کا لنک کاپی کریں\n\n➤ لنک یہاں بھیجیں\n\nبس اتنا ہی — باقی کام بوٹ کرے گا۔</blockquote>"
       },
       "ru": {
-        "text": "<blockquote>📥 <u>Sᴋᴀᴄʜᴀᴛь Rᴇᴇʟ</u>\n\n<u>➤ Oᴛᴘʀᴀᴠьᴛᴇ ssʏʟᴋᴜ ɴᴀ Pᴜʙʟɪᴄʜɴʏᴊ Iɴsᴛᴀɢʀᴀᴍ Rᴇᴇʟ</u></blockquote>"
+        "text": "<blockquote><b>СКАЧАТЬ REEL</b>\n\n➤ Скопируйте ссылку на Reel в Instagram\n\n➤ Отправьте ссылку сюда\n\nВот и всё — остальное сделает бот.</blockquote>"
       }
     },
     "disclaimer": {
       "en": {
-        "text": "<blockquote><u>𝐃𝐈𝐒𝐂𝐋𝐀𝐈𝐌𝐄𝐑 &amp; 𝐓𝐄𝐑𝐌𝐒 𝐎𝐅 𝐔𝐒𝐄</u>\n\nPʟᴇᴀsᴇ ᴜsᴇ ᴛʜɪs sᴇʀᴠɪᴄᴇ ʀᴇsᴘᴏɴsɪʙʟʏ ᴀɴᴅ ᴏɴʟʏ ғᴏʀ ᴄᴏɴᴛᴇɴᴛ ʏᴏᴜ ᴀʀᴇ ᴀᴜᴛʜᴏʀɪᴢᴇᴅ ᴛᴏ ᴜsᴇ.</blockquote>"
+        "text": "<blockquote expandable><b>DISCLAIMER &amp; TERMS OF USE</b>\n\nThis bot is a general-purpose media-downloading tool provided for personal and fair-use purposes only. It does not host, store, own, or claim any rights over the content it retrieves.\n\nBy using this bot, you confirm that:\n• You have the necessary rights or permissions to download the content you request, or that your use qualifies as fair use / fair dealing under applicable law.\n• You will not use this bot to download, redistribute, or republish copyrighted material without the rights holder’s consent.\n• You are solely and fully responsible for how you use any content obtained through this bot.\n\nThe bot operator does not monitor, endorse, or verify the ownership of any content requested by users, and accepts no liability for misuse, copyright infringement, or violation of third-party rights. Files are delivered directly to you and are not permanently stored on the bot’s servers.\n\nThis service is provided “as is”, without warranty of any kind, and may be modified, suspended, or discontinued at any time without prior notice. Continued use after changes constitutes acceptance of the updated terms.\n\nTap <b>Agree &amp; Continue</b> to confirm you have read and accepted these terms.</blockquote>",
+        "buttons": [
+          {
+            "label": "✅ Agree & Continue",
+            "type": "callback",
+            "value": "agree_terms",
+            "row": 1,
+            "style": "success"
+          }
+        ]
       },
       "hi": {
-        "text": "<blockquote><u>𝐃𝐈𝐒𝐂𝐋𝐀𝐈𝐌𝐄𝐑 &amp; 𝐓𝐄𝐑𝐌𝐒 𝐎𝐅 𝐔𝐒𝐄</u>\n\nKʀɪᴘʏᴀ Iꜱ Sᴇʀᴠɪᴄᴇ Kᴀ Iꜱᴛᴇᴍᴀʟ Kᴀʀᴇɴ ᴀᴜʀ Sɪʀғ Uꜱ Cᴏɴᴛᴇɴᴛ Kᴇ Lɪʏᴇ Jɪꜱᴋᴀ Aᴘᴋᴏ Aᴅʜɪᴋᴀʀ Hᴀɪ.</blockquote>"
+        "text": "<blockquote expandable><b>अस्वीकरण और उपयोग की शर्तें</b>\n\nयह बॉट केवल व्यक्तिगत और उचित उपयोग के लिए सामान्य मीडिया-डाउनलोडिंग सेवा प्रदान करता है। यह आपके द्वारा प्राप्त सामग्री को होस्ट, स्थायी रूप से स्टोर या अपना नहीं बताता और उस पर किसी अधिकार का दावा नहीं करता।\n\nइस बॉट का उपयोग करके आप पुष्टि करते हैं कि:\n• आपके पास अनुरोधित सामग्री डाउनलोड करने के आवश्यक अधिकार या अनुमति है, या आपका उपयोग लागू कानून के अनुसार उचित उपयोग के अंतर्गत आता है।\n• आप अधिकारधारी की अनुमति के बिना कॉपीराइट सामग्री को डाउनलोड, पुनर्वितरित या दोबारा प्रकाशित नहीं करेंगे।\n• इस बॉट से प्राप्त किसी भी सामग्री के उपयोग की पूरी जिम्मेदारी आपकी है।\n\nबॉट संचालक उपयोगकर्ताओं द्वारा अनुरोधित सामग्री के स्वामित्व की निगरानी, पुष्टि या समर्थन नहीं करता और दुरुपयोग, कॉपीराइट उल्लंघन या किसी तीसरे पक्ष के अधिकारों के उल्लंघन के लिए जिम्मेदार नहीं है। फाइलें सीधे आपको भेजी जाती हैं और बॉट के सर्वर पर स्थायी रूप से स्टोर नहीं की जातीं।\n\nयह सेवा “जैसी है” आधार पर दी जाती है और किसी भी प्रकार की वारंटी नहीं देती। इसे बिना पूर्व सूचना के बदला, रोका या बंद किया जा सकता है। शर्तों में बदलाव के बाद बॉट का उपयोग जारी रखना नई शर्तों की स्वीकृति माना जाएगा।\n\nइन शर्तों को पढ़कर स्वीकार करने के लिए <b>सहमत हूँ और जारी रखें</b> दबाएँ।</blockquote>",
+        "buttons": [
+          {
+            "label": "✅ सहमत हूँ और जारी रखें",
+            "type": "callback",
+            "value": "agree_terms",
+            "row": 1,
+            "style": "success"
+          }
+        ]
+      },
+      "es": {
+        "text": "<blockquote expandable><b>AVISO Y CONDICIONES DE USO</b>\n\nEste bot es una herramienta general para descargar contenido multimedia, destinada únicamente a usos personales y permitidos. No aloja, almacena, posee ni reclama derechos sobre el contenido que obtiene.\n\nAl usar este bot confirmas que:\n• Tienes los derechos o permisos necesarios para descargar el contenido solicitado, o que tu uso está permitido por la legislación aplicable.\n• No descargarás, redistribuirás ni volverás a publicar material protegido por derechos de autor sin el consentimiento del titular.\n• Eres totalmente responsable del uso que hagas de cualquier contenido obtenido mediante este bot.\n\nEl operador del bot no supervisa ni verifica la propiedad del contenido solicitado y no asume responsabilidad por usos indebidos, infracciones de derechos de autor o vulneraciones de derechos de terceros. Los archivos se entregan directamente y no se almacenan permanentemente en los servidores del bot.\n\nEl servicio se ofrece “tal cual”, sin garantías, y puede modificarse, suspenderse o cancelarse sin previo aviso. Continuar utilizándolo después de cambios implica aceptar las condiciones actualizadas.\n\nPulsa <b>Aceptar y continuar</b> para confirmar que has leído y aceptado estas condiciones.</blockquote>",
+        "buttons": [
+          {
+            "label": "✅ Aceptar y continuar",
+            "type": "callback",
+            "value": "agree_terms",
+            "row": 1,
+            "style": "success"
+          }
+        ]
+      },
+      "fr": {
+        "text": "<blockquote expandable><b>AVERTISSEMENT ET CONDITIONS D’UTILISATION</b>\n\nCe bot est un outil général de téléchargement de médias destiné uniquement à un usage personnel et autorisé. Il n’héberge, ne stocke, ne possède et ne revendique aucun droit sur les contenus récupérés.\n\nEn utilisant ce bot, vous confirmez que :\n• Vous disposez des droits ou autorisations nécessaires pour télécharger le contenu demandé, ou que votre utilisation est autorisée par la loi applicable.\n• Vous ne téléchargerez, ne redistribuerez et ne republierez pas de contenu protégé sans l’autorisation du titulaire des droits.\n• Vous êtes entièrement responsable de l’utilisation des contenus obtenus via ce bot.\n\nL’opérateur ne surveille ni ne vérifie la propriété des contenus demandés et décline toute responsabilité en cas de mauvaise utilisation, d’atteinte aux droits d’auteur ou aux droits de tiers. Les fichiers sont envoyés directement et ne sont pas conservés définitivement sur les serveurs du bot.\n\nLe service est fourni « tel quel », sans garantie, et peut être modifié, suspendu ou arrêté sans préavis. Continuer à l’utiliser après une modification vaut acceptation des conditions mises à jour.\n\nAppuyez sur <b>J’accepte et continuer</b> pour confirmer votre acceptation.</blockquote>",
+        "buttons": [
+          {
+            "label": "✅ J’accepte et continuer",
+            "type": "callback",
+            "value": "agree_terms",
+            "row": 1,
+            "style": "success"
+          }
+        ]
+      },
+      "ar": {
+        "text": "<blockquote expandable><b>إخلاء المسؤولية وشروط الاستخدام</b>\n\nهذا البوت أداة عامة لتنزيل الوسائط ومخصصة للاستخدام الشخصي والمسموح به فقط. لا يستضيف أو يخزن أو يمتلك المحتوى الذي يتم جلبه ولا يدعي أي حقوق عليه.\n\nباستخدامك للبوت، تؤكد أن:\n• لديك الحقوق أو الأذونات اللازمة لتنزيل المحتوى المطلوب، أو أن استخدامك مسموح به بموجب القانون المعمول به.\n• لن تستخدم البوت لتنزيل أو إعادة توزيع أو إعادة نشر مواد محمية بحقوق الطبع دون موافقة صاحب الحقوق.\n• أنت المسؤول بالكامل عن طريقة استخدام أي محتوى تحصل عليه عبر البوت.\n\nمشغّل البوت لا يراقب أو يتحقق من ملكية المحتوى المطلوب ولا يتحمل مسؤولية سوء الاستخدام أو انتهاك حقوق الطبع أو حقوق الغير. يتم إرسال الملفات إليك مباشرة ولا يتم تخزينها بشكل دائم على خوادم البوت.\n\nتُقدّم الخدمة «كما هي» دون أي ضمان، وقد يتم تعديلها أو تعليقها أو إيقافها دون إشعار مسبق. استمرارك في الاستخدام بعد تغيير الشروط يعني قبولك للشروط المحدثة.\n\nاضغط <b>أوافق وأتابع</b> لتأكيد قراءة الشروط وقبولها.</blockquote>",
+        "buttons": [
+          {
+            "label": "✅ أوافق وأتابع",
+            "type": "callback",
+            "value": "agree_terms",
+            "row": 1,
+            "style": "success"
+          }
+        ]
+      },
+      "pt": {
+        "text": "<blockquote expandable><b>AVISO E TERMOS DE USO</b>\n\nEste bot é uma ferramenta geral de download de mídia, destinada apenas a uso pessoal e permitido. Ele não hospeda, armazena, possui nem reivindica direitos sobre o conteúdo obtido.\n\nAo usar este bot, você confirma que:\n• Possui os direitos ou permissões necessários para baixar o conteúdo solicitado, ou que seu uso é permitido pela lei aplicável.\n• Não usará o bot para baixar, redistribuir ou republicar material protegido por direitos autorais sem autorização do titular.\n• É totalmente responsável pela forma como utiliza qualquer conteúdo obtido pelo bot.\n\nO operador não monitora nem verifica a propriedade do conteúdo solicitado e não se responsabiliza por uso indevido, violação de direitos autorais ou direitos de terceiros. Os arquivos são enviados diretamente e não ficam armazenados permanentemente nos servidores do bot.\n\nO serviço é fornecido “como está”, sem garantias, e pode ser alterado, suspenso ou encerrado sem aviso prévio. Continuar usando o bot após alterações significa aceitar os termos atualizados.\n\nToque em <b>Concordar e continuar</b> para confirmar que leu e aceitou estes termos.</blockquote>",
+        "buttons": [
+          {
+            "label": "✅ Concordar e continuar",
+            "type": "callback",
+            "value": "agree_terms",
+            "row": 1,
+            "style": "success"
+          }
+        ]
+      },
+      "id": {
+        "text": "<blockquote expandable><b>PENAFIAN &amp; KETENTUAN PENGGUNAAN</b>\n\nBot ini adalah alat pengunduh media umum yang hanya disediakan untuk penggunaan pribadi dan wajar. Bot tidak menghosting, menyimpan secara permanen, memiliki, atau mengklaim hak atas konten yang diambil.\n\nDengan menggunakan bot ini, Anda menyatakan bahwa:\n• Anda memiliki hak atau izin yang diperlukan untuk mengunduh konten, atau penggunaan Anda diperbolehkan oleh hukum yang berlaku.\n• Anda tidak akan menggunakan bot untuk mengunduh, mendistribusikan ulang, atau menerbitkan ulang materi berhak cipta tanpa izin pemegang hak.\n• Anda bertanggung jawab sepenuhnya atas penggunaan konten yang diperoleh melalui bot.\n\nOperator bot tidak memantau atau memverifikasi kepemilikan konten dan tidak bertanggung jawab atas penyalahgunaan, pelanggaran hak cipta, atau hak pihak ketiga. File dikirim langsung kepada Anda dan tidak disimpan secara permanen di server bot.\n\nLayanan disediakan “sebagaimana adanya” tanpa jaminan dan dapat diubah, dihentikan sementara, atau dihentikan kapan saja tanpa pemberitahuan. Penggunaan setelah perubahan berarti menerima ketentuan terbaru.\n\nTekan <b>Setuju &amp; Lanjutkan</b> untuk mengonfirmasi bahwa Anda telah membaca dan menerima ketentuan ini.</blockquote>",
+        "buttons": [
+          {
+            "label": "✅ Setuju & Lanjutkan",
+            "type": "callback",
+            "value": "agree_terms",
+            "row": 1,
+            "style": "success"
+          }
+        ]
+      },
+      "bn": {
+        "text": "<blockquote expandable><b>দাবিত্যাগ ও ব্যবহারের শর্ত</b>\n\nএই বটটি ব্যক্তিগত ও অনুমোদিত ব্যবহারের জন্য একটি সাধারণ মিডিয়া ডাউনলোড টুল। এটি সংগ্রহ করা কনটেন্ট হোস্ট, স্থায়ীভাবে সংরক্ষণ বা নিজের বলে দাবি করে না এবং এর ওপর কোনো অধিকার দাবি করে না।\n\nএই বট ব্যবহার করে আপনি নিশ্চিত করছেন যে:\n• অনুরোধ করা কনটেন্ট ডাউনলোড করার জন্য আপনার প্রয়োজনীয় অধিকার বা অনুমতি রয়েছে, অথবা প্রযোজ্য আইনে আপনার ব্যবহার অনুমোদিত।\n• অধিকার মালিকের অনুমতি ছাড়া কপিরাইটযুক্ত কনটেন্ট ডাউনলোড, পুনর্বিতরণ বা পুনঃপ্রকাশ করবেন না।\n• বটের মাধ্যমে পাওয়া কনটেন্ট কীভাবে ব্যবহার করবেন তার সম্পূর্ণ দায়িত্ব আপনার।\n\nবট পরিচালনাকারী ব্যবহারকারীর অনুরোধ করা কনটেন্টের মালিকানা যাচাই বা পর্যবেক্ষণ করে না এবং অপব্যবহার, কপিরাইট লঙ্ঘন বা তৃতীয় পক্ষের অধিকার লঙ্ঘনের জন্য দায়ী নয়। ফাইল সরাসরি আপনাকে পাঠানো হয় এবং বটের সার্ভারে স্থায়ীভাবে রাখা হয় না।\n\nসেবাটি কোনো ধরনের ওয়ারেন্টি ছাড়াই “যেমন আছে” ভিত্তিতে দেওয়া হয় এবং পূর্ব নোটিশ ছাড়াই পরিবর্তন, স্থগিত বা বন্ধ হতে পারে। শর্ত পরিবর্তনের পরও ব্যবহার চালিয়ে গেলে তা নতুন শর্ত গ্রহণ হিসেবে গণ্য হবে।\n\nশর্ত পড়ে গ্রহণ করতে <b>সম্মত ও চালিয়ে যান</b> চাপুন।</blockquote>",
+        "buttons": [
+          {
+            "label": "✅ সম্মত ও চালিয়ে যান",
+            "type": "callback",
+            "value": "agree_terms",
+            "row": 1,
+            "style": "success"
+          }
+        ]
+      },
+      "ur": {
+        "text": "<blockquote expandable><b>دستبرداری اور استعمال کی شرائط</b>\n\nیہ بوٹ عام میڈیا ڈاؤن لوڈنگ ٹول ہے جو صرف ذاتی اور جائز استعمال کے لیے فراہم کیا گیا ہے۔ یہ حاصل کیے گئے مواد کو ہوسٹ، مستقل طور پر محفوظ یا اپنی ملکیت قرار نہیں دیتا اور نہ ہی اس پر کسی حق کا دعویٰ کرتا ہے۔\n\nاس بوٹ کو استعمال کرکے آپ تصدیق کرتے ہیں کہ:\n• مطلوبہ مواد ڈاؤن لوڈ کرنے کے لیے آپ کے پاس ضروری حقوق یا اجازت موجود ہے، یا قابلِ اطلاق قانون کے تحت آپ کا استعمال جائز ہے۔\n• آپ حقِ ملکیت رکھنے والے کی اجازت کے بغیر کاپی رائٹ شدہ مواد ڈاؤن لوڈ، دوبارہ تقسیم یا دوبارہ شائع نہیں کریں گے۔\n• بوٹ سے حاصل کیے گئے مواد کے استعمال کی مکمل ذمہ داری آپ کی ہے۔\n\nبوٹ کا منتظم مطلوبہ مواد کی ملکیت کی نگرانی یا تصدیق نہیں کرتا اور غلط استعمال، کاپی رائٹ کی خلاف ورزی یا تیسرے فریق کے حقوق کی خلاف ورزی کا ذمہ دار نہیں ہے۔ فائلیں براہِ راست آپ کو بھیجی جاتی ہیں اور بوٹ کے سرور پر مستقل طور پر محفوظ نہیں کی جاتیں۔\n\nیہ سروس “جیسی ہے” کی بنیاد پر فراہم کی جاتی ہے، بغیر کسی ضمانت کے، اور اسے پیشگی اطلاع کے بغیر تبدیل، معطل یا بند کیا جا سکتا ہے۔ شرائط میں تبدیلی کے بعد استعمال جاری رکھنا نئی شرائط کی منظوری تصور ہوگا۔\n\nشرائط پڑھ کر قبول کرنے کے لیے <b>متفق ہوں اور جاری رکھیں</b> دبائیں۔</blockquote>",
+        "buttons": [
+          {
+            "label": "✅ متفق ہوں اور جاری رکھیں",
+            "type": "callback",
+            "value": "agree_terms",
+            "row": 1,
+            "style": "success"
+          }
+        ]
       },
       "ru": {
-        "text": "<blockquote><u>𝐃𝐈𝐒𝐂𝐋𝐀𝐈𝐌𝐄𝐑 &amp; 𝐓𝐄𝐑𝐌𝐒 𝐎𝐅 𝐔𝐒𝐄</u>\n\nPᴏᴢʜᴀʟᴜᴊsᴛᴀ, ɪsᴘᴏʟьᴢᴜᴊᴛᴇ sᴇʀᴠɪs ᴏᴛᴠᴇᴛsᴛᴠᴇɴɴᴏ ɪ ᴛᴏʟьᴋᴏ ᴅʟʏᴀ Kᴏɴᴛᴇɴᴛᴀ, ᴋᴏᴛᴏʀʏᴊ ᴠᴀᴍ ʀᴀᴢʀᴇsʜᴇɴᴏ ɪsᴘᴏʟьᴢᴏᴠᴀᴛь.</blockquote>"
+        "text": "<blockquote expandable><b>ОТКАЗ ОТ ОТВЕТСТВЕННОСТИ И УСЛОВИЯ ИСПОЛЬЗОВАНИЯ</b>\n\nЭтот бот является универсальным инструментом для загрузки медиа и предназначен только для личного и разрешённого использования. Он не размещает, не хранит постоянно, не владеет и не заявляет права на получаемый контент.\n\nИспользуя бота, вы подтверждаете, что:\n• У вас есть необходимые права или разрешения на загрузку запрашиваемого контента либо ваше использование разрешено применимым законодательством.\n• Вы не будете скачивать, распространять или публиковать защищённые авторским правом материалы без согласия правообладателя.\n• Вы полностью отвечаете за использование любого контента, полученного через бота.\n\nОператор не контролирует и не проверяет право собственности на запрашиваемый контент и не несёт ответственности за неправомерное использование, нарушение авторских прав или прав третьих лиц. Файлы отправляются напрямую вам и не хранятся постоянно на серверах бота.\n\nСервис предоставляется «как есть», без каких-либо гарантий, и может быть изменён, приостановлен или прекращён без предварительного уведомления. Продолжение использования после изменений означает принятие обновлённых условий.\n\nНажмите <b>Согласен и продолжить</b>, чтобы подтвердить, что вы прочитали и приняли условия.</blockquote>",
+        "buttons": [
+          {
+            "label": "✅ Согласен и продолжить",
+            "type": "callback",
+            "value": "agree_terms",
+            "row": 1,
+            "style": "success"
+          }
+        ]
       }
+    },
+    "help_user": {
+      "en": {
+        "text": "<b>GUIDE</b>\n\n➤ Send an Instagram Reel link\n➤ Get it in the best available quality\n➤ Tap Get Caption for the post caption"
+      },
+      "hi": {
+        "text": "<b>गाइड</b>\n\n➤ Instagram Reel का लिंक भेजें\n➤ उपलब्ध सबसे अच्छी क्वालिटी में Reel पाएँ\n➤ पोस्ट का कैप्शन पाने के लिए कैप्शन बटन दबाएँ"
+      },
+      "es": {
+        "text": "<b>GUÍA</b>\n\n➤ Envía un enlace de Instagram Reel\n➤ Recíbelo con la mejor calidad disponible\n➤ Pulsa Obtener subtítulo para ver el texto de la publicación"
+      },
+      "fr": {
+        "text": "<b>GUIDE</b>\n\n➤ Envoyez un lien de Reel Instagram\n➤ Recevez-le dans la meilleure qualité disponible\n➤ Appuyez sur Obtenir la légende pour voir la légende"
+      },
+      "ar": {
+        "text": "<b>الدليل</b>\n\n➤ أرسل رابط Reel من Instagram\n➤ احصل عليه بأفضل جودة متاحة\n➤ اضغط على الحصول على الوصف لرؤية وصف المنشور"
+      },
+      "pt": {
+        "text": "<b>GUIA</b>\n\n➤ Envie um link de Reel do Instagram\n➤ Receba na melhor qualidade disponível\n➤ Toque em Obter legenda para ver a legenda da publicação"
+      },
+      "id": {
+        "text": "<b>PANDUAN</b>\n\n➤ Kirim tautan Instagram Reel\n➤ Dapatkan dalam kualitas terbaik yang tersedia\n➤ Ketuk Dapatkan Caption untuk melihat caption postingan"
+      },
+      "bn": {
+        "text": "<b>গাইড</b>\n\n➤ Instagram Reel-এর লিংক পাঠান\n➤ উপলব্ধ সেরা মানের Reel পান\n➤ পোস্টের ক্যাপশন দেখতে ক্যাপশন বাটনে চাপুন"
+      },
+      "ur": {
+        "text": "<b>رہنمائی</b>\n\n➤ Instagram Reel کا لنک بھیجیں\n➤ دستیاب بہترین معیار میں حاصل کریں\n➤ پوسٹ کا کیپشن دیکھنے کے لیے کیپشن بٹن دبائیں"
+      },
+      "ru": {
+        "text": "<b>РУКОВОДСТВО</b>\n\n➤ Отправьте ссылку на Instagram Reel\n➤ Получите его в лучшем доступном качестве\n➤ Нажмите «Получить подпись», чтобы увидеть подпись публикации"
+      }
+    },
+    "reel_result": {
+      "en": {
+        "text": "✅ <b>Your Reel is ready!</b>\n🎬 Saved and sent below",
+        "buttons": [
+          {
+            "label": "📝 Caption",
+            "type": "callback",
+            "value": "get_caption",
+            "row": 1,
+            "style": "primary"
+          },
+          {
+            "label": "🎵 Audio",
+            "type": "callback",
+            "value": "get_audio",
+            "row": 1,
+            "style": "primary"
+          }
+        ]
+      },
+      "hi": {
+        "text": "✅ <b>आपकी Reel तैयार है!</b>\n🎬 नीचे सेव करके भेज दी गई है",
+        "buttons": [
+          {
+            "label": "📝 कैप्शन",
+            "type": "callback",
+            "value": "get_caption",
+            "row": 1,
+            "style": "primary"
+          },
+          {
+            "label": "🎵 ऑडियो",
+            "type": "callback",
+            "value": "get_audio",
+            "row": 1,
+            "style": "primary"
+          }
+        ]
+      },
+      "es": {
+        "text": "✅ <b>¡Tu Reel está listo!</b>\n🎬 Guardado y enviado abajo",
+        "buttons": [
+          {
+            "label": "📝 Subtítulo",
+            "type": "callback",
+            "value": "get_caption",
+            "row": 1,
+            "style": "primary"
+          },
+          {
+            "label": "🎵 Audio",
+            "type": "callback",
+            "value": "get_audio",
+            "row": 1,
+            "style": "primary"
+          }
+        ]
+      },
+      "fr": {
+        "text": "✅ <b>Votre Reel est prêt !</b>\n🎬 Enregistré et envoyé ci-dessous",
+        "buttons": [
+          {
+            "label": "📝 Légende",
+            "type": "callback",
+            "value": "get_caption",
+            "row": 1,
+            "style": "primary"
+          },
+          {
+            "label": "🎵 Audio",
+            "type": "callback",
+            "value": "get_audio",
+            "row": 1,
+            "style": "primary"
+          }
+        ]
+      },
+      "ar": {
+        "text": "✅ <b>الـ Reel جاهز!</b>\n🎬 تم حفظه وإرساله أدناه",
+        "buttons": [
+          {
+            "label": "📝 الوصف",
+            "type": "callback",
+            "value": "get_caption",
+            "row": 1,
+            "style": "primary"
+          },
+          {
+            "label": "🎵 الصوت",
+            "type": "callback",
+            "value": "get_audio",
+            "row": 1,
+            "style": "primary"
+          }
+        ]
+      },
+      "pt": {
+        "text": "✅ <b>Seu Reel está pronto!</b>\n🎬 Salvo e enviado abaixo",
+        "buttons": [
+          {
+            "label": "📝 Legenda",
+            "type": "callback",
+            "value": "get_caption",
+            "row": 1,
+            "style": "primary"
+          },
+          {
+            "label": "🎵 Áudio",
+            "type": "callback",
+            "value": "get_audio",
+            "row": 1,
+            "style": "primary"
+          }
+        ]
+      },
+      "id": {
+        "text": "✅ <b>Reel Anda sudah siap!</b>\n🎬 Disimpan dan dikirim di bawah",
+        "buttons": [
+          {
+            "label": "📝 Caption",
+            "type": "callback",
+            "value": "get_caption",
+            "row": 1,
+            "style": "primary"
+          },
+          {
+            "label": "🎵 Audio",
+            "type": "callback",
+            "value": "get_audio",
+            "row": 1,
+            "style": "primary"
+          }
+        ]
+      },
+      "bn": {
+        "text": "✅ <b>আপনার Reel প্রস্তুত!</b>\n🎬 নিচে সংরক্ষণ করে পাঠানো হয়েছে",
+        "buttons": [
+          {
+            "label": "📝 ক্যাপশন",
+            "type": "callback",
+            "value": "get_caption",
+            "row": 1,
+            "style": "primary"
+          },
+          {
+            "label": "🎵 অডিও",
+            "type": "callback",
+            "value": "get_audio",
+            "row": 1,
+            "style": "primary"
+          }
+        ]
+      },
+      "ur": {
+        "text": "✅ <b>آپ کی Reel تیار ہے!</b>\n🎬 نیچے محفوظ کرکے بھیج دی گئی ہے",
+        "buttons": [
+          {
+            "label": "📝 کیپشن",
+            "type": "callback",
+            "value": "get_caption",
+            "row": 1,
+            "style": "primary"
+          },
+          {
+            "label": "🎵 آڈیو",
+            "type": "callback",
+            "value": "get_audio",
+            "row": 1,
+            "style": "primary"
+          }
+        ]
+      },
+      "ru": {
+        "text": "✅ <b>Ваш Reel готов!</b>\n🎬 Сохранён и отправлен ниже",
+        "buttons": [
+          {
+            "label": "📝 Подпись",
+            "type": "callback",
+            "value": "get_caption",
+            "row": 1,
+            "style": "primary"
+          },
+          {
+            "label": "🎵 Аудио",
+            "type": "callback",
+            "value": "get_audio",
+            "row": 1,
+            "style": "primary"
+          }
+        ]
+      }
+    },
+    "maintenance": {
+      "en": {
+        "text": "The bot is temporarily offline for\nscheduled upgrades and improvements.\n\nWe’re working to make the bot\nfaster, smoother and better\nfor everyone.\n\n⏳ We’ll be back shortly.\n\nThank you for your\npatience & support.",
+        "buttons": [
+          {
+            "label": "🔔 Notify me",
+            "type": "callback",
+            "value": "maint_notify_me",
+            "row": 1,
+            "style": "danger"
+          }
+        ]
+      },
+      "hi": {
+        "text": "बॉट निर्धारित अपग्रेड और सुधार के लिए\nअस्थायी रूप से ऑफलाइन है।\n\nहम बॉट को सभी के लिए\nतेज़, बेहतर और आसान बनाने पर काम कर रहे हैं।\n\n⏳ हम जल्द वापस आएँगे।\n\nआपके धैर्य और सपोर्ट के लिए धन्यवाद।",
+        "buttons": [
+          {
+            "label": "🔔 मुझे सूचित करें",
+            "type": "callback",
+            "value": "maint_notify_me",
+            "row": 1,
+            "style": "danger"
+          }
+        ]
+      },
+      "es": {
+        "text": "El bot está temporalmente fuera de servicio\npor actualizaciones y mejoras programadas.\n\nEstamos trabajando para hacerlo\nmás rápido, fluido y mejor para todos.\n\n⏳ Volveremos en breve.\n\nGracias por tu paciencia y apoyo.",
+        "buttons": [
+          {
+            "label": "🔔 Avísame",
+            "type": "callback",
+            "value": "maint_notify_me",
+            "row": 1,
+            "style": "danger"
+          }
+        ]
+      },
+      "fr": {
+        "text": "Le bot est temporairement hors ligne\npour des mises à niveau et améliorations prévues.\n\nNous travaillons à le rendre\nplus rapide, fluide et performant pour tous.\n\n⏳ Nous serons bientôt de retour.\n\nMerci pour votre patience et votre soutien.",
+        "buttons": [
+          {
+            "label": "🔔 Me prévenir",
+            "type": "callback",
+            "value": "maint_notify_me",
+            "row": 1,
+            "style": "danger"
+          }
+        ]
+      },
+      "ar": {
+        "text": "البوت متوقف مؤقتًا\nبسبب تحديثات وتحسينات مجدولة.\n\nنعمل على جعل البوت\nأسرع وأسهل وأفضل للجميع.\n\n⏳ سنعود قريبًا.\n\nشكرًا لصبركم ودعمكم.",
+        "buttons": [
+          {
+            "label": "🔔 أبلغني",
+            "type": "callback",
+            "value": "maint_notify_me",
+            "row": 1,
+            "style": "danger"
+          }
+        ]
+      },
+      "pt": {
+        "text": "O bot está temporariamente offline\npara atualizações e melhorias programadas.\n\nEstamos trabalhando para deixá-lo\nmais rápido, estável e melhor para todos.\n\n⏳ Voltaremos em breve.\n\nObrigado pela paciência e apoio.",
+        "buttons": [
+          {
+            "label": "🔔 Avise-me",
+            "type": "callback",
+            "value": "maint_notify_me",
+            "row": 1,
+            "style": "danger"
+          }
+        ]
+      },
+      "id": {
+        "text": "Bot sedang offline sementara\nuntuk peningkatan dan perbaikan terjadwal.\n\nKami sedang membuat bot lebih\ncepat, lancar, dan lebih baik untuk semua.\n\n⏳ Kami akan segera kembali.\n\nTerima kasih atas kesabaran dan dukungan Anda.",
+        "buttons": [
+          {
+            "label": "🔔 Beri tahu saya",
+            "type": "callback",
+            "value": "maint_notify_me",
+            "row": 1,
+            "style": "danger"
+          }
+        ]
+      },
+      "bn": {
+        "text": "নির্ধারিত আপগ্রেড ও উন্নতির জন্য\nবটটি সাময়িকভাবে অফলাইনে রয়েছে।\n\nআমরা বটকে সবার জন্য আরও\nদ্রুত, সহজ ও ভালো করার কাজ করছি।\n\n⏳ আমরা শিগগিরই ফিরে আসব।\n\nআপনার ধৈর্য ও সাপোর্টের জন্য ধন্যবাদ।",
+        "buttons": [
+          {
+            "label": "🔔 আমাকে জানান",
+            "type": "callback",
+            "value": "maint_notify_me",
+            "row": 1,
+            "style": "danger"
+          }
+        ]
+      },
+      "ur": {
+        "text": "شیڈول شدہ اپ گریڈ اور بہتری کے لیے\nبوٹ عارضی طور پر آف لائن ہے۔\n\nہم بوٹ کو سب کے لیے\nتیز، بہتر اور آسان بنانے پر کام کر رہے ہیں۔\n\n⏳ ہم جلد واپس آئیں گے۔\n\nآپ کے صبر اور تعاون کا شکریہ۔",
+        "buttons": [
+          {
+            "label": "🔔 مجھے اطلاع دیں",
+            "type": "callback",
+            "value": "maint_notify_me",
+            "row": 1,
+            "style": "danger"
+          }
+        ]
+      },
+      "ru": {
+        "text": "Бот временно недоступен\nиз-за плановых обновлений и улучшений.\n\nМы работаем над тем, чтобы сделать его\nбыстрее, стабильнее и удобнее для всех.\n\n⏳ Скоро мы вернёмся.\n\nСпасибо за терпение и поддержку.",
+        "buttons": [
+          {
+            "label": "🔔 Уведомить меня",
+            "type": "callback",
+            "value": "maint_notify_me",
+            "row": 1,
+            "style": "danger"
+          }
+        ]
+      }
+    },
+    "bot_live": {
+      "en": {
+        "text": "✅ <b>BOT IS LIVE</b>\n\nMaintenance is complete — the bot is back and running normally.\n\n🚀 Everything is back online and ready to use.\n\nThank you for waiting.\n\nEnjoy the improvements. ✨"
+      },
+      "hi": {
+        "text": "✅ <b>बॉट लाइव है</b>\n\nमेंटेनेंस पूरा हो गया है — बॉट फिर से सामान्य रूप से चल रहा है।\n\n🚀 सब कुछ ऑनलाइन है और इस्तेमाल के लिए तैयार है।\n\nइंतज़ार करने के लिए धन्यवाद।\n\nनए सुधारों का आनंद लें। ✨"
+      },
+      "es": {
+        "text": "✅ <b>EL BOT ESTÁ ACTIVO</b>\n\nEl mantenimiento ha terminado y el bot vuelve a funcionar con normalidad.\n\n🚀 Todo está en línea y listo para usar.\n\nGracias por esperar.\n\nDisfruta de las mejoras. ✨"
+      },
+      "fr": {
+        "text": "✅ <b>LE BOT EST EN LIGNE</b>\n\nLa maintenance est terminée : le bot fonctionne à nouveau normalement.\n\n🚀 Tout est en ligne et prêt à être utilisé.\n\nMerci d’avoir attendu.\n\nProfitez des améliorations. ✨"
+      },
+      "ar": {
+        "text": "✅ <b>البوت يعمل الآن</b>\n\nاكتملت الصيانة — عاد البوت للعمل بشكل طبيعي.\n\n🚀 كل شيء متصل وجاهز للاستخدام.\n\nشكرًا لانتظاركم.\n\nاستمتعوا بالتحسينات. ✨"
+      },
+      "pt": {
+        "text": "✅ <b>O BOT ESTÁ ONLINE</b>\n\nA manutenção terminou — o bot voltou a funcionar normalmente.\n\n🚀 Tudo está online e pronto para uso.\n\nObrigado por esperar.\n\nAproveite as melhorias. ✨"
+      },
+      "id": {
+        "text": "✅ <b>BOT SUDAH ONLINE</b>\n\nPemeliharaan selesai — bot kembali berjalan normal.\n\n🚀 Semuanya kembali online dan siap digunakan.\n\nTerima kasih telah menunggu.\n\nNikmati peningkatannya. ✨"
+      },
+      "bn": {
+        "text": "✅ <b>বট এখন লাইভ</b>\n\nমেইনটেন্যান্স শেষ হয়েছে — বট আবার স্বাভাবিকভাবে চলছে।\n\n🚀 সবকিছু অনলাইনে এবং ব্যবহারের জন্য প্রস্তুত।\n\nঅপেক্ষা করার জন্য ধন্যবাদ।\n\nনতুন উন্নতিগুলো উপভোগ করুন। ✨"
+      },
+      "ur": {
+        "text": "✅ <b>بوٹ لائیو ہے</b>\n\nمینٹیننس مکمل ہو گئی ہے — بوٹ دوبارہ معمول کے مطابق چل رہا ہے۔\n\n🚀 سب کچھ آن لائن اور استعمال کے لیے تیار ہے۔\n\nانتظار کرنے کا شکریہ۔\n\nنئی بہتریوں سے لطف اٹھائیں۔ ✨"
+      },
+      "ru": {
+        "text": "✅ <b>БОТ СНОВА ОНЛАЙН</b>\n\nТехнические работы завершены — бот снова работает нормально.\n\n🚀 Всё онлайн и готово к использованию.\n\nСпасибо за ожидание.\n\nПользуйтесь улучшениями. ✨"
+      }
+    },
+    "help_admin": {
+      "en": {
+        "text": "<blockquote><u>❓ <b>ADMIN HELP</b></u>\n\n<u>➤ 📊 Stats & Activity — view the bot’s live numbers</u>\n\n<u>➤ 👥 Users & Groups — list or message any user</u>\n\n<u>➤ 📢 Broadcast — message everyone with forward-lock</u>\n\n<u>➤ 🎨 Menu & UI — edit any menu’s text, image or buttons</u>\n\n<u>➤ ⚙️ Settings & Admins — welcome, admins, maintenance and languages</u>\n\n<u>➤ 📦 Update Backup — save live settings and users to backup files</u>\n\n<u>➤ 🛑 Danger Zone — destructive, irreversible actions</u></blockquote>",
+        "buttons": [
+          {
+            "label": "📦 Update Backup — how it works",
+            "type": "callback",
+            "value": "help_update_backup_info",
+            "row": 1,
+            "style": "primary"
+          },
+          {
+            "label": "🔙 Admin Panel",
+            "type": "callback",
+            "value": "adm_home",
+            "row": 2,
+            "style": "primary"
+          }
+        ]
+      },
+      "hi": {
+        "text": "<blockquote><u>❓ <b>एडमिन सहायता</b></u>\n\n<u>➤ 📊 आँकड़े और गतिविधि — बॉट के लाइव आँकड़े देखें</u>\n\n<u>➤ 👥 यूज़र्स और ग्रुप — किसी भी यूज़र की सूची या संदेश</u>\n\n<u>➤ 📢 ब्रॉडकास्ट — सभी को संदेश भेजें</u>\n\n<u>➤ 🎨 मेनू और UI — टेक्स्ट, इमेज या बटन संपादित करें</u>\n\n<u>➤ ⚙️ सेटिंग्स और एडमिन — वेलकम, एडमिन, मेंटेनेंस और भाषाएँ</u>\n\n<u>➤ 📦 बैकअप अपडेट — लाइव सेटिंग्स और यूज़र्स का बैकअप लें</u>\n\n<u>➤ 🛑 डेंजर ज़ोन — हटाने वाली और अपरिवर्तनीय कार्रवाइयाँ</u></blockquote>",
+        "buttons": [
+          {
+            "label": "📦 बैकअप अपडेट — कैसे काम करता है",
+            "type": "callback",
+            "value": "help_update_backup_info",
+            "row": 1,
+            "style": "primary"
+          },
+          {
+            "label": "🔙 एडमिन पैनल",
+            "type": "callback",
+            "value": "adm_home",
+            "row": 2,
+            "style": "primary"
+          }
+        ]
+      },
+      "es": {
+        "text": "<blockquote><u>❓ <b>AYUDA DEL ADMIN</b></u>\n\n<u>➤ 📊 Estadísticas y actividad — consulta los datos en vivo</u>\n\n<u>➤ 👥 Usuarios y grupos — lista o envía mensajes</u>\n\n<u>➤ 📢 Difusión — envía mensajes a todos</u>\n\n<u>➤ 🎨 Menú y UI — edita texto, imágenes o botones</u>\n\n<u>➤ ⚙️ Configuración y admins — gestiona funciones y lenguajes</u>\n\n<u>➤ 📦 Actualizar copia de seguridad — guarda datos y usuarios</u>\n\n<u>➤ 🛑 Zona de peligro — acciones destructivas e irreversibles</u></blockquote>",
+        "buttons": [
+          {
+            "label": "📦 Actualizar copia — cómo funciona",
+            "type": "callback",
+            "value": "help_update_backup_info",
+            "row": 1,
+            "style": "primary"
+          },
+          {
+            "label": "🔙 Panel de administración",
+            "type": "callback",
+            "value": "adm_home",
+            "row": 2,
+            "style": "primary"
+          }
+        ]
+      },
+      "fr": {
+        "text": "<blockquote><u>❓ <b>AIDE ADMIN</b></u>\n\n<u>➤ 📊 Statistiques et activité — consultez les données en direct</u>\n\n<u>➤ 👥 Utilisateurs et groupes — listez ou contactez un utilisateur</u>\n\n<u>➤ 📢 Diffusion — envoyez un message à tous</u>\n\n<u>➤ 🎨 Menu et UI — modifiez texte, images ou boutons</u>\n\n<u>➤ ⚙️ Paramètres et admins — gérez les fonctions et langues</u>\n\n<u>➤ 📦 Mettre à jour la sauvegarde — sauvegardez les données</u>\n\n<u>➤ 🛑 Zone dangereuse — actions destructrices et irréversibles</u></blockquote>",
+        "buttons": [
+          {
+            "label": "📦 Mise à jour du backup — fonctionnement",
+            "type": "callback",
+            "value": "help_update_backup_info",
+            "row": 1,
+            "style": "primary"
+          },
+          {
+            "label": "🔙 Panneau admin",
+            "type": "callback",
+            "value": "adm_home",
+            "row": 2,
+            "style": "primary"
+          }
+        ]
+      },
+      "ar": {
+        "text": "<blockquote><u>❓ <b>مساعدة المشرف</b></u>\n\n<u>➤ 📊 الإحصاءات والنشاط — عرض أرقام البوت المباشرة</u>\n\n<u>➤ 👥 المستخدمون والمجموعات — عرض أو مراسلة أي مستخدم</u>\n\n<u>➤ 📢 البث — إرسال رسالة للجميع</u>\n\n<u>➤ 🎨 القائمة وواجهة المستخدم — تعديل النصوص والصور والأزرار</u>\n\n<u>➤ ⚙️ الإعدادات والمشرفون — إدارة الإعدادات واللغات</u>\n\n<u>➤ 📦 تحديث النسخة الاحتياطية — حفظ الإعدادات والمستخدمين</u>\n\n<u>➤ 🛑 منطقة الخطر — إجراءات مدمرة وغير قابلة للعكس</u></blockquote>",
+        "buttons": [
+          {
+            "label": "📦 تحديث النسخة الاحتياطية — كيف يعمل",
+            "type": "callback",
+            "value": "help_update_backup_info",
+            "row": 1,
+            "style": "primary"
+          },
+          {
+            "label": "🔙 لوحة الإدارة",
+            "type": "callback",
+            "value": "adm_home",
+            "row": 2,
+            "style": "primary"
+          }
+        ]
+      },
+      "pt": {
+        "text": "<blockquote><u>❓ <b>AJUDA DO ADMIN</b></u>\n\n<u>➤ 📊 Estatísticas e atividade — veja os números em tempo real</u>\n\n<u>➤ 👥 Usuários e grupos — liste ou envie mensagens</u>\n\n<u>➤ 📢 Transmissão — envie mensagem para todos</u>\n\n<u>➤ 🎨 Menu e UI — edite textos, imagens ou botões</u>\n\n<u>➤ ⚙️ Configurações e admins — gerencie funções e idiomas</u>\n\n<u>➤ 📦 Atualizar backup — salve configurações e usuários</u>\n\n<u>➤ 🛑 Zona de perigo — ações destrutivas e irreversíveis</u></blockquote>",
+        "buttons": [
+          {
+            "label": "📦 Atualizar backup — como funciona",
+            "type": "callback",
+            "value": "help_update_backup_info",
+            "row": 1,
+            "style": "primary"
+          },
+          {
+            "label": "🔙 Painel administrativo",
+            "type": "callback",
+            "value": "adm_home",
+            "row": 2,
+            "style": "primary"
+          }
+        ]
+      },
+      "id": {
+        "text": "<blockquote><u>❓ <b>BANTUAN ADMIN</b></u>\n\n<u>➤ 📊 Statistik & aktivitas — lihat angka bot secara langsung</u>\n\n<u>➤ 👥 Pengguna & grup — daftar atau kirim pesan</u>\n\n<u>➤ 📢 Siaran — kirim pesan ke semua orang</u>\n\n<u>➤ 🎨 Menu & UI — edit teks, gambar, atau tombol</u>\n\n<u>➤ ⚙️ Pengaturan & admin — kelola fungsi dan bahasa</u>\n\n<u>➤ 📦 Perbarui backup — simpan pengaturan dan pengguna</u>\n\n<u>➤ 🛑 Zona bahaya — tindakan destruktif dan tidak dapat dibatalkan</u></blockquote>",
+        "buttons": [
+          {
+            "label": "📦 Perbarui backup — cara kerja",
+            "type": "callback",
+            "value": "help_update_backup_info",
+            "row": 1,
+            "style": "primary"
+          },
+          {
+            "label": "🔙 Panel Admin",
+            "type": "callback",
+            "value": "adm_home",
+            "row": 2,
+            "style": "primary"
+          }
+        ]
+      },
+      "bn": {
+        "text": "<blockquote><u>❓ <b>অ্যাডমিন সহায়তা</b></u>\n\n<u>➤ 📊 পরিসংখ্যান ও কার্যকলাপ — বটের লাইভ তথ্য দেখুন</u>\n\n<u>➤ 👥 ইউজার ও গ্রুপ — তালিকা দেখুন বা বার্তা পাঠান</u>\n\n<u>➤ 📢 ব্রডকাস্ট — সবাইকে বার্তা পাঠান</u>\n\n<u>➤ 🎨 মেনু ও UI — টেক্সট, ছবি বা বাটন সম্পাদনা করুন</u>\n\n<u>➤ ⚙️ সেটিংস ও অ্যাডমিন — ফিচার ও ভাষা পরিচালনা করুন</u>\n\n<u>➤ 📦 ব্যাকআপ আপডেট — সেটিংস ও ইউজার ডেটা সংরক্ষণ করুন</u>\n\n<u>➤ 🛑 ডেঞ্জার জোন — ধ্বংসাত্মক ও অপরিবর্তনীয় কাজ</u></blockquote>",
+        "buttons": [
+          {
+            "label": "📦 ব্যাকআপ আপডেট — কীভাবে কাজ করে",
+            "type": "callback",
+            "value": "help_update_backup_info",
+            "row": 1,
+            "style": "primary"
+          },
+          {
+            "label": "🔙 অ্যাডমিন প্যানেল",
+            "type": "callback",
+            "value": "adm_home",
+            "row": 2,
+            "style": "primary"
+          }
+        ]
+      },
+      "ur": {
+        "text": "<blockquote><u>❓ <b>ایڈمن مدد</b></u>\n\n<u>➤ 📊 اعداد و شمار اور سرگرمی — بوٹ کے لائیو اعداد دیکھیں</u>\n\n<u>➤ 👥 صارفین اور گروپس — فہرست یا پیغام بھیجیں</u>\n\n<u>➤ 📢 براڈکاسٹ — سب کو پیغام بھیجیں</u>\n\n<u>➤ 🎨 مینو اور UI — متن، تصویر یا بٹن تبدیل کریں</u>\n\n<u>➤ ⚙️ ترتیبات اور ایڈمن — فیچرز اور زبانیں منظم کریں</u>\n\n<u>➤ 📦 بیک اپ اپڈیٹ — سیٹنگز اور صارفین محفوظ کریں</u>\n\n<u>➤ 🛑 خطرناک حصہ — تباہ کن اور ناقابلِ واپسی اقدامات</u></blockquote>",
+        "buttons": [
+          {
+            "label": "📦 بیک اپ اپڈیٹ — کیسے کام کرتا ہے",
+            "type": "callback",
+            "value": "help_update_backup_info",
+            "row": 1,
+            "style": "primary"
+          },
+          {
+            "label": "🔙 ایڈمن پینل",
+            "type": "callback",
+            "value": "adm_home",
+            "row": 2,
+            "style": "primary"
+          }
+        ]
+      },
+      "ru": {
+        "text": "<blockquote><u>❓ <b>ПОМОЩЬ АДМИНИСТРАТОРА</b></u>\n\n<u>➤ 📊 Статистика и активность — просмотр данных бота</u>\n\n<u>➤ 👥 Пользователи и группы — список или сообщения</u>\n\n<u>➤ 📢 Рассылка — отправка сообщения всем</u>\n\n<u>➤ 🎨 Меню и UI — редактирование текста, изображений и кнопок</u>\n\n<u>➤ ⚙️ Настройки и админы — управление функциями и языками</u>\n\n<u>➤ 📦 Обновить резервную копию — сохранить настройки и пользователей</u>\n\n<u>➤ 🛑 Опасная зона — разрушительные и необратимые действия</u></blockquote>",
+        "buttons": [
+          {
+            "label": "📦 Обновление backup — как это работает",
+            "type": "callback",
+            "value": "help_update_backup_info",
+            "row": 1,
+            "style": "primary"
+          },
+          {
+            "label": "🔙 Панель администратора",
+            "type": "callback",
+            "value": "adm_home",
+            "row": 2,
+            "style": "primary"
+          }
+        ]
+      }
+    }
+  },
+  "reply_keyboard": {
+    "en": {
+      "download": "📥 Download Reel",
+      "usage": "📊 My Usage",
+      "gift": "🎁 Send A Gift",
+      "language": "🌐 Language",
+      "developer": "👨‍💻 Developer",
+      "howto": "📖 How To Use",
+      "support": "🆘 Support",
+      "admin": "🛠 Admin Panel"
+    },
+    "hi": {
+      "download": "📥 रील डाउनलोड",
+      "usage": "📊 मेरा उपयोग",
+      "gift": "🎁 सपोर्ट भेजें",
+      "language": "🌐 भाषा",
+      "developer": "👨‍💻 डेवलपर",
+      "howto": "📖 कैसे इस्तेमाल करें",
+      "support": "🆘 सहायता",
+      "admin": "🛠 एडमिन पैनल"
+    },
+    "es": {
+      "download": "📥 Descargar Reel",
+      "usage": "📊 Mi uso",
+      "gift": "🎁 Apoyar el bot",
+      "language": "🌐 Idioma",
+      "developer": "👨‍💻 Desarrollador",
+      "howto": "📖 Cómo usar",
+      "support": "🆘 Soporte",
+      "admin": "🛠 Panel de administración"
+    },
+    "fr": {
+      "download": "📥 Télécharger le Reel",
+      "usage": "📊 Mon utilisation",
+      "gift": "🎁 Soutenir le bot",
+      "language": "🌐 Langue",
+      "developer": "👨‍💻 Développeur",
+      "howto": "📖 Comment utiliser",
+      "support": "🆘 Assistance",
+      "admin": "🛠 Panneau admin"
+    },
+    "ar": {
+      "download": "📥 تنزيل الـ Reel",
+      "usage": "📊 استخدامي",
+      "gift": "🎁 دعم البوت",
+      "language": "🌐 اللغة",
+      "developer": "👨‍💻 المطور",
+      "howto": "📖 طريقة الاستخدام",
+      "support": "🆘 الدعم",
+      "admin": "🛠 لوحة الإدارة"
+    },
+    "pt": {
+      "download": "📥 Baixar Reel",
+      "usage": "📊 Meu uso",
+      "gift": "🎁 Apoiar o bot",
+      "language": "🌐 Idioma",
+      "developer": "👨‍💻 Desenvolvedor",
+      "howto": "📖 Como usar",
+      "support": "🆘 Suporte",
+      "admin": "🛠 Painel administrativo"
+    },
+    "id": {
+      "download": "📥 Unduh Reel",
+      "usage": "📊 Penggunaan Saya",
+      "gift": "🎁 Dukung Bot",
+      "language": "🌐 Bahasa",
+      "developer": "👨‍💻 Pengembang",
+      "howto": "📖 Cara Menggunakan",
+      "support": "🆘 Dukungan",
+      "admin": "🛠 Panel Admin"
+    },
+    "bn": {
+      "download": "📥 রিল ডাউনলোড",
+      "usage": "📊 আমার ব্যবহার",
+      "gift": "🎁 বটকে সাপোর্ট",
+      "language": "🌐 ভাষা",
+      "developer": "👨‍💻 ডেভেলপার",
+      "howto": "📖 কীভাবে ব্যবহার করবেন",
+      "support": "🆘 সাপোর্ট",
+      "admin": "🛠 অ্যাডমিন প্যানেল"
+    },
+    "ur": {
+      "download": "📥 ریِل ڈاؤن لوڈ",
+      "usage": "📊 میرا استعمال",
+      "gift": "🎁 بوٹ کو سپورٹ",
+      "language": "🌐 زبان",
+      "developer": "👨‍💻 ڈویلپر",
+      "howto": "📖 استعمال کا طریقہ",
+      "support": "🆘 معاونت",
+      "admin": "🛠 ایڈمن پینل"
+    },
+    "ru": {
+      "download": "📥 Скачать Reel",
+      "usage": "📊 Моя статистика",
+      "gift": "🎁 Поддержать бота",
+      "language": "🌐 Язык",
+      "developer": "👨‍💻 Разработчик",
+      "howto": "📖 Как использовать",
+      "support": "🆘 Поддержка",
+      "admin": "🛠 Панель администратора"
     }
   }
 }

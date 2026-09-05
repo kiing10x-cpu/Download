@@ -73,6 +73,13 @@ MONGO_URI = os.environ.get("MONGO_URI", "").strip()
 BACKUP_INTERVAL_HOURS = int(os.environ.get("BACKUP_INTERVAL_HOURS", "12"))
 
 DATA_FILE = "bot_data.json"
+# "Update Backup" seed files — see _apply_seed_files_if_present() and the
+# 📦 Update Backup admin-panel button. Drop both, with these EXACT names,
+# next to bot.py in the GitHub repo before pushing a code update. If the
+# host wipes local storage on deploy (no bot_data.json, empty MongoDB),
+# the bot auto-loads these back in on startup — no manual restore needed.
+SEED_SETTINGS_FILE = "bot_settings_seed.json"
+SEED_USERS_FILE = "bot_users_seed.json"
 BACKUP_DIR = "backups"
 DOWNLOAD_DIR = "downloads"
 PLUGIN_DIR = "plugins"
@@ -554,6 +561,28 @@ INSTAGRAM_URL_RE = re.compile(
     r"(https?://(?:www\.)?instagram\.com/(?:reel|reels|p|tv)/[A-Za-z0-9_\-]+/?\S*)"
 )
 
+
+def _is_private_chat(update: Update) -> bool:
+    chat = update.effective_chat
+    return bool(chat and chat.type == "private")
+
+
+def _message_mentions_this_bot(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """True when a message explicitly tags this bot. Useful in groups where
+    privacy mode is disabled and we must never answer unrelated chatter."""
+    try:
+        username = (context.bot.username or "").lower()
+    except Exception:
+        username = ""
+    text = (update.effective_message.text or "").lower() if update.effective_message else ""
+    return bool(username and f"@{username}" in text)
+
+
+def _safe_filename(value: str, fallback: str = "Instagram_Audio") -> str:
+    value = re.sub(r'[\\/:*?"<>|]+', " ", str(value or ""))
+    value = re.sub(r"\s+", " ", value).strip(" .")
+    return (value[:80] or fallback)
+
 # ----------------------------------------------------------------------------
 # Unicode "style" helpers (#1 — Style Text)
 # ----------------------------------------------------------------------------
@@ -567,23 +596,33 @@ SMALL_CAPS_MAP = {
 
 
 def to_small_caps(text: str) -> str:
-    return "".join(SMALL_CAPS_MAP.get(ch.lower(), ch) for ch in text)
+    """Bot-wide house style: Initial Capital + Unicode small caps.
+
+    Every normal user/admin UI string that passes through this helper now
+    follows the same typography, e.g. ``Stats & Activity`` ->
+    ``Sᴛᴀᴛꜱ & Aᴄᴛɪᴠɪᴛʏ``. This keeps old generated messages from drifting
+    between plain lowercase and all-small-caps styles.
+    """
+    out = []
+    word_start = True
+    for ch in str(text):
+        if ch.isalpha() and ch.isascii():
+            if word_start:
+                out.append(ch.upper())
+                word_start = False
+            else:
+                out.append(SMALL_CAPS_MAP.get(ch.lower(), ch))
+        else:
+            out.append(ch)
+            # Start a new styled word after whitespace/punctuation, but not
+            # after an already-styled Unicode small-cap glyph.
+            word_start = not (ch.isalnum() or ch in "'’")
+    return "".join(out)
 
 
 def to_title_small_caps(text: str) -> str:
-    """Same house style used throughout the bot's cards ('Nᴀᴍᴇ', 'Uꜱᴇʀ Iᴅ',
-    'Sᴛᴀᴛᴜꜱ') — the first letter of every word stays a normal capital, the
-    rest of the word is rendered in small-caps glyphs. Keeps every
-    admin/user-facing card built from this generated consistently instead
-    of relying on hand-typed unicode that can drift out of sync."""
-    words = text.split(" ")
-    out = []
-    for w in words:
-        if not w:
-            out.append(w)
-            continue
-        out.append(w[0].upper() + to_small_caps(w[1:]))
-    return " ".join(out)
+    """Alias for the single bot-wide Initial-Capital small-caps house style."""
+    return to_small_caps(text)
 
 
 # ----------------------------------------------------------------------------
@@ -610,7 +649,7 @@ STR = {
 }
 
 # Wrapped in to_small_caps() right here (not just at render time) so the
-# `if text == RKB_DOWNLOAD:` string-matching in handle_text() still lines up
+# `if rkb_action == "download":` string-matching in handle_text() still lines up
 # with what the reply-keyboard button actually sends back — to_small_caps()
 # is idempotent (re-applying it to already-styled text is a safe no-op), so
 # this can't get out of sync with styled_kb_button()'s own wrapping below.
@@ -624,21 +663,21 @@ RKB_SUPPORT = to_title_small_caps("Support")
 RKB_ADMINPANEL = to_title_small_caps("Admin Panel")
 
 
-def main_reply_keyboard(is_admin_user: bool = False) -> ReplyKeyboardMarkup:
-    """v2 Section 1 — persistent bottom keyboard, alongside the existing
-    inline /start menu (doesn't replace it). Colors via Bot API 9.4 `style`
-    (needs PTB 22.7+, already pinned in requirements.txt).
-    v5 — an extra 🛠 Admin Panel row appears below How to Use/Support, but
-    ONLY when this keyboard is built for an admin's own chat — every other
-    user's keyboard is completely unchanged."""
+def main_reply_keyboard(is_admin_user: bool = False, lang: str = None) -> ReplyKeyboardMarkup:
+    """Persistent bottom keyboard, localized to the user's selected language.
+
+    The callback/routing identifiers remain the same; only the visible labels
+    change. This keeps existing bot functionality intact while making the
+    whole persistent keyboard follow the selected language."""
+    labels = _get_rkb_labels(lang)
     rows = [
-        [styled_kb_button(RKB_DOWNLOAD, style="success")],
-        [styled_kb_button(RKB_USAGE, style="primary"), styled_kb_button(RKB_GIFT, style="primary")],
-        [styled_kb_button(RKB_LANGUAGE, style="primary"), styled_kb_button(RKB_DEVELOPER, style="primary")],
-        [styled_kb_button(RKB_HOWTO, style="danger"), styled_kb_button(RKB_SUPPORT, style="danger")],
+        [styled_kb_button(labels["download"], style="success")],
+        [styled_kb_button(labels["usage"], style="primary"), styled_kb_button(labels["gift"], style="primary")],
+        [styled_kb_button(labels["language"], style="primary"), styled_kb_button(labels["developer"], style="primary")],
+        [styled_kb_button(labels["howto"], style="danger"), styled_kb_button(labels["support"], style="danger")],
     ]
     if is_admin_user:
-        rows.append([styled_kb_button(RKB_ADMINPANEL, style="primary")])
+        rows.append([styled_kb_button(labels["admin"], style="primary")])
     return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
 
@@ -680,16 +719,20 @@ USER_ERR_WRONG_FORMAT = (
 )
 
 USER_ERR_NOT_AVAILABLE = (
-    "❌ " + to_bold_sans("Not available") + "\n\n"
-    + to_small_caps("This reel can't be downloaded right now.") + "\n"
-    + to_small_caps("Please try again later or contact support.")
+    "<blockquote>❌ " + to_title_small_caps("Not Available") + "\n\n"
+    + to_title_small_caps("This Reel Can't Be Downloaded Right Now.") + "\n"
+    + to_title_small_caps("Please Try Again Later Or Contact Support.")
+    + "</blockquote>"
 )
 
+
 USER_ERR_AUDIO_NOT_AVAILABLE = (
-    "❌ A" + to_small_caps("udio ") + "N" + to_small_caps("ot ") + "A" + to_small_caps("vailable") + "\n\n"
-    + "T" + to_small_caps("his reel doesn't have its own audio track to extract.") + "\n"
-    + "P" + to_small_caps("lease try again later or contact ") + "S" + to_small_caps("upport.")
+    "<blockquote>❌ " + to_title_small_caps("Audio Not Available") + "\n\n"
+    + to_title_small_caps("This Reel Doesn't Have An Audio Track To Extract.") + "\n"
+    + to_title_small_caps("Please Try Again Later Or Contact Support.")
+    + "</blockquote>"
 )
+
 
 USER_ERR_GENERIC = (
     "❌ " + to_bold_sans("Something went wrong") + "\n\n"
@@ -871,17 +914,17 @@ DEFAULT_MENUS = {
             "𝐖𝐄𝐋𝐂𝐎𝐌𝐄 ᴛᴏ {bot_link}\n\n"
             "Yᴏᴜʀ ᴘᴇʀsᴏɴᴀʟ Iɴsᴛᴀɢʀᴀᴍ Rᴇᴇʟ ᴀssɪsᴛᴀɴᴛ.\n\n"
             "𝐓𝐇𝐈𝐒 𝐁𝐎𝐓 𝐂𝐀𝐍\n\n"
-            "➤ Dᴏᴡɴʟᴏᴀᴅ Iɴsᴛᴀɢʀᴀᴍ Rᴇᴇʟs\n\n"
-            "➤ Gᴇᴛ Rᴇᴇʟ Cᴀᴘᴛɪᴏɴs\n\n"
-            "➤ Gᴇᴛ Rᴇᴇʟ Aᴜᴅɪᴏ\n\n"
+            "<u>➤ Dᴏᴡɴʟᴏᴀᴅ Iɴsᴛᴀɢʀᴀᴍ Rᴇᴇʟs</u>\n\n"
+            "<u>➤ Gᴇᴛ Rᴇᴇʟ Cᴀᴘᴛɪᴏɴs</u>\n\n"
+            "<u>➤ Gᴇᴛ Rᴇᴇʟ Aᴜᴅɪᴏ</u>\n\n"
             "𝐖𝐇𝐘 𝐂𝐇𝐎𝐎𝐒𝐄 𝐔𝐒?\n\n"
-            "➤ Nᴏ Wᴀᴛᴇʀᴍᴀᴋs\n\n"
-            "➤ Hɪɢʜ-Qᴜᴀʟɪᴛʏ Rᴇᴇʟ Dᴏᴡɴʟᴏᴀᴅs\n\n"
-            "➤ Fᴀsᴛ ᴀɴᴅ Sᴍᴏᴏᴛʜ Sᴇʀᴠɪᴄᴇ\n\n"
-            "➤ Hᴀssʟᴇ-Fʀᴇᴇ ᴀɴᴅ Eᴀsʏ ᴛᴏ Uꜱᴇ\n\n"
-            "➤ Sᴀᴠᴇs Tɪᴍᴇ ᴀɴᴅ Eғғᴏʀᴛ\n\n"
-            "➤ Rᴇᴇʟ, Cᴀᴘᴛɪᴏɴ ᴀɴᴅ Aᴜᴅɪᴏ ɪɴ Oɴᴇ Pʟᴀᴄᴇ\n\n"
-            "➤ Nᴏ Exᴛʀᴀ Tᴏᴏʟs ᴏʀ Cᴏᴍᴘʟɪᴄᴀᴛᴇᴅ Sᴛᴇᴘs"
+            "<u>➤ Nᴏ Wᴀᴛᴇʀᴍᴀᴋs</u>\n\n"
+            "<u>➤ Hɪɢʜ-Qᴜᴀʟɪᴛʏ Rᴇᴇʟ Dᴏᴡɴʟᴏᴀᴅs</u>\n\n"
+            "<u>➤ Fᴀsᴛ ᴀɴᴅ Sᴍᴏᴏᴛʜ Sᴇʀᴠɪᴄᴇ</u>\n\n"
+            "<u>➤ Hᴀssʟᴇ-Fʀᴇᴇ ᴀɴᴅ Eᴀsʏ ᴛᴏ Uꜱᴇ</u>\n\n"
+            "<u>➤ Sᴀᴠᴇs Tɪᴍᴇ ᴀɴᴅ Eғғᴏʀᴛ</u>\n\n"
+            "<u>➤ Rᴇᴇʟ, Cᴀᴘᴛɪᴏɴ ᴀɴᴅ Aᴜᴅɪᴏ ɪɴ Oɴᴇ Pʟᴀᴄᴇ</u>\n\n"
+            "<u>➤ Nᴏ Exᴛʀᴀ Tᴏᴏʟs ᴏʀ Cᴏᴍᴘʟɪᴄᴀᴛᴇᴅ Sᴛᴇᴘs</u>"
             "</blockquote>"
         ),
         "parse_mode": "HTML",
@@ -895,9 +938,9 @@ DEFAULT_MENUS = {
     "help_user": {
         "text": (
             f"{to_deco(to_small_caps('guide'))}\n\n"
-            f"① {to_small_caps('send a reel link')}\n"
-            f"② {to_small_caps('get it in best quality')}\n"
-            f"③ {to_small_caps('tap get caption for a short quote')}"
+            f"<u>➤ {to_small_caps('send a reel link')}</u>\n"
+            f"<u>➤ {to_small_caps('get it in best quality')}</u>\n"
+            f"<u>➤ {to_small_caps('tap get caption for a short quote')}</u>"
         ),
         "parse_mode": None,
         "image_file_id": None,
@@ -946,14 +989,14 @@ DEFAULT_MENUS = {
             "without prior notice. Continued use of this bot after any "
             "changes to these terms constitutes acceptance of the updated "
             "terms.\n\n"
-            "Tap <b>I Agree &amp; Continue</b> to confirm you have read and "
+            "Tap <b>Agree &amp; Continue</b> to confirm you have read and "
             "accepted these terms."
             "</blockquote>"
         ),
         "parse_mode": "HTML",
         "image_file_id": None,
         "buttons": [
-            {"label": "✅ I Agree & Continue", "type": "callback", "value": "agree_terms", "row": 1, "style": "success"}
+            {"label": "✅ Agree & Continue", "type": "callback", "value": "agree_terms", "row": 1, "style": "success"}
         ],
         "auto_delete_seconds": None,
         "updated_by": None,
@@ -999,18 +1042,22 @@ DEFAULT_MENUS = {
     },
     "help_admin": {
         "text": (
-            to_small_caps("❓ admin help") + "\n\n"
-            + to_small_caps("📊 stats & activity — view the bot's live numbers") + "\n"
-            + to_small_caps("👥 users & groups — list or message any user") + "\n"
-            + to_small_caps("📢 broadcast — message everyone, with forward-lock") + "\n"
-            + to_small_caps("🎨 menu & ui — edit any menu's text, image or buttons") + "\n"
-            + to_small_caps("⚙️ settings & admins — welcome, admins, maintenance, languages") + "\n"
-            + to_small_caps("🛑 danger zone — destructive, irreversible actions")
+            "<blockquote>"
+            "<u>❓ " + to_small_caps("admin help") + "</u>\n\n"
+            "<u>➤ " + to_small_caps("📊 stats & activity — view the bot's live numbers") + "</u>\n\n"
+            "<u>➤ " + to_small_caps("👥 users & groups — list or message any user") + "</u>\n\n"
+            "<u>➤ " + to_small_caps("📢 broadcast — message everyone, with forward-lock") + "</u>\n\n"
+            "<u>➤ " + to_small_caps("🎨 menu & ui — edit any menu's text, image or buttons") + "</u>\n\n"
+            "<u>➤ " + to_small_caps("⚙️ settings & admins — welcome, admins, maintenance, languages") + "</u>\n\n"
+            "<u>➤ " + to_small_caps("📦 update backup — save every live setting + all users to 2 files, so a code update on github never wipes them") + "</u>\n\n"
+            "<u>➤ " + to_small_caps("🛑 danger zone — destructive, irreversible actions") + "</u>"
+            "</blockquote>"
         ),
-        "parse_mode": None,
+        "parse_mode": "HTML",
         "image_file_id": None,
         "buttons": [
-            {"label": "🔙 Admin Panel", "type": "callback", "value": "adm_home", "row": 1, "style": "primary"}
+            {"label": "📦 " + to_small_caps("update backup — how it works"), "type": "callback", "value": "help_update_backup_info", "row": 1, "style": "primary"},
+            {"label": "🔙 Admin Panel", "type": "callback", "value": "adm_home", "row": 2, "style": "primary"},
         ],
         "auto_delete_seconds": None,
         "updated_by": None,
@@ -1021,8 +1068,8 @@ DEFAULT_MENUS = {
         "text": (
             "<blockquote>"
             "𝘞𝘢𝘯𝘵 𝘵𝘰 𝘥𝘰𝘸𝘯𝘭𝘰𝘢𝘥 𝘢 𝘙𝘦𝘦𝘭?\n\n"
-            "➤ 𝘊𝘰𝘱𝘺 𝘵𝘩𝘦 𝘙𝘦𝘦𝘭 𝘭𝘪𝘯𝘬 𝘧𝘳𝘰𝘮 𝘐𝘯𝘴𝘵𝘢𝘨𝘳𝘢𝘮\n\n"
-            "➤ 𝘗𝘢𝘴𝘵𝘦 𝘵𝘩𝘦 𝘭𝘪𝘯𝘬 𝘩𝘦𝘳𝘦\n\n"
+            "<u>➤ 𝘊𝘰𝘱𝘺 𝘵𝘩𝘦 𝘙𝘦𝘦𝘭 𝘭𝘪𝘯𝘬 𝘧𝘳𝘰𝘮 𝘐𝘯𝘴𝘵𝘢𝘨𝘳𝘢𝘮</u>\n\n"
+            "<u>➤ 𝘗𝘢𝘴𝘵𝘦 𝘵𝘩𝘦 𝘭𝘪𝘯𝘬 𝘩𝘦𝘳𝘦</u>\n\n"
             "𝘛𝘩𝘢𝘵'𝘴 𝘪𝘵 — 𝘐'𝘭𝘭 𝘥𝘰 𝘵𝘩𝘦 𝘳𝘦𝘴𝘵."
             "</blockquote>"
         ),
@@ -1064,13 +1111,13 @@ DEFAULT_MENUS = {
     "gift": {
         "text": (
             "<blockquote>"
-            "✨ 𝐒𝐔𝐏𝐏𝐎𝐑𝐓 𝐎𝐔𝐑 𝐁𝐎𝐓\n\n"
-            "Tʜɪꜱ ꜱᴜᴘᴘᴏʀᴛ ɪꜱ ᴄᴏᴍᴘʟᴇᴛᴇʟʏ ᴏᴘᴛɪᴏɴᴀʟ.\n"
-            "Wᴇ ɴᴇᴠᴇʀ ꜰᴏʀᴄᴇ ᴀɴʏᴏɴᴇ ᴛᴏ ꜱᴇɴᴅ ᴀ ᴘᴀʏᴍᴇɴᴛ.\n\n"
-            "Iꜰ ʏᴏᴜ ᴇɴᴊᴏʏ ᴜꜱɪɴɢ ᴛʜᴇ ʙᴏᴛ ᴀɴᴅ ᴡᴀɴᴛ ᴛᴏ ꜱᴜᴘᴘᴏʀᴛ ɪᴛ, "
-            "ʏᴏᴜ ᴄᴀɴ ᴄᴏɴᴛʀɪʙᴜᴛᴇ ᴀɴʏ ᴀᴍᴏᴜɴᴛ ʏᴏᴜ ᴘʀᴇꜰᴇʀ.\n\n"
-            "Yᴏᴜʀ ꜱᴜᴘᴘᴏʀᴛ ʜᴇʟᴘꜱ ᴜꜱ ᴋᴇᴇᴘ ᴡᴏʀᴋɪɴɢ ᴏɴ ᴛʜᴇ ʙᴏᴛ, ɪᴍᴘʀᴏᴠɪɴɢ "
-            "ᴇxɪꜱᴛɪɴɢ ꜰᴇᴀᴛᴜʀᴇꜱ, ᴀᴅᴅɪɴɢ ɴᴇᴡ ꜰᴜɴᴄᴛɪᴏɴꜱ ᴀɴᴅ ʙʀɪɴɢɪɴɢ ᴍᴏʀᴇ ᴜꜱᴇꜰᴜʟ ᴜᴘɢʀᴀᴅᴇꜱ.\n\n"
+            "<u>✨ 𝐒𝐔𝐏𝐏𝐎𝐑𝐓 𝐎𝐔𝐑 𝐁𝐎𝐓</u>\n\n"
+            "<u>➤ Tʜɪꜱ ꜱᴜᴘᴘᴏʀᴛ ɪꜱ ᴄᴏᴍᴘʟᴇᴛᴇʟʏ ᴏᴘᴛɪᴏɴᴀʟ.</u>\n"
+            "<u>➤ Wᴇ ɴᴇᴠᴇʀ ꜰᴏʀᴄᴇ ᴀɴʏᴏɴᴇ ᴛᴏ ꜱᴇɴᴅ ᴀ ᴘᴀʏᴍᴇɴᴛ.</u>\n\n"
+            "<u>➤ Iꜰ ʏᴏᴜ ᴇɴᴊᴏʏ ᴜꜱɪɴɢ ᴛʜᴇ ʙᴏᴛ ᴀɴᴅ ᴡᴀɴᴛ ᴛᴏ ꜱᴜᴘᴘᴏʀᴛ ɪᴛ,</u> "
+            "<u>ʏᴏᴜ ᴄᴀɴ ᴄᴏɴᴛʀɪʙᴜᴛᴇ ᴀɴʏ ᴀᴍᴏᴜɴᴛ ʏᴏᴜ ᴘʀᴇꜰᴇʀ.</u>\n\n"
+            "<u>➤ Yᴏᴜʀ ꜱᴜᴘᴘᴏʀᴛ ʜᴇʟᴘꜱ ᴜꜱ ᴋᴇᴇᴘ ᴡᴏʀᴋɪɴɢ ᴏɴ ᴛʜᴇ ʙᴏᴛ, ɪᴍᴘʀᴏᴠɪɴɢ "
+            "ᴇxɪꜱᴛɪɴɢ ꜰᴇᴀᴛᴜʀᴇꜱ, ᴀᴅᴅɪɴɢ ɴᴇᴡ ꜰᴜɴᴄᴛɪᴏɴꜱ ᴀɴᴅ ʙʀɪɴɢɪɴɢ ᴍᴏʀᴇ ᴜꜱᴇꜰᴜʟ ᴜᴘɢʀᴀᴅᴇꜱ.</u>\n\n"
             "Wᴇ ꜱɪɴᴄᴇʀᴇʟʏ ᴀᴘᴘʀᴇᴄɪᴀᴛᴇ ᴇᴠᴇʀʏ ʙɪᴛ ᴏꜰ ꜱᴜᴘᴘᴏʀᴛ. ❤️"
             "</blockquote>"
         ),
@@ -1083,7 +1130,7 @@ DEFAULT_MENUS = {
         "translations": {},
     },
     "language": {
-        "text": "🌐 " + to_small_caps("choose your language:"),
+        "text": "🌐 <u>" + to_small_caps("choose your language:") + "</u>",
         "parse_mode": None,
         "image_file_id": None,
         "buttons": [],
@@ -1093,7 +1140,7 @@ DEFAULT_MENUS = {
         "translations": {},
     },
     "developer": {
-        "text": to_small_caps("tap below to message the developer:"),
+        "text": "<u>➤ " + to_small_caps("tap below to message the developer:") + "</u>",
         "parse_mode": None,
         "image_file_id": None,
         "buttons": [],
@@ -1105,10 +1152,10 @@ DEFAULT_MENUS = {
     "support": {
         "text": (
             "<blockquote>"
-            + to_title_small_caps("Please type your message below.") + "\n\n"
-            + "🛠️ " + to_title_small_caps("Report a problem") + "\n"
-            + "💡 " + to_title_small_caps("Share your feedback") + "\n"
-            + "❓ " + to_title_small_caps("Ask a question") + "\n"
+            + "<u>" + to_title_small_caps("Please type your message below.") + "</u>\n\n"
+            + "<u>🛠️ " + to_title_small_caps("Report a problem") + "</u>\n"
+            + "<u>💡 " + to_title_small_caps("Share your feedback") + "</u>\n"
+            + "<u>❓ " + to_title_small_caps("Ask a question") + "</u>\n"
             + "💭 " + to_title_small_caps("Suggest a feature") + "\n\n"
             + to_title_small_caps("We'll review your message and get back to you as soon as possible.")
             + "</blockquote>"
@@ -1133,10 +1180,104 @@ DEFAULT_MENUS = {
     },
 }
 
+# ----------------------------------------------------------------------------
+# language_pack.json — ships next to bot.py with ready-made translations
+# (10 languages) for the language picker plus real per-menu text for start,
+# language, and (a shorter) disclaimer, howto, gift, support, developer,
+# download. Loaded once at import time and merged into DEFAULT_MENUS so
+# fresh installs have working translations out of the box — and again at
+# runtime in load_data() so already-deployed bots pick it up too, without
+# ever overwriting a translation an admin has since customized by hand.
+# Missing/corrupt file is never fatal — the bot just falls back to the
+# untranslated (English) text, same as before this file existed.
+# ----------------------------------------------------------------------------
+_LANGUAGE_PACK_CACHE = None
+
+
+def _load_language_pack() -> dict:
+    global _LANGUAGE_PACK_CACHE
+    if _LANGUAGE_PACK_CACHE is not None:
+        return _LANGUAGE_PACK_CACHE
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "language_pack.json")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            pack = json.load(f)
+        if not isinstance(pack, dict):
+            raise ValueError("language_pack.json is not a JSON object")
+        _LANGUAGE_PACK_CACHE = pack
+    except FileNotFoundError:
+        _LANGUAGE_PACK_CACHE = {}
+    except Exception as e:
+        log.warning("language_pack.json present but couldn't be read/parsed (%s) — continuing without it.", e)
+        _LANGUAGE_PACK_CACHE = {}
+    return _LANGUAGE_PACK_CACHE
+
+
+def _get_rkb_labels(lang: str = None) -> dict:
+    """Return localized persistent reply-keyboard labels.
+
+    Falls back to English if the selected language is unavailable or the
+    optional keyboard section is missing from an older language pack.
+    """
+    pack = _load_language_pack()
+    all_labels = pack.get("reply_keyboard", {})
+    selected = all_labels.get(lang) if lang else None
+    selected = selected if isinstance(selected, dict) else all_labels.get("en", {})
+    fallback = {
+        "download": RKB_DOWNLOAD, "usage": RKB_USAGE, "gift": RKB_GIFT,
+        "language": RKB_LANGUAGE, "developer": RKB_DEVELOPER,
+        "howto": RKB_HOWTO, "support": RKB_SUPPORT, "admin": RKB_ADMINPANEL,
+    }
+    for key, value in fallback.items():
+        if not selected.get(key):
+            selected[key] = value
+    return selected
+
+
+def _rkb_action_for_text(text: str, lang: str = None):
+    """Map a localized reply-keyboard label back to its stable action key."""
+    labels = _get_rkb_labels(lang)
+    for action, label in labels.items():
+        if text == label or text == to_title_small_caps(label):
+            return action
+    # Keep old/English keyboards working after an update.
+    legacy = {
+        RKB_DOWNLOAD: "download", RKB_USAGE: "usage", RKB_GIFT: "gift",
+        RKB_LANGUAGE: "language", RKB_DEVELOPER: "developer",
+        RKB_HOWTO: "howto", RKB_SUPPORT: "support", RKB_ADMINPANEL: "admin",
+    }
+    return legacy.get(text)
+
+
+def _apply_language_pack_to_menus(menus: dict) -> None:
+    """Fills in menu[lang] translations that are missing, for every menu the
+    pack covers. Never overwrites a translation that's already there (so an
+    admin's own edit, or a previous run's merge, always wins)."""
+    pack = _load_language_pack()
+    for menu_id, per_lang in pack.get("menus", {}).items():
+        menu = menus.get(menu_id)
+        if not menu or not isinstance(per_lang, dict):
+            continue
+        translations = menu.setdefault("translations", {})
+        for lang, content in per_lang.items():
+            if lang not in translations and isinstance(content, dict) and content.get("text"):
+                translations[lang] = {"text": content["text"]}
+
+
+# Populate DEFAULT_MENUS itself at import time, so brand-new installs (no
+# saved bot_data.json / Mongo doc yet) start with working translations.
+_apply_language_pack_to_menus(DEFAULT_MENUS)
+
 DEFAULT_DATA = {
     "users": {},
     "groups": {},
     "admins": [OWNER_ID] if OWNER_ID else [],
+    # Granular admin access — str(admin_id) -> [permission_key, ...]. An
+    # admin with NO entry here (i.e. added before this feature existed) is
+    # treated as full-access, so nobody already trusted silently loses
+    # access. Only admins added from now on get an explicit, owner-chosen
+    # list. See ADMIN_PERMISSIONS / get_admin_perms() / has_admin_perm().
+    "admin_permissions": {},
     "blocked": [],
     "menus": json.loads(json.dumps(DEFAULT_MENUS)),
     "settings": {
@@ -1148,7 +1289,11 @@ DEFAULT_DATA = {
         "rate_limit_max": 20,
         "rate_limit_window_seconds": 60,
         "inactive_reengage_days": 0,
-        "languages": [],  # e.g. ["en", "hi"] — admin-added via Settings > Languages
+        # Pre-populated from language_pack.json (minus "en", which is
+        # always shown anyway) so the language picker has real options out
+        # of the box. Admin can still add/remove languages in Settings >
+        # Languages as before — this is just the starting default.
+        "languages": [c for c in _load_language_pack().get("languages", {}) if c != "en"],
         "lock_all_content": False,  # #4 — master forwarding/sharing lock
         "logger_channel_id": None,  # #14 — dedicated logger channel
         "logger_enabled": False,
@@ -1170,12 +1315,22 @@ DEFAULT_DATA = {
         "premium_plans": [],  # v4 — admin-defined plans: {id, name, days, price_inr, price_stars, enabled}
         "detailed_join_alerts": True,  # new-user/group-start full details -> admin DMs + logger
         "user_activity_dm": True,      # every reel-link a user sends -> owner DM (misuse monitoring)
+        "notify_route": "all",         # where the Reel-Delivered activity card goes: logger | activity | dm | all
         "leaderboard_enabled": False,  # admin toggle — top-donor ranking shown inside Send Gift
         "share_enabled": True,         # admin toggle — "📤 Share" button under My Usage
         "share_url": None,             # link the Share button points to; falls back to the bot link
+        "share_text": "Try this Instagram Reel Downloader bot.",
         "premium_emoji_enabled": False,   # #17 — greeting uses a Premium custom emoji
         "premium_emoji_id": None,         # custom_emoji_id captured from the admin's sample message
         "premium_emoji_char": "🌟",       # fallback glyph shown to non-Premium users automatically
+        "activity_channel_id": None,      # #18 — dedicated channel for the Reel Delivered card
+        "activity_channel_enabled": False,
+        # v11 — owner-only Instagram failure monitor / AI Check dashboard.
+        "instagram_monitor_threshold": 5,
+        "instagram_monitor_window_minutes": 10,
+        "instagram_monitor_cooldown_minutes": 60,
+        "instagram_monitor_recovery_successes": 3,
+        "instagram_monitor_owner_ids": [OWNER_ID] if OWNER_ID else [],
     },
     "broadcast_log": [],
     "activity_log": [],         # ring buffer: {time, user_id, name, username, chat_type, url}
@@ -1186,6 +1341,13 @@ DEFAULT_DATA = {
     "blocked_domains": [],      # PDF #3 — whole domains blocked by admin
     "error_log": [],            # #13 — capped ring buffer of recent errors
     "metrics": {"reels_downloaded": 0, "audio_gets": 0, "caption_gets": 0, "start_count": 0, "broadcasts_sent": 0},
+    # Rolling Instagram-only monitoring state. Old events are pruned automatically.
+    "instagram_monitor": {
+        "failures": [], "successes": [], "outage_active": False,
+        "last_alert_at": None, "last_recovery_at": None,
+        "last_error_category": None, "last_error_detail": None,
+        "alert_count": 0, "recovery_count": 0,
+    },
     "tickets": {},               # v2 §6 — ticket_id(str) -> {...}
     "ticket_msg_map": {},        # v2 §6 — admin_group_message_id(str) -> ticket_id
     "support_msg_map": {},       # one-shot support admin-message-id(str) -> user_id(str)
@@ -1259,6 +1421,63 @@ def get_mongo_collection():
         return None
 
 
+def _apply_seed_files_if_present() -> bool:
+    """Part of the 📦 Update Backup system (see SEED_SETTINGS_FILE /
+    SEED_USERS_FILE and send_update_backup()). Only ever called from
+    load_data() in the branch where NO existing data was found (fresh
+    Mongo, or no local bot_data.json) — so on a host with persistent
+    storage this never runs and never clobbers live data. It exists
+    specifically for hosts that wipe the filesystem on every redeploy:
+    export the two seed files from the admin panel, commit them into the
+    repo next to bot.py with these exact names, push the update — the
+    bot then reconstructs its previous settings/menus/users right here,
+    automatically, on the very first startup after the deploy."""
+    global BOT_DATA
+    seed = {}
+    if os.path.exists(SEED_SETTINGS_FILE):
+        try:
+            with open(SEED_SETTINGS_FILE, "r", encoding="utf-8") as f:
+                seed.update(json.load(f))
+            log.info("Update Backup: found %s — seeding settings/menus from it.", SEED_SETTINGS_FILE)
+        except Exception as e:
+            log.warning("Update Backup: could not read %s: %s", SEED_SETTINGS_FILE, e)
+    if os.path.exists(SEED_USERS_FILE):
+        try:
+            with open(SEED_USERS_FILE, "r", encoding="utf-8") as f:
+                users_payload = json.load(f)
+            seed["users"] = users_payload.get("users", users_payload)
+            log.info("Update Backup: found %s — seeding users from it.", SEED_USERS_FILE)
+        except Exception as e:
+            log.warning("Update Backup: could not read %s: %s", SEED_USERS_FILE, e)
+    if seed:
+        BOT_DATA = _deep_merge_defaults(seed)
+        return True
+    return False
+
+
+def _apply_language_pack_migration():
+    """Runs once after BOT_DATA is loaded from any source (fresh, local
+    JSON, MongoDB, or a restored/seeded backup). Backfills missing menu
+    translations and, if the owner has never touched Settings > Languages
+    (still the empty default), pre-fills it from language_pack.json so the
+    picker isn't empty. Purely additive — never overwrites an existing
+    admin-set value — so it's always safe to re-run on every startup."""
+    changed = False
+    menus = BOT_DATA.get("menus", {})
+    before = json.dumps(menus, sort_keys=True)
+    _apply_language_pack_to_menus(menus)
+    if json.dumps(menus, sort_keys=True) != before:
+        changed = True
+    settings = BOT_DATA.setdefault("settings", {})
+    if not settings.get("languages"):
+        pack_langs = [c for c in _load_language_pack().get("languages", {}) if c != "en"]
+        if pack_langs:
+            settings["languages"] = pack_langs
+            changed = True
+    if changed:
+        save_data()
+
+
 def load_data():
     global BOT_DATA
     col = get_mongo_collection()
@@ -1278,7 +1497,9 @@ def load_data():
                 log.info("Migrated local JSON data into MongoDB.")
             else:
                 BOT_DATA = json.loads(json.dumps(DEFAULT_DATA))
+                _apply_seed_files_if_present()
                 col.update_one({"_id": "bot_data"}, {"$set": BOT_DATA}, upsert=True)
+        _apply_language_pack_migration()
         return
 
     if os.path.exists(DATA_FILE):
@@ -1287,7 +1508,9 @@ def load_data():
         log.info("Loaded data from local JSON file.")
     else:
         BOT_DATA = json.loads(json.dumps(DEFAULT_DATA))
+        _apply_seed_files_if_present()
         save_data()
+    _apply_language_pack_migration()
 
 
 def save_data():
@@ -1368,6 +1591,61 @@ def is_owner(user_id: int) -> bool:
 
 def is_admin(user_id: int) -> bool:
     return is_owner(user_id) or user_id in BOT_DATA.get("admins", [])
+
+
+# ----------------------------------------------------------------------------
+# Granular admin permissions — every grantable Admin Panel section. Keys
+# match the panel's callback_data with the "adm_" prefix stripped (see
+# _perm_key_for_screen). 📦 Update Backup, ☠️ Danger Zone, and 👤 Manage
+# Admins are intentionally NOT in this list — they stay owner-only no
+# matter what, since they can export all data, do irreversible damage, or
+# hand out access, respectively.
+# ----------------------------------------------------------------------------
+ADMIN_PERMISSIONS = [
+    ("stats", "📊 Statistics"),
+    ("users", "👥 Users & Groups"),
+    ("live", "🕵️ Live User Feed"),
+    ("broadcast", "📢 Broadcast"),
+    ("premium", "💎 Premium"),
+    ("leaderboard", "🏆 Leaderboard"),
+    ("share", "📤 Share Settings"),
+    ("devsettings", "👨‍💻 Developer Settings"),
+    ("support_settings", "🎧 Support Settings"),
+    ("tickets", "🎫 Tickets"),
+    ("menu_ui", "🎨 Menu & UI"),
+    ("plugins", "🧩 Feature Plugins"),
+    ("notifications", "🔔 Notifications"),
+    ("activity", "📜 Activity Log"),
+    ("selftest", "🩺 Self-Test"),
+    ("cmdtest", "🧪 Test Commands"),
+    ("ai_check", "🤖 AI Check"),
+    ("settings", "⚙️ Settings"),
+]
+ADMIN_PERMISSION_KEYS = [k for k, _ in ADMIN_PERMISSIONS]
+ADMIN_PERMISSION_LABELS = dict(ADMIN_PERMISSIONS)
+
+
+def _perm_key_for_screen(screen_key: str) -> str:
+    return screen_key[4:] if screen_key.startswith("adm_") else screen_key
+
+
+def get_admin_perms(user_id: int) -> set:
+    """Owner -> every permission. An admin with NO explicit entry in
+    admin_permissions (i.e. added before this feature existed) also gets
+    every permission, so upgrading the bot never silently locks out an
+    already-trusted admin. Only admins added AFTER this feature exists get
+    the exact list the owner picked for them at add-time (can be empty)."""
+    if is_owner(user_id):
+        return set(ADMIN_PERMISSION_KEYS)
+    uid = str(user_id)
+    perms_map = BOT_DATA.get("admin_permissions", {})
+    if uid not in perms_map:
+        return set(ADMIN_PERMISSION_KEYS)  # legacy admin, added before permissions existed
+    return set(perms_map.get(uid) or [])
+
+
+def has_admin_perm(user_id: int, perm_key: str) -> bool:
+    return is_owner(user_id) or perm_key in get_admin_perms(user_id)
 
 
 def touch_user(update: Update) -> bool:
@@ -1473,6 +1751,25 @@ def _force_join_targets():
     return normalized
 
 
+def normalize_channel_id(raw: str) -> str:
+    """Auto-fix the #1 real-world force-join bug: an admin pastes a numeric
+    channel ID that's missing Telegram's mandatory "-100" prefix for
+    channels/supergroups (very common — many ID-lookup bots/forwarded
+    messages show the bare internal number, e.g. "-5080988402" instead of
+    the actual Bot-API-usable "-1005080988402"). Using the bare form makes
+    every get_chat_member call fail with "chat not found", which silently
+    blocks every single user — exactly the "force-join doesn't work at
+    all" symptom. Public @usernames and already-correct IDs pass through
+    unchanged."""
+    raw = str(raw).strip()
+    if raw.startswith("@") or not raw.lstrip("-").isdigit():
+        return raw
+    digits = raw.lstrip("-")
+    if raw.startswith("-") and not digits.startswith("100"):
+        return f"-100{digits}"
+    return raw
+
+
 async def is_force_join_ok(context: ContextTypes.DEFAULT_TYPE, user_id: int) -> bool:
     """Require membership in every configured force-join channel.
 
@@ -1486,7 +1783,7 @@ async def is_force_join_ok(context: ContextTypes.DEFAULT_TYPE, user_id: int) -> 
         return True
     verified = BOT_DATA["settings"].get("force_join_request_verified", {}).get(str(user_id), [])
     for target in targets:
-        chat_id = target.get("chat_id")
+        chat_id = normalize_channel_id(target.get("chat_id")) if target.get("chat_id") else None
         key = str(chat_id or target.get("link"))
         if key in verified:
             continue
@@ -1508,7 +1805,7 @@ async def is_force_join_ok(context: ContextTypes.DEFAULT_TYPE, user_id: int) -> 
 async def resolve_force_join_link(context: ContextTypes.DEFAULT_TYPE, channel) -> str | None:
     if not channel:
         return None
-    ch = str(channel)
+    ch = normalize_channel_id(channel)
     if ch.startswith("http"):
         return ch
     if ch.lstrip("-").isdigit():
@@ -1520,7 +1817,14 @@ async def resolve_force_join_link(context: ContextTypes.DEFAULT_TYPE, channel) -
                 return chat.invite_link
             return await context.bot.export_chat_invite_link(int(ch))
         except Exception as e:
+            # This is the #1 real cause of "no usable join link found" on the
+            # user-facing prompt: either the ID is still wrong (not a real
+            # channel the bot can see), or the bot IS in the channel but
+            # isn't an admin there (export_chat_invite_link needs admin
+            # rights). Logged so it shows up in Activity Log instead of
+            # silently failing with zero diagnosis.
             log.warning("Force-join: could not resolve invite link for %s: %s", ch, e)
+            log_error("force_join", f"could not resolve a join link for channel {ch}: {e}")
             return None
     return f"https://t.me/{ch.lstrip('@')}"
 
@@ -1543,8 +1847,8 @@ async def handle_force_join_request(update: Update, context: ContextTypes.DEFAUL
     verified_map = BOT_DATA["settings"].setdefault("force_join_request_verified", {})
     keys = set(verified_map.get(uid, []))
     for target in _force_join_targets():
-        chat_id = target.get("chat_id")
-        if str(chat_id) == str(req.chat.id):
+        chat_id = normalize_channel_id(target.get("chat_id")) if target.get("chat_id") else None
+        if chat_id and str(chat_id) == str(req.chat.id):
             keys.add(str(chat_id))
         # Match the actual invite link if Telegram exposes it.
         inv = getattr(req, "invite_link", None)
@@ -1635,7 +1939,8 @@ def build_join_details(update: Update, is_new: bool) -> str:
     chat = update.effective_chat
     lbl = to_title_small_caps
     username_display = f"@{user.username}" if user.username else "Not Set"
-    lang_code = (user.language_code or "").lower()
+    saved_lang = BOT_DATA.get("users", {}).get(str(user.id), {}).get("lang")
+    lang_code = (saved_lang or user.language_code or "").lower()
     lang_display = _LANGUAGE_NAME_MAP.get(lang_code, user.language_code or "Unknown")
 
     lines = [
@@ -1713,18 +2018,15 @@ async def log_user_activity(context: ContextTypes.DEFAULT_TYPE, update: Update, 
         del buf[: len(buf) - 300]
     save_data()
 
-    if not BOT_DATA["settings"].get("user_activity_dm", True):
-        return
-    uname = f"@{user.username}" if user.username else "(no username)"
-    text = (
-        "🕵️ Live Activity\n\n"
-        f"👤 {user.full_name} {uname}\n"
-        f"🆔 {user.id}\n"
-        f"🕒 {iso_to_ist_str(entry['time'], '%H:%M:%S')} IST\n"
-        f"🔗 {url}"
-    )
-    await dm_all_admins(context, text)
-    await log_event(context, text)
+    # NOTE: this used to also DM admins a plain-text "Live Activity" ping
+    # right here, at request time. That has been superseded by the richer
+    # Reel Delivered-style card (see build_reel_delivered_card /
+    # send_reel_delivered_card) which now goes to admin DM once the reel is
+    # actually delivered — same "📡 Feed To Admin DM" toggle, one consistent
+    # format instead of two different-looking messages for the same event.
+    # The activity_log entry above (used by the Live User Feed / quick-ban
+    # screen) is still recorded immediately, so nothing about the
+    # anti-misuse monitoring itself is lost.
 
 
 def track_sent_message(chat_id: int, message_id: int):
@@ -2249,21 +2551,30 @@ async def _clear_ephemeral(context: ContextTypes.DEFAULT_TYPE, chat_id: int = No
 
 
 async def require_disclaimer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """PDF #1 — gate behind the disclaimer/agree flow only (no force-join
-    check). Kept as a standalone building block for require_gate() below;
-    most call sites should use require_gate() instead, which also enforces
-    force-join. Returns True if the user may proceed; otherwise shows the
-    disclaimer and returns False. Admins are exempt."""
+    """PDF #1 — gate behind LANGUAGE SELECTION FIRST, then the
+    disclaimer/agree flow (no force-join check here). Kept as a standalone
+    building block for require_gate() below; most call sites should use
+    require_gate() instead, which also enforces force-join. Language is
+    asked before the disclaimer so the disclaimer that follows can be shown
+    immediately in the language the user just picked. Returns True if the
+    user may proceed; otherwise shows whichever screen is still pending and
+    returns False. Admins are exempt."""
     user_obj = update.effective_user
     if not user_obj:
         return True
     if is_admin(user_obj.id):
         return True
     uid = str(user_obj.id)
-    if BOT_DATA["users"].get(uid, {}).get("accepted_terms"):
-        return True
-    await render_menu(context, update.effective_chat.id, "disclaimer")
-    return False
+    user = BOT_DATA["users"].get(uid, {})
+    if not user.get("lang_prompted"):
+        user["lang_prompted"] = True
+        save_data()
+        await _send_language_picker(context, update.effective_chat.id)
+        return False
+    if not user.get("accepted_terms"):
+        await render_menu(context, update.effective_chat.id, "disclaimer", lang=user.get("lang"))
+        return False
+    return True
 
 
 async def show_force_join_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2271,8 +2582,8 @@ async def show_force_join_prompt(update: Update, context: ContextTypes.DEFAULT_T
     links = await get_force_join_links(context)
     kb_rows = []
     for i, link in enumerate(links, 1):
-        label = "📢 JOIN CHANNEL" if len(links) == 1 else f"📢 JOIN CHANNEL {i}"
-        kb_rows.append([InlineKeyboardButton(label, url=link)])
+        label = "📢 Join Channel" if len(links) == 1 else f"📢 Join Channel {i}"
+        kb_rows.append([styled_button(label, url=link)])
     kb_rows.append([styled_button("✅ I'VE JOINED / SENT REQUEST", callback_data="check_force_join", style="success")])
     text = "🔒 " + to_small_caps("please join all required channels to use this bot.")
     if not links:
@@ -2469,9 +2780,11 @@ async def cb_global_button_gate(update: Update, context: ContextTypes.DEFAULT_TY
     instead of each of 100+ individual callback handlers needing its own
     check (which is exactly how it stayed half-enforced before: some
     screens checked, most didn't). is_admin() inside require_gate() exempts
-    admins as usual. The two callbacks that ARE the gate itself
-    (agree_terms, check_force_join) must fall through untouched, or the
-    user would have no way to ever pass the gate."""
+    admins as usual. The callbacks that ARE the gate itself — agree_terms,
+    check_force_join, and setlang:* (language is now picked BEFORE the
+    disclaimer, so it must work even though the user hasn't agreed to
+    terms yet) — must fall through untouched, or the user would have no
+    way to ever pass the gate."""
     query = update.callback_query
     if not query:
         return
@@ -2488,7 +2801,7 @@ async def cb_global_button_gate(update: Update, context: ContextTypes.DEFAULT_TY
         except Exception:
             pass
         raise ApplicationHandlerStop
-    if data in ("agree_terms", "check_force_join"):
+    if data in ("agree_terms", "check_force_join") or data.startswith("setlang:"):
         return
     if not await require_gate(update, context):
         try:
@@ -2501,38 +2814,69 @@ async def cb_global_button_gate(update: Update, context: ContextTypes.DEFAULT_TY
 LANG_NAMES = {
     "en": "🇬🇧 English", "hi": "🇮🇳 हिन्दी", "es": "🇪🇸 Español",
     "fr": "🇫🇷 Français", "ar": "🇸🇦 العربية", "pt": "🇵🇹 Português",
-    "id": "🇮🇩 Indonesia", "bn": "🇧🇩 বাংলা", "ur": "🇵🇰 اردو",
+    "id": "🇮🇩 Indonesia", "bn": "🇧🇩 বাংলা", "ur": "🇵🇰 اردو", "ru": "🇷🇺 Русский",
 }
 
 
+async def _send_language_picker(context: ContextTypes.DEFAULT_TYPE, chat_id: int, existing_message=None):
+    """Shared 'choose your language' screen — shown at the very start of
+    onboarding, before the disclaimer. Edits existing_message in place when
+    given (so a button tap replaces the same message), otherwise sends a
+    fresh one (e.g. the very first prompt during /start)."""
+    text = (
+        "🌐 <b>" + to_small_caps("Language Selection") + "</b>\n\n"
+        "<blockquote>"
+        "<u>➤ " + to_small_caps("Welcome!") + "</u>\n\n"
+        + to_small_caps("Please select your preferred language to continue.") + "\n\n"
+        "<u>➤ " + to_small_caps("Select Language") + "</u>\n"
+        + to_small_caps("Choose one of the languages below.") +
+        "</blockquote>"
+    )
+    kb = build_language_keyboard()
+    if existing_message is not None:
+        try:
+            return await existing_message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+        except Exception:
+            pass
+    return await context.bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=kb)
+
+
 def build_language_keyboard() -> InlineKeyboardMarkup:
-    langs = BOT_DATA["settings"].get("languages", [])
-    rows = [[styled_button("✨ Default (Hinglish)", callback_data="setlang:default")]]
-    for code in langs:
-        rows.append([styled_button(LANG_NAMES.get(code, code), callback_data=f"setlang:{code}")])
+    # Show every language configured by the bot, plus the built-in default.
+    # Keep the layout compact and consistent with the existing button styling.
+    configured = BOT_DATA["settings"].get("languages", [])
+    codes = []
+    for code in ("en", "hi", "es", "fr", "ar", "ru", "pt", "id", "bn", "ur"):
+        if code not in codes and (code in configured or code == "en"):
+            codes.append(code)
+    # If an admin has configured additional supported languages, include them.
+    for code in configured:
+        if code not in codes and code in LANG_NAMES:
+            codes.append(code)
+    rows = []
+    for i in range(0, len(codes), 2):
+        rows.append([styled_button(to_small_caps(LANG_NAMES.get(c, c)), callback_data=f"setlang:{c}") for c in codes[i:i+2]])
+    rows.append([styled_button("✨ " + to_small_caps("Default (Hinglish)"), callback_data="setlang:default")])
     return InlineKeyboardMarkup(rows)
 
 
 async def show_post_onboarding(context: ContextTypes.DEFAULT_TYPE, chat_id: int, uid: str):
-    """#1 — one-time language picker, shown before the welcome menu only the
-    very first time a user reaches here (and only if the admin has actually
-    configured extra languages — otherwise there's nothing to pick and we
-    just fall through to the normal start menu). Shared by /start and by the
-    disclaimer's 'I Agree & Continue' button so both paths land the user in
-    the same place."""
+    """Lands the user on the start menu once both onboarding gates
+    (language selection, then disclaimer — see require_disclaimer()) are
+    already satisfied. The language-prompt branch that used to live here
+    was moved earlier in the flow, ahead of the disclaimer, so language
+    selection always happens first. This is kept as a safety fallback: if
+    some caller ever reaches here with lang_prompted still unset, it shows
+    the picker instead of skipping straight to start."""
     user = BOT_DATA["users"].get(uid, {})
-    langs = BOT_DATA["settings"].get("languages", [])
-    if not user.get("lang_prompted") and langs:
+    if not user.get("lang_prompted"):
         user["lang_prompted"] = True
         save_data()
-        sent = await context.bot.send_message(
-            chat_id, "🌐 Welcome! Pick your language to get started:", reply_markup=build_language_keyboard()
-        )
-        return sent
+        return await _send_language_picker(context, chat_id)
     sent = await render_menu(context, chat_id, "start")
     if not BOT_DATA["users"].get(uid, {}).get("reply_kb_sent"):
         try:
-            await context.bot.send_message(chat_id, "⠀", reply_markup=main_reply_keyboard(is_admin(int(uid))))
+            await context.bot.send_message(chat_id, "⠀", reply_markup=main_reply_keyboard(is_admin(int(uid)), BOT_DATA["users"].get(uid, {}).get("lang")))
         except Exception:
             pass
         BOT_DATA["users"].setdefault(uid, {})["reply_kb_sent"] = True
@@ -2545,6 +2889,35 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if is_blocked(user_obj.id) and not is_admin(user_obj.id):
         return  # silently ignored, per spec
     is_new = touch_user(update)
+
+    # Group-specific /start: don't show the private onboarding/gate flow in
+    # a group. Show a clean card with the group name as a link and who
+    # started the bot, matching the bot's house typography.
+    if not _is_private_chat(update):
+        chat = update.effective_chat
+        title = html.escape(chat.title or "This Group")
+        if getattr(chat, "username", None):
+            group_link = f"https://t.me/{chat.username}"
+        elif str(chat.id).startswith("-100") and update.message:
+            group_link = f"https://t.me/c/{str(chat.id)[4:]}/{update.message.message_id}"
+        else:
+            group_link = None
+        group_name = f'<a href="{group_link}">{title}</a>' if group_link else title
+        starter = update.effective_user
+        starter_name = html.escape(starter.full_name or "User")
+        starter_link = f'<a href="tg://user?id={starter.id}">{starter_name}</a>'
+        body = (
+            "<blockquote>🚀 " + to_title_small_caps("Bot Started In") + "\n\n"
+            + "👥 " + group_name + "\n"
+            + "👤 " + to_title_small_caps("Started By") + " : " + starter_link + "\n\n"
+            + to_title_small_caps("Send An Instagram Reel Link To Download It.")
+            + "</blockquote>"
+        )
+        await update.message.reply_text(body, parse_mode="HTML", disable_web_page_preview=True)
+        await notify_admins_new_start(context, update, is_new)
+        await delete_incoming(update)
+        return
+
     # FIX — this notification used to fire only AFTER the rate-limit /
     # maintenance / disclaimer+force-join gate checks below all passed. Any
     # one of those returning early (extremely common: force-join is the
@@ -2649,15 +3022,14 @@ async def cmd_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await require_gate(update, context):
         await delete_incoming(update)
         return
-    langs = BOT_DATA["settings"].get("languages", [])
     menu = BOT_DATA["menus"].get("language", {})
-    banner = menu.get("text") or DEFAULT_MENUS["language"]["text"]
-    if not langs:
-        await _replace_rkb_screen(
-            context, update.effective_chat.id, "language",
-            to_small_caps("no extra languages are configured yet."),
-        )
-        return
+    lang = BOT_DATA["users"].get(str(user_obj.id), {}).get("lang")
+    translation = menu.get("translations", {}).get(lang) if lang else None
+    banner = (translation or {}).get("text") or menu.get("text") or DEFAULT_MENUS["language"]["text"]
+    # build_language_keyboard() always includes at least English + Default
+    # (Hinglish), whether or not the owner has added any extra languages in
+    # Settings > Languages — so the picker should always be shown, never
+    # blocked behind an "extra languages" check.
     await _replace_rkb_screen(
         context, update.effective_chat.id, "language",
         banner, reply_markup=build_language_keyboard(), parse_mode=menu.get("parse_mode"),
@@ -2669,13 +3041,34 @@ async def cb_setlang(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     code = query.data.split(":", 1)[1]
     uid = str(update.effective_user.id)
+    lang_value = None if code == "default" else code
     if uid in BOT_DATA["users"]:
-        BOT_DATA["users"][uid]["lang"] = None if code == "default" else code
+        BOT_DATA["users"][uid]["lang"] = lang_value
         # Belt-and-suspenders: a selection from any source means the picker
         # has now been shown/handled for this user.
         BOT_DATA["users"][uid]["lang_prompted"] = True
         save_data()
+    # Onboarding order: language is picked BEFORE the disclaimer. So if this
+    # user hasn't agreed to the terms yet, the next screen is the disclaimer
+    # — now shown in whichever language they just picked — not the start
+    # menu. Returning users who change their language later (already past
+    # the disclaimer) still land straight on start, same as before.
+    if not BOT_DATA["users"].get(uid, {}).get("accepted_terms"):
+        await render_menu(context, query.message.chat_id, "disclaimer", existing_message=query.message, lang=lang_value)
+        return
     await render_menu(context, query.message.chat_id, "start", existing_message=query.message)
+    # Refresh the persistent keyboard too, so a returning user who changes
+    # language immediately sees the new labels instead of the old language.
+    try:
+        await context.bot.send_message(
+            query.message.chat_id,
+            "⠀",
+            reply_markup=main_reply_keyboard(is_admin(int(uid)), lang_value),
+        )
+        BOT_DATA["users"].setdefault(uid, {})["reply_kb_sent"] = True
+        save_data()
+    except Exception as e:
+        log_error("language_keyboard_refresh", f"could not refresh reply keyboard: {e}")
 
 
 async def cb_agree_terms(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2704,6 +3097,81 @@ async def cb_agree_terms(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ----------------------------------------------------------------------------
 # Reel download
 # ----------------------------------------------------------------------------
+
+def build_reel_delivered_card(user_name: str, user_id, reel_number, original_reel_url: str, username: str = None) -> str:
+    """HTML card used for both the Activity Channel AND the admin-DM Live
+    Activity feed — same layout in both places so admins never see two
+    different formats for the same event.
+
+    Layout (per spec):
+        Rᴇᴇʟ Nᴏ : #2      <- underlined (label + value)
+        Sᴛᴀᴛᴜs : Dᴇʟɪᴠᴇʀᴇᴅ <- underlined (label + value)
+
+        Uꜱᴇʀ : <clickable name>
+        Uꜱᴇʀɴᴀᴍᴇ : Not Set / @username
+        Uꜱᴇʀ ID : 123456
+
+        Click Here To View Reel   (bare link, no visible URL)
+
+    All dynamic values are HTML-escaped before insertion, including the
+    URL used in the href attribute. The user's name is a clickable link
+    straight to their Telegram profile (via @username if set, otherwise
+    tg://user?id), same pattern as clickable_user() elsewhere in the bot.
+    """
+    safe_name = html.escape(str(user_name or "—"))
+    safe_uid = html.escape(str(user_id))
+    safe_no = html.escape(str(reel_number))
+    safe_url = html.escape(original_reel_url or "", quote=True)
+    username_display = f"@{username}" if username else "Not Set"
+
+    if username:
+        name_html = f'<a href="https://t.me/{html.escape(username, quote=True)}">{safe_name}</a>'
+    else:
+        name_html = f'<a href="tg://user?id={safe_uid}">{safe_name}</a>'
+
+    reel_no_line = f"<u>{to_title_small_caps('Reel No')} : #{safe_no}</u>"
+    status_line = f"<u>{to_title_small_caps('Status')} : {to_title_small_caps('Delivered')}</u>"
+
+    return (
+        f"{reel_no_line}\n"
+        f"{status_line}\n\n"
+        f"{to_title_small_caps('User')} : {name_html}\n"
+        f"{to_title_small_caps('Username')} : {html.escape(username_display)}\n"
+        f"{to_title_small_caps('User Id')} : {safe_uid}\n\n"
+        f'<a href="{safe_url}">{to_title_small_caps("Click Here To View Reel")}</a>'
+    )
+
+
+async def send_reel_delivered_card(context, user_name: str, user_id, reel_number, original_reel_url: str, username: str = None):
+    """Posts the reel-delivered card to admin-facing destinations, per the
+    admin-configurable "📡 Notify Route" (Settings & Admins > Live Feed):
+      - "logger"   -> Logger Channel only
+      - "activity" -> Activity Channel only
+      - "dm"       -> Admin DM only
+      - "all"      -> all three (default)
+    Same card/format everywhere, so admins never see two different-looking
+    messages for the same event."""
+    card = build_reel_delivered_card(user_name, user_id, reel_number, original_reel_url, username=username)
+    s = BOT_DATA["settings"]
+    route = s.get("notify_route", "all")
+
+    if route in ("activity", "all") and s.get("activity_channel_enabled") and s.get("activity_channel_id"):
+        try:
+            await context.bot.send_message(
+                chat_id=s["activity_channel_id"],
+                text=card,
+                parse_mode="HTML",
+                disable_web_page_preview=True,
+            )
+        except Exception:
+            log.warning("Activity Channel reel-delivered post failed", exc_info=True)
+
+    if route in ("dm", "all") and s.get("user_activity_dm", True):
+        await dm_all_admins(context, card, parse_mode="HTML")
+
+    if route in ("logger", "all"):
+        await log_event(context, card, parse_mode="HTML")
+
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # BUGFIX — root cause of the recurring "'NoneType' object has no
@@ -2744,7 +3212,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if problem_text:
                     tag = (
                         "<blockquote>"
-                        + "↩️ " + to_title_small_caps("Reply To Your Message") + "\n\n"
+                        + to_title_small_caps("Admin's Reply") + " ↩️" + "\n\n"
                         + f"«{html.escape(problem_text[:300])}»"
                         + "</blockquote>"
                     )
@@ -2778,6 +3246,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = update.message.text or ""
 
+    # Group safety: never answer normal group conversation. The bot only
+    # reacts to an actual Instagram URL (with or without @BotUsername).
+    # Private chats retain the normal helpful invalid-link feedback.
+    if not _is_private_chat(update) and text:
+        if not INSTAGRAM_URL_RE.search(text):
+            return
+
     # BUGFIX #2 (part 2) — non-text media that isn't part of an active ticket
     # or awaited-input flow has nothing to do here; don't fall through to the
     # "not a valid reel link" text reply for a bare photo/video.
@@ -2801,11 +3276,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # RKB_ADMINPANEL is excluded here — cmd_admin() replies to this exact
     # message first (reply_text) and only then deletes it itself, so
     # deleting it up-front would break that reply-to reference.
-    _RKB_BUTTON_TEXTS = {
-        RKB_DOWNLOAD, RKB_USAGE, RKB_GIFT, RKB_LANGUAGE,
-        RKB_DEVELOPER, RKB_HOWTO, RKB_SUPPORT,
-    }
-    if text in _RKB_BUTTON_TEXTS:
+    user_lang = BOT_DATA["users"].get(uid, {}).get("lang")
+    rkb_action = _rkb_action_for_text(text, user_lang)
+    if rkb_action in {"download", "usage", "gift", "language", "developer", "howto", "support"}:
         # This was previously missing — the comment above described this
         # behaviour but no code actually deleted the tapped message, so old
         # button-tap messages from the user kept piling up in the chat.
@@ -2827,28 +3300,28 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         sent = await render_menu(context, update.effective_chat.id, "download")
         await track_and_refresh_panel(context, update.effective_chat.id, "rkb_latest", sent)
         return
-    if text == RKB_USAGE:
+    if rkb_action == "usage":
         await show_usage_screen(update, context)
         return
-    if text == RKB_GIFT:
+    if rkb_action == "gift":
         await show_gift_menu(update, context)
         return
-    if text == RKB_LANGUAGE:
+    if rkb_action == "language":
         await cmd_language(update, context)
         return
-    if text == RKB_DEVELOPER:
+    if rkb_action == "developer":
         await show_developer_button(update, context)
         return
-    if text == RKB_HOWTO:
+    if rkb_action == "howto":
         # Same treatment as Download Reel above — admin-editable via
         # Menu & UI → "howto".
         sent = await render_menu(context, update.effective_chat.id, "howto")
         await track_and_refresh_panel(context, update.effective_chat.id, "rkb_latest", sent)
         return
-    if text == RKB_SUPPORT:
+    if rkb_action == "support":
         await support_button_entry(update, context)
         return
-    if text == RKB_ADMINPANEL and is_admin(user_id):
+    if rkb_action == "admin" and is_admin(user_id):
         await cmd_admin(update, context)
         return
 
@@ -2887,7 +3360,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if not match:
-        # #15 — simple keyword auto-reply
+        # Never spam groups for ordinary conversation. Auto-replies and the
+        # invalid-link message are intentionally private-chat only.
+        if not _is_private_chat(update):
+            return
         low = text.lower()
         for phrase, reply in BOT_DATA["settings"].get("auto_replies", {}).items():
             if phrase in low:
@@ -2990,11 +3466,31 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     def run_download(use_merge: bool):
         opts = build_ydl_opts(use_merge)
-        info = _ytdlp_extract_with_retry(opts, url, download=True)
+        try:
+            info = _ytdlp_extract_with_retry(opts, url, download=True)
+        except Exception as first_error:
+            # Instagram occasionally exposes only one extractor-visible stream
+            # for a reel. Retry once with yt-dlp's broadest format selector
+            # instead of failing solely because our quality preference was too
+            # strict. The real exception still reaches logs if this also fails.
+            log.warning("Preferred Instagram format failed; retrying with plain best: %s", first_error)
+            opts = {
+                "format": "best/bestvideo+bestaudio",
+                "outtmpl": out_template,
+                "quiet": True,
+                "no_warnings": True,
+                "progress_hooks": [_progress_hook],
+            }
+            if FFMPEG_PATH:
+                opts["ffmpeg_location"] = FFMPEG_PATH
+            info = _ytdlp_extract_with_retry(opts, url, download=True)
         with yt_dlp.YoutubeDL(opts) as ydl:
             fp = ydl.prepare_filename(info)
-        if not fp.endswith(".mp4") and os.path.exists(fp.rsplit(".", 1)[0] + ".mp4"):
-            fp = fp.rsplit(".", 1)[0] + ".mp4"
+        stem = fp.rsplit(".", 1)[0]
+        for candidate in (fp, stem + ".mp4", stem + ".webm", stem + ".mkv"):
+            if os.path.exists(candidate):
+                fp = candidate
+                break
         ig_caption = (info.get("description") or "").strip()
         uploader = (info.get("uploader") or info.get("uploader_id") or "").strip()
         return fp, ig_caption, uploader
@@ -3125,7 +3621,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # after sending (see finally: below), so Audio re-downloads
         # audio-only from the cached URL rather than needing the video kept
         # around on disk.
-        _caption_cache[(sent.chat_id, sent.message_id)] = {"caption": ig_caption, "url": url}
+        _caption_cache[(sent.chat_id, sent.message_id)] = {
+            "caption": ig_caption,
+            "url": url,
+            "uploader": ig_uploader,
+            "title": (ig_caption.splitlines()[0] if ig_caption else ig_uploader or "Instagram Audio"),
+        }
         if len(_caption_cache) > CAPTION_CACHE_MAX:
             _caption_cache.pop(next(iter(_caption_cache)))
 
@@ -3133,10 +3634,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         bump_usage(uid)
         BOT_DATA["metrics"]["reels_downloaded"] = BOT_DATA["metrics"].get("reels_downloaded", 0) + 1
         BOT_DATA["users"].setdefault(uid, {})["reels_count"] = BOT_DATA["users"].get(uid, {}).get("reels_count", 0) + 1
+        await instagram_monitor_success(context, user_id)
         save_data()
         await log_event(
             context,
             f"📥 New download — user {user_id} (@{user_obj.username or 'no username'}) — {url}",
+        )
+        await send_reel_delivered_card(
+            context,
+            user_name=user_obj.full_name or (f"@{user_obj.username}" if user_obj.username else str(user_id)),
+            user_id=user_id,
+            reel_number=BOT_DATA["metrics"]["reels_downloaded"],
+            original_reel_url=url,
+            username=user_obj.username,
         )
 
         seconds = menu.get("auto_delete_seconds")
@@ -3152,11 +3662,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if "no video formats found" in str(e).lower():
             log_error("ytdlp_no_formats", f"url={url} err={e} — yt-dlp may need updating (pip install -U yt-dlp)")
         log_error("download", f"url={url} err={e}")
+        await instagram_monitor_failure(context, user_id, e)
         try:
-            await status_msg.edit_text(USER_ERR_NOT_AVAILABLE)
+            await status_msg.edit_text(USER_ERR_NOT_AVAILABLE, parse_mode="HTML")
         except Exception:
             try:
-                await update.message.reply_text(USER_ERR_NOT_AVAILABLE)
+                await update.message.reply_text(USER_ERR_NOT_AVAILABLE, parse_mode="HTML")
             except Exception:
                 pass
     finally:
@@ -3361,15 +3872,22 @@ async def cb_get_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         source_path = await asyncio.to_thread(run_source_download)
         if not source_path:
-            await status_msg.edit_text(USER_ERR_AUDIO_NOT_AVAILABLE)
+            await status_msg.edit_text(USER_ERR_AUDIO_NOT_AVAILABLE, parse_mode="HTML")
             return
         audio_path = await asyncio.to_thread(extract_audio_ffmpeg, source_path)
         if not audio_path or not os.path.exists(audio_path):
-            await status_msg.edit_text(USER_ERR_AUDIO_NOT_AVAILABLE)
+            await status_msg.edit_text(USER_ERR_AUDIO_NOT_AVAILABLE, parse_mode="HTML")
             return
         protect = bool(BOT_DATA["settings"].get("lock_all_content", False))
+        # Give Telegram a clean, human-readable filename/title instead of the
+        # temporary yt-dlp filename full of ids and timestamps.
+        audio_title = _safe_filename((entry or {}).get("uploader") or (entry or {}).get("title") or "Instagram Audio")
+        filename = _safe_filename((entry or {}).get("title") or audio_title) + ".mp3"
         with open(audio_path, "rb") as aud:
-            await query.message.reply_audio(audio=aud, protect_content=protect)
+            await query.message.reply_audio(
+                audio=aud, protect_content=protect, filename=filename,
+                title=audio_title, performer="Instagram"
+            )
         uid = str(query.from_user.id)
         u = BOT_DATA["users"].setdefault(uid, {})
         u["audio_count"] = u.get("audio_count", 0) + 1
@@ -3382,10 +3900,10 @@ async def cb_get_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         log.exception("Audio extraction failed for %s", url)
         log_error("audio", f"url={url} err={e}")
         try:
-            await status_msg.edit_text(USER_ERR_AUDIO_NOT_AVAILABLE)
+            await status_msg.edit_text(USER_ERR_AUDIO_NOT_AVAILABLE, parse_mode="HTML")
         except Exception:
             try:
-                await query.message.reply_text(USER_ERR_AUDIO_NOT_AVAILABLE)
+                await query.message.reply_text(USER_ERR_AUDIO_NOT_AVAILABLE, parse_mode="HTML")
             except Exception:
                 pass
     finally:
@@ -3421,6 +3939,286 @@ async def cb_download_another(update: Update, context: ContextTypes.DEFAULT_TYPE
     query = update.callback_query
     await query.answer()
     await query.message.reply_text("🔗 " + to_small_caps("paste your next instagram reel link."))
+
+
+# ----------------------------------------------------------------------------
+# v11 — OWNER-ONLY Instagram Download Failure Monitor
+# ----------------------------------------------------------------------------
+
+def _ig_monitor_state() -> dict:
+    state = BOT_DATA.setdefault("instagram_monitor", {})
+    state.setdefault("failures", [])
+    state.setdefault("successes", [])
+    state.setdefault("outage_active", False)
+    state.setdefault("last_alert_at", None)
+    state.setdefault("last_recovery_at", None)
+    state.setdefault("last_error_category", None)
+    state.setdefault("last_error_detail", None)
+    state.setdefault("alert_count", 0)
+    state.setdefault("recovery_count", 0)
+    return state
+
+
+def _ig_monitor_cfg(key: str, default):
+    return BOT_DATA.get("settings", {}).get(key, default)
+
+
+def _ig_error_category(error: Exception | str) -> str:
+    msg = str(error).lower()
+    # These are normally properties of one URL, not an Instagram-wide outage.
+    individual = (
+        "private", "deleted", "not found", "does not exist", "invalid url",
+        "unsupported url", "login required", "not available", "removed",
+        "page isn't available", "page is unavailable",
+    )
+    if any(x in msg for x in individual):
+        return "individual_link"
+    if any(x in msg for x in ("timed out", "timeout", "connection", "network",
+                              "dns", "temporarily unavailable", "502", "503",
+                              "504", "429", "rate limit")):
+        return "network_temporary"
+    if any(x in msg for x in ("no video formats found", "unable to extract",
+                              "requested format is not available",
+                              "extractor", "instagram")):
+        return "instagram_extractor"
+    if "ffmpeg" in msg or "ffprobe" in msg:
+        return "local_media"
+    return "download_other"
+
+
+def _ig_monitor_prune(now: datetime | None = None):
+    now = now or datetime.utcnow()
+    st = _ig_monitor_state()
+    window = timedelta(minutes=int(_ig_monitor_cfg("instagram_monitor_window_minutes", 10)))
+    cutoff = now - window
+    for key in ("failures", "successes"):
+        kept = []
+        for e in st.get(key, []):
+            try:
+                dt = datetime.fromisoformat(e["time"])
+                if dt >= cutoff:
+                    kept.append(e)
+            except Exception:
+                continue
+        st[key] = kept[-100:]
+
+
+async def _ig_monitor_admin_ids(context: ContextTypes.DEFAULT_TYPE) -> list[int]:
+    raw = BOT_DATA.get("settings", {}).get("instagram_monitor_owner_ids")
+    ids = raw if isinstance(raw, list) else []
+    if not ids and OWNER_ID:
+        ids = [OWNER_ID]
+    out = []
+    for value in ids:
+        try:
+            iv = int(value)
+            if iv and iv not in out:
+                out.append(iv)
+        except Exception:
+            pass
+    return out
+
+
+async def _ig_monitor_send_alert(context: ContextTypes.DEFAULT_TYPE, recovered: bool = False):
+    st = _ig_monitor_state()
+    now = datetime.utcnow()
+    if recovered:
+        text = (
+            "🟢 " + to_title_small_caps("Instagram Download System") + "\n\n"
+            "✓ " + to_small_caps("downloading has recovered.") + "\n\n"
+            + f"{to_title_small_caps('Status')} : 🟢 " + to_small_caps("Operational") + "\n"
+            + f"{to_title_small_caps('Successful Checks')} : {len(st.get('successes', []))}\n"
+            + f"{to_title_small_caps('Failures')} : {len(st.get('failures', []))}\n"
+            + f"{to_title_small_caps('Time')} : {now_ist_str('%d %b %Y, %I:%M:%S %p')} IST\n\n"
+            + to_small_caps("the Instagram downloader is working normally again.")
+        )
+    else:
+        failures = st.get("failures", [])
+        categories = {}
+        for e in failures:
+            categories[e.get("category", "unknown")] = categories.get(e.get("category", "unknown"), 0) + 1
+        reason = max(categories, key=categories.get) if categories else "unknown"
+        text = (
+            "🚨 " + to_title_small_caps("Instagram Download Alert") + "\n\n"
+            "⚠️ " + to_small_caps("possible system issue detected") + "\n\n"
+            + to_small_caps("Instagram reel downloads are failing unusually.") + "\n\n"
+            + f"{to_title_small_caps('Failures')} : {len(failures)}\n"
+            + f"{to_title_small_caps('Affected Users')} : {len({e.get('user_id') for e in failures})}\n"
+            + f"{to_title_small_caps('Status')} : 🔴 " + to_small_caps("Unstable") + "\n"
+            + f"{to_title_small_caps('Category')} : {html.escape(reason.replace('_', ' ').title())}\n"
+            + f"{to_title_small_caps('Window')} : {int(_ig_monitor_cfg('instagram_monitor_window_minutes', 10))} min\n"
+            + f"{to_title_small_caps('Time')} : {now_ist_str('%d %b %Y, %I:%M:%S %p')} IST\n\n"
+            + to_small_caps("the bot will continue monitoring the system.")
+        )
+    kb = InlineKeyboardMarkup([[styled_button("🔄 " + to_small_caps("Check Status"), callback_data="ai_check")]])
+    for aid in await _ig_monitor_admin_ids(context):
+        try:
+            await context.bot.send_message(aid, text, parse_mode="HTML", reply_markup=kb)
+        except Exception:
+            log.exception("Instagram monitor notification failed for admin %s", aid)
+
+
+async def instagram_monitor_failure(context: ContextTypes.DEFAULT_TYPE, user_id: int, error: Exception | str):
+    """Record a REAL Instagram Reel download failure without blocking the downloader."""
+    try:
+        now = datetime.utcnow()
+        st = _ig_monitor_state()
+        category = _ig_error_category(error)
+        _ig_monitor_prune(now)
+        # Ignore failures that are clearly local/individual when deciding on an IG-wide outage.
+        event = {"time": now.isoformat(), "user_id": str(user_id), "category": category,
+                 "detail": str(error)[:500]}
+        st["failures"].append(event)
+        st["last_error_category"] = category
+        st["last_error_detail"] = str(error)[:500]
+        _ig_monitor_prune(now)
+
+        candidates = [e for e in st["failures"]
+                      if e.get("category") == category
+                      and category not in ("individual_link", "local_media", "network_temporary")]
+        threshold = int(_ig_monitor_cfg("instagram_monitor_threshold", 5))
+        distinct_users = len({e.get("user_id") for e in candidates})
+        likely_systemic = len(candidates) >= threshold and (distinct_users >= 2 or len(candidates) >= threshold + 2)
+
+        if likely_systemic and not st.get("outage_active"):
+            cooldown = timedelta(minutes=int(_ig_monitor_cfg("instagram_monitor_cooldown_minutes", 60)))
+            last = None
+            try:
+                last = datetime.fromisoformat(st.get("last_alert_at")) if st.get("last_alert_at") else None
+            except Exception:
+                pass
+            if last is None or now - last >= cooldown:
+                st["outage_active"] = True
+                st["last_alert_at"] = now.isoformat()
+                st["alert_count"] = int(st.get("alert_count", 0)) + 1
+                save_data()
+                await _ig_monitor_send_alert(context, recovered=False)
+                return
+        save_data()
+    except Exception:
+        # Monitoring must NEVER break the main Reel Downloader.
+        log.exception("Instagram failure monitor crashed")
+
+
+async def instagram_monitor_success(context: ContextTypes.DEFAULT_TYPE, user_id: int):
+    """Record a successful Reel delivery and detect recovery after an outage."""
+    try:
+        now = datetime.utcnow()
+        st = _ig_monitor_state()
+        _ig_monitor_prune(now)
+        st["successes"].append({"time": now.isoformat(), "user_id": str(user_id)})
+        _ig_monitor_prune(now)
+        if st.get("outage_active"):
+            threshold = int(_ig_monitor_cfg("instagram_monitor_recovery_successes", 3))
+            if len(st["successes"]) >= threshold:
+                st["outage_active"] = False
+                st["last_recovery_at"] = now.isoformat()
+                st["recovery_count"] = int(st.get("recovery_count", 0)) + 1
+                save_data()
+                await _ig_monitor_send_alert(context, recovered=True)
+                return
+        save_data()
+    except Exception:
+        log.exception("Instagram recovery monitor crashed")
+
+
+async def _render_ai_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Owner/admin live control-room dashboard with the bot-wide premium
+    typography, pointer + underline convention, and a single Telegram
+    blockquote card. Rendering is read-only and never blocks downloading."""
+    query = update.callback_query
+    if not is_admin(update.effective_user.id):
+        await query.answer("🔒 " + to_small_caps("admin only."), show_alert=True)
+        return
+
+    now = datetime.utcnow()
+    day_ago = now - timedelta(hours=24)
+    _ig_monitor_prune(now)
+    st = _ig_monitor_state()
+
+    def recent(ts):
+        dt = _parse_iso(ts)
+        return bool(dt and dt >= day_ago)
+
+    users = BOT_DATA.get("users", {})
+    active_24h = sum(1 for u in users.values() if recent(u.get("last_active")))
+    new_users_24h = sum(1 for u in users.values() if recent(u.get("joined")))
+    events_24h = [e for e in BOT_DATA.get("activity_log", []) if recent(e.get("time"))]
+    errors_24h = [e for e in BOT_DATA.get("error_log", []) if recent(e.get("time"))]
+    download_errors_24h = [e for e in errors_24h if e.get("kind") in ("download", "ytdlp_no_formats")]
+
+    request_count = len(events_24h)
+    monitor_failures = st.get("failures", [])
+    monitor_successes = st.get("successes", [])
+    systemic = [e for e in monitor_failures if e.get("category") == "instagram_extractor"]
+    distinct_failed_users = len({e.get("user_id") for e in systemic if e.get("user_id")})
+    total_health_events = len(monitor_failures) + len(monitor_successes)
+    health_rate = (len(monitor_successes) / total_health_events * 100) if total_health_events else 100.0
+
+    if st.get("outage_active"):
+        status = "🔴 " + to_small_caps("Instagram downloads unstable")
+        state_label = "🔴 " + to_small_caps("Critical")
+    elif systemic and len(systemic) >= max(1, int(_ig_monitor_cfg("instagram_monitor_threshold", 5)) - 1):
+        status = "🟡 " + to_small_caps("Instagram being watched closely")
+        state_label = "🟡 " + to_small_caps("Warning")
+    else:
+        status = "🟢 " + to_small_caps("Instagram downloads operational")
+        state_label = "🟢 " + to_small_caps("Operational")
+
+    last_failure = monitor_failures[-1] if monitor_failures else None
+    last_error = html.escape(str(st.get("last_error_detail") or "—")[:120])
+    last_category = html.escape(str((last_failure or {}).get("category") or "—"))
+
+    def row(icon, label, value):
+        return f"{icon} <u>➤ {to_small_caps(label)}</u> : {value}"
+
+    lines = [
+        "🤖 " + to_title_small_caps("AI Check"),
+        "",
+        "<u>📊 " + to_title_small_caps("Admin Dashboard") + "</u>",
+        row("📡", "Instagram Status", status),
+        row("⏱", "Bot Uptime", html.escape(human_uptime())),
+        row("👥", "Total Users", len(users)),
+        row("🆕", "New Users · 24h", new_users_24h),
+        row("🟢", "Active Users · 24h", active_24h),
+        row("🎬", "Reel Requests · 24h", request_count),
+        row("❌", "Download Errors · 24h", len(download_errors_24h)),
+        row("📈", "Lifetime Reels Delivered", BOT_DATA.get("metrics", {}).get("reels_downloaded", 0)),
+        "",
+        "<u>🧠 " + to_title_small_caps("Smart Instagram Monitor") + "</u>",
+        row("🚦", "State", state_label),
+        row("📉", "Failures · Window", len(monitor_failures)),
+        row("✓", "Successes · Window", len(monitor_successes)),
+        row("🎯", "Failure Threshold", int(_ig_monitor_cfg("instagram_monitor_threshold", 5))),
+        row("🕒", "Detection Window", f"{int(_ig_monitor_cfg('instagram_monitor_window_minutes', 10))} min"),
+        row("🔁", "Recovery Threshold", f"{int(_ig_monitor_cfg('instagram_monitor_recovery_successes', 3))} successes"),
+        row("⏳", "Alert Cooldown", f"{int(_ig_monitor_cfg('instagram_monitor_cooldown_minutes', 60))} min"),
+        row("👤", "Affected Users · Extractor", distinct_failed_users),
+        row("📊", "Health Rate · Window", f"{health_rate:.0f}%"),
+        row("🧩", "Last Error Type", last_category),
+        row("📝", "Last Error", last_error),
+    ]
+    if st.get("last_alert_at"):
+        lines.append(row("🚨", "Last Alert", html.escape(str(st.get("last_alert_at")))))
+    if st.get("last_recovery_at"):
+        lines.append(row("🟢", "Last Recovery", html.escape(str(st.get("last_recovery_at")))))
+
+    # Keep the entire dashboard inside the same native Telegram quote/card,
+    # matching the bot's existing premium message convention.
+    text = "<blockquote>" + "\n".join(lines) + "</blockquote>"
+    kb = InlineKeyboardMarkup([
+        [styled_button("🔄 " + to_small_caps("Refresh"), callback_data="ai_check")],
+        [styled_button("📊 " + to_small_caps("Statistics"), callback_data="adm_stats"),
+         styled_button("📜 " + to_small_caps("Activity Log"), callback_data="adm_activity")],
+        back_row(),
+        home_row(),
+    ])
+    await query.edit_message_text(text, parse_mode="HTML", reply_markup=kb)
+
+
+async def cb_ai_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    await _render_ai_check(update, context)
 
 
 # ----------------------------------------------------------------------------
@@ -3704,7 +4502,7 @@ async def show_usage_screen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     remaining = "Unlimited" if assigned_premium else str(max(0, limit - used))
 
     lines = [
-        to_title_small_caps("My Usage"), "",
+        "<u>" + to_title_small_caps("My Usage") + "</u>", "",
         f"Nᴀᴍᴇ : {html.escape(user.full_name)}",
         f"Uꜱᴇʀɴᴀᴍᴇ : {html.escape(username)}",
         f"Uꜱᴇʀ Iᴅ : {user.id}",
@@ -3727,31 +4525,10 @@ async def show_usage_screen(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines += ["", f"💎 Pʀᴇᴍɪᴜᴍ Sᴛᴀᴛᴜꜱ : {'Active' if active else 'Expired'}", f"Eхᴘɪʀʏ : {html.escape(expiry_text)}"]
 
     text = "<blockquote>" + "\n".join(lines) + "</blockquote>"
-
-    # Bugfix — newly added/turned-ON premium plans (BOT_DATA["settings"]
-    # ["premium_plans"]) were never rendered anywhere for users; this screen
-    # is where "Plans (those live under Usage now)" are supposed to appear
-    # (see show_gift_menu's docstring). Show each enabled plan as its own
-    # button, above the Share button, using the same gift_plan: callback
-    # the payment flow (cb_gift_plan) already handles.
-    kb_rows = []
-    for p in BOT_DATA["settings"].get("premium_plans", []):
-        if not p.get("enabled"):
-            continue
-        price_bits = []
-        if p.get("price_inr"):
-            price_bits.append(f"₹{p['price_inr']}")
-        if p.get("price_stars"):
-            price_bits.append(f"{p['price_stars']}⭐")
-        price_str = " / ".join(price_bits) if price_bits else "—"
-        kb_rows.append([
-            styled_button(f"💎 {p['name']} — {price_str}", callback_data=f"gift_plan:{p['id']}", style="success")
-        ])
+    kb = None
     if BOT_DATA["settings"].get("share_enabled", True):
         share_url = await resolve_share_url(context)
-        kb_rows.append([styled_button("📤 " + to_small_caps("share"), url=share_url, style="primary")])
-    kb = InlineKeyboardMarkup(kb_rows) if kb_rows else None
-
+        kb = InlineKeyboardMarkup([[styled_button("📤 " + to_small_caps("Share Bot"), url=share_url)]])
     await _replace_rkb_screen(context, update.effective_chat.id, "usage", text, reply_markup=kb, parse_mode="HTML")
 
 
@@ -3767,17 +4544,19 @@ def _normalize_username_link(value: str) -> str:
 
 
 async def resolve_share_url(context: ContextTypes.DEFAULT_TYPE) -> str:
-    """v5 — where the 'My Usage' Share button points. Admin can set a
-    custom link (e.g. a channel/landing page) in Admin Panel > Leaderboard
-    & Sharing; otherwise it falls back to the bot's own t.me link."""
-    url = BOT_DATA["settings"].get("share_url")
-    if url:
-        return url
+    """v11 — the My Usage Share button now opens Telegram's real share
+    composer instead of simply opening the bot profile. The configured
+    share_url remains the content being shared; when unset, the live bot
+    username is resolved automatically."""
+    target = BOT_DATA["settings"].get("share_url")
     try:
-        me = await context.bot.get_me()
-        return f"https://t.me/{me.username}"
+        if not target:
+            me = await context.bot.get_me()
+            target = f"https://t.me/{me.username}" if me.username else "https://t.me/"
     except Exception:
-        return "https://t.me/"
+        target = "https://t.me/"
+    text = BOT_DATA["settings"].get("share_text") or "Try this Instagram Reel Downloader bot."
+    return "https://t.me/share/url?url=" + quote(target, safe="") + "&text=" + quote(text, safe="")
 
 
 async def resolve_developer_url(context: ContextTypes.DEFAULT_TYPE) -> str | None:
@@ -4391,15 +5170,14 @@ async def handle_user_awaiting_input(update: Update, context: ContextTypes.DEFAU
         save_data()
         await log_event(context, f"🆘 Support request #{rid} from {user_obj.id}")
 
-        # Short typing/loading animation before the confirmation — the exact
-        # same reveal helper used for the Maintenance Mode message.
-        # IMPORTANT — sent as a brand-new, untracked message (never routed
-        # through _replace_rkb_screen / the shared "rkb_latest" panel slot),
-        # so switching to any other bottom-keyboard screen afterwards can
-        # never delete this confirmation as a side effect.
-        confirm_msg = await _send_typewriter(
-            context, update.effective_chat.id, _build_support_user_confirmation(rid),
-            parse_mode="HTML", delay=0.45,
+        # v11 — typing animation removed here per request (it was showing
+        # raw <blockquote> markup mid-reveal on some clients since
+        # intermediate frames are sent unparsed by design). Confirmation
+        # now sends instantly, fully HTML-parsed, no animation.
+        confirm_msg = await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=_build_support_user_confirmation(rid),
+            parse_mode="HTML",
         )
         if confirm_msg:
             req["confirm_message_id"] = confirm_msg.message_id
@@ -4543,43 +5321,59 @@ def get_admin_panel_title() -> str:
     return menu.get("text") or DEFAULT_MENUS["admin"]["text"]
 
 
-def admin_panel_keyboard():
-    # v6 — 2-per-row grid layout: every top-level Admin Panel entry is now
-    # arranged two buttons per row instead of one, so the whole panel fits
-    # on screen with far less scrolling, and related tools sit side by
-    # side for a cleaner, more predictable control flow. Grouped by
-    # purpose: money & plans, growth & sharing, people-facing ops,
-    # communication tools, content/config, then diagnostics.
-    # UPI Settings now lives inside 💎 Premium (it's payment config for
-    # premium plans, so it belongs with them, not as its own top-level
-    # button) and 🕵️ Live User Feed is paired with 👥 Users & Groups since
-    # both are user-monitoring tools — nothing sits alone on its own row.
-    # v10 — per request, every Admin Panel button is colorless/neutral
-    # (no `style`) — colors were only wanted on the user-facing bottom
-    # keyboard, not inside the admin tools. Category emojis are kept so
-    # buttons stay easy to tell apart at a glance without relying on color.
-    return InlineKeyboardMarkup(
-        [
-            [styled_button("💎 Premium", callback_data="adm_premium"),
-             styled_button("🏆 Leaderboard", callback_data="adm_leaderboard")],
-            [styled_button("📤 Share Settings", callback_data="adm_share"),
-             styled_button("📢 Broadcast", callback_data="adm_broadcast")],
-            [styled_button("👨‍💻 Developer Settings", callback_data="adm_devsettings"),
-             styled_button("🎧 Support Settings", callback_data="adm_support_settings")],
-            [styled_button("🎫 Tickets", callback_data="adm_tickets"),
-             styled_button("📊 Statistics", callback_data="adm_stats")],
-            [styled_button("👥 Users & Groups", callback_data="adm_users"),
-             styled_button("🕵️ Live User Feed", callback_data="adm_live")],
-            [styled_button("🎨 Menu & UI", callback_data="adm_menu_ui"),
-             styled_button("🧪 Test Commands", callback_data="adm_cmdtest")],
-            [styled_button("🔔 Notifications", callback_data="adm_notifications"),
-             styled_button("📜 Activity Log", callback_data="adm_activity")],
-            [styled_button("🩺 Self-Test", callback_data="adm_selftest"),
-             styled_button("🧩 Feature Plugins", callback_data="adm_plugins")],
-            [styled_button("⚙️ Settings", callback_data="adm_settings"),
-             styled_button("☠️ Danger Zone", callback_data="adm_danger")],
-        ]
-    )
+def admin_panel_keyboard(user_id: int = None):
+    """Buttons are filtered per-caller: the owner sees everything; an admin
+    only sees the sections they've actually been granted (see
+    ADMIN_PERMISSIONS / get_admin_perms). 📦 Update Backup and ☠️ Danger
+    Zone are owner-only and are never shown to admins at all, no matter
+    what permissions they hold. Passing user_id=None shows every button
+    (kept for any legacy caller that hasn't been updated to pass it)."""
+    perms = get_admin_perms(user_id) if user_id is not None else set(ADMIN_PERMISSION_KEYS)
+
+    def allowed(perm_key):
+        return user_id is None or perm_key in perms
+
+    all_buttons = [
+        ("premium", styled_button("💎 Premium", callback_data="adm_premium")),
+        ("leaderboard", styled_button("🏆 Leaderboard", callback_data="adm_leaderboard")),
+        ("share", styled_button("📤 Share Settings", callback_data="adm_share")),
+        ("broadcast", styled_button("📢 Broadcast", callback_data="adm_broadcast")),
+        ("devsettings", styled_button("👨‍💻 Developer Settings", callback_data="adm_devsettings")),
+        ("support_settings", styled_button("🎧 Support Settings", callback_data="adm_support_settings")),
+        ("tickets", styled_button("🎫 Tickets", callback_data="adm_tickets")),
+        ("stats", styled_button("📊 Statistics", callback_data="adm_stats")),
+        ("users", styled_button("👥 Users & Groups", callback_data="adm_users")),
+        ("live", styled_button("🕵️ Live User Feed", callback_data="adm_live")),
+        ("menu_ui", styled_button("🎨 Menu & UI", callback_data="adm_menu_ui")),
+        ("cmdtest", styled_button("🧪 Test Commands", callback_data="adm_cmdtest")),
+        ("ai_check", styled_button("🤖 AI Check", callback_data="ai_check")),
+        ("notifications", styled_button("🔔 Notifications", callback_data="adm_notifications")),
+        ("activity", styled_button("📜 Activity Log", callback_data="adm_activity")),
+        ("selftest", styled_button("🩺 Self-Test", callback_data="adm_selftest")),
+        ("plugins", styled_button("🧩 Feature Plugins", callback_data="adm_plugins")),
+        ("settings", styled_button("⚙️ Settings", callback_data="adm_settings")),
+    ]
+
+    rows, row = [], []
+    for perm_key, btn in all_buttons:
+        if not allowed(perm_key):
+            continue
+        row.append(btn)
+        if len(row) == 2:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+
+    # Owner-only, always — never granted to admins via permissions.
+    if user_id is None or is_owner(user_id):
+        rows.append([styled_button("📦 Update Backup", callback_data="adm_update_backup"),
+                     styled_button("☠️ Danger Zone", callback_data="adm_danger")])
+
+    if not rows:
+        rows = [[styled_button("ℹ️ No Sections Granted Yet", callback_data="adm_home")]]
+
+    return InlineKeyboardMarkup(rows)
 
 
 def back_row(cb="adm_back", label="🔙 Back"):
@@ -4599,18 +5393,20 @@ async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await _clear_ephemeral(context, update.effective_chat.id)
     context.user_data["adm_nav_stack"] = ["adm_home"]
-    sent = await update.message.reply_text(get_admin_panel_title(), reply_markup=admin_panel_keyboard())
+    sent = await update.message.reply_text(get_admin_panel_title(), reply_markup=admin_panel_keyboard(update.effective_user.id))
     await track_and_refresh_panel(context, update.effective_chat.id, "admin", sent)
     await delete_incoming(update)
 
 
 async def _render_adm_home(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.edit_message_text(get_admin_panel_title(), reply_markup=admin_panel_keyboard())
+    await update.callback_query.edit_message_text(get_admin_panel_title(), reply_markup=admin_panel_keyboard(update.effective_user.id))
 
 
 async def cb_adm_home(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    await _clear_ephemeral(context, update.effective_chat.id)
+    context.user_data.pop("awaiting", None)
     context.user_data["adm_nav_stack"] = ["adm_home"]
     await _render_adm_home(update, context)
 
@@ -4864,37 +5660,36 @@ async def cb_run_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         if key == "start":
             await query.answer("✅ " + to_small_caps("running /start..."))
-            await render_menu(context, chat_id, "start")
+            await track(await render_menu(context, chat_id, "start"))
 
         elif key == "help":
             await query.answer("✅ " + to_small_caps("running /help..."))
-            await render_menu(context, chat_id, "help_admin" if is_admin(admin_id) else "help_user")
+            await track(await render_menu(context, chat_id, "help_admin" if is_admin(admin_id) else "help_user"))
 
         elif key == "language":
             await query.answer("✅ " + to_small_caps("running /language..."))
-            langs = BOT_DATA["settings"].get("languages", [])
-            if not langs:
-                await send(to_small_caps("no extra languages configured yet — add some in settings > languages."))
-            else:
-                await send("🌐 " + to_small_caps("choose a language:"), reply_markup=build_language_keyboard())
+            await send("🌐 " + to_small_caps("choose a language:"), reply_markup=build_language_keyboard())
 
         elif key == "admin":
             await query.answer("✅ " + to_small_caps("running /admin..."))
-            await send(get_admin_panel_title(), reply_markup=admin_panel_keyboard())
+            await send(get_admin_panel_title(), reply_markup=admin_panel_keyboard(admin_id))
 
         elif key == "ping":
+            # Same live status data/format as the real /ping command.
             await query.answer()
             t0 = time.monotonic()
-            msg = await context.bot.send_message(chat_id, "🏓 Pong!")
+            msg = await context.bot.send_message(chat_id, "🏓 " + to_title_small_caps("Pong!"))
             await track(msg)
             ms = int((time.monotonic() - t0) * 1000)
-            col = get_mongo_collection()
-            backend = "MongoDB ✅" if col is not None else "Local JSON"
+            backend = "MongoDB" if get_mongo_collection() is not None else "Local JSON File"
+            lines = [
+                f"↬ {to_title_small_caps('Uptime')} : {human_uptime_full()}",
+                f"↬ {to_title_small_caps('Storage')} : {to_title_small_caps(backend)}",
+                f"↬ {to_title_small_caps('Server Time')} : {now_ist_str('%d %b %Y, %H:%M:%S')} IST",
+            ]
             await msg.edit_text(
-                f"🏓 Pong! {ms}ms\n\n"
-                f"⏱ Uptime: {human_uptime()}\n"
-                f"🗄 Storage: {backend}\n"
-                f"🕒 Server time: {now_ist_str('%d %b %Y, %H:%M:%S')} IST\n"
+                f"🏓 <b>{to_title_small_caps('Pong!')}</b> {ms}ms\n\n<blockquote>{html.escape(chr(10).join(lines))}</blockquote>",
+                parse_mode="HTML",
             )
 
         elif key == "health":
@@ -5039,9 +5834,15 @@ async def _render_adm_live(update: Update, context: ContextTypes.DEFAULT_TYPE):
             lines.append(f"• {when} IST — {e.get('name')} {uname} [{e.get('user_id')}]\n  ↳ {e.get('url')}")
     body = "\n".join(lines)
     s = BOT_DATA["settings"]
+    route = s.get("notify_route", "all")
+    route_labels = {"logger": "📋 Logger", "activity": "📢 Activity", "dm": "📩 Admin Dm", "all": "🌐 All"}
     kb = InlineKeyboardMarkup(
         [
             [styled_button("🚫 Ban / Unban User (by ID)", callback_data="adm_quickban")],
+            [styled_button(
+                f"📡 Notify Route: {route_labels.get(route, 'All')}",
+                callback_data="adm_notify_route_cycle",
+            )],
             [styled_button(
                 toggle_label("📡 Feed To Admin DM", s.get('user_activity_dm', True)),
                 callback_data="stgl:user_activity_dm:adm_live",
@@ -5061,6 +5862,21 @@ async def cb_adm_live(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     if not is_admin(update.effective_user.id):
         return
+    await _render_adm_live(update, context)
+
+
+async def cb_adm_notify_route_cycle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Cycles the Reel-Delivered notification destination: Logger ->
+    Activity -> Admin DM -> All -> Logger ... one tap, no sub-menu needed."""
+    query = update.callback_query
+    await query.answer()
+    if not is_admin(update.effective_user.id):
+        return
+    order = ["all", "logger", "activity", "dm"]
+    current = BOT_DATA["settings"].get("notify_route", "all")
+    nxt = order[(order.index(current) + 1) % len(order)] if current in order else "all"
+    BOT_DATA["settings"]["notify_route"] = nxt
+    save_data()
     await _render_adm_live(update, context)
 
 
@@ -5088,9 +5904,22 @@ SCREEN_RENDERERS = {}  # populated just above build_app, once every screen fn ex
 def nav_tracked(screen_key):
     """Wraps a screen's callback handler so entering it gets pushed onto the
     per-admin nav stack, so 'Back' can unwind through however many screens
-    were visited, not just to a single hardcoded parent."""
+    were visited, not just to a single hardcoded parent.
+
+    Also doubles as the enforcement point for granular admin permissions:
+    if screen_key maps to a key in ADMIN_PERMISSIONS, the caller must have
+    that permission (owner always does). Nested/utility screens that
+    aren't in the catalog (e.g. a broadcast sub-step) are left ungated
+    here since reaching them already required passing the gated top-level
+    screen first."""
     def deco(fn):
         async def wrapped(update, context):
+            perm_key = _perm_key_for_screen(screen_key)
+            if perm_key in ADMIN_PERMISSION_KEYS and not has_admin_perm(update.effective_user.id, perm_key):
+                await update.callback_query.answer(
+                    "🔒 " + to_small_caps("you don't have access to this section."), show_alert=True,
+                )
+                return
             stack = context.user_data.setdefault("adm_nav_stack", ["adm_home"])
             if not stack or stack[-1] != screen_key:
                 stack.append(screen_key)
@@ -5104,6 +5933,11 @@ def nav_tracked(screen_key):
 async def cb_adm_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    # Sweep away any leftover "send a value..." prompt / "✅ saved" confirmation
+    # messages from whatever setup flow the admin is leaving — those should
+    # not keep sitting in the chat once the admin navigates away.
+    await _clear_ephemeral(context, update.effective_chat.id)
+    context.user_data.pop("awaiting", None)
     stack = context.user_data.setdefault("adm_nav_stack", ["adm_home"])
     if len(stack) > 1:
         stack.pop()  # drop the screen we're currently on
@@ -5119,23 +5953,21 @@ async def cb_adm_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def _render_adm_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    col = get_mongo_collection()
-    backend = "MongoDB ✅" if col is not None else "Local JSON file (fallback)"
-    if col is None and _mongo_last_error and MONGO_URI:
-        backend += f"\n   ⚠️ Mongo error: {_mongo_last_error}"
-    mem = get_memory_usage_mb()
+    mem = get_memory_mb()
+    backend = "MongoDB" if get_mongo_collection() is not None else "Local JSON File"
+    uptime = human_uptime()
     text = (
-        "📊 Stats & Activity\n\n"
-        f"👥 Users: {len(BOT_DATA['users'])}\n"
-        f"👨‍👩‍👧 Groups: {len(BOT_DATA['groups'])}\n"
-        f"🚫 Blocked: {len(BOT_DATA['blocked'])}\n"
-        f"📢 Broadcasts sent: {len(BOT_DATA['broadcast_log'])}\n"
-        f"⬇️ Reels downloaded: {BOT_DATA['metrics'].get('reels_downloaded', 0)}\n"
-        f"🚀 /start count: {BOT_DATA['metrics'].get('start_count', 0)}\n"
-        f"🚫 Copyright reports: {len(BOT_DATA['copyright_reports'])}\n"
-        f"⏱ Uptime: {human_uptime()}\n"
-        f"💾 Memory: {mem if mem is not None else 'n/a'} MB\n"
-        f"🗄 Storage backend: {backend}\n"
+        "📊 " + to_title_small_caps("Stats & Activity") + "\n\n"
+        + f"{to_title_small_caps('Users')} : {len(BOT_DATA['users'])}\n"
+        + f"{to_title_small_caps('Groups')} : {len(BOT_DATA['groups'])}\n"
+        + f"{to_title_small_caps('Blocked')} : {len(BOT_DATA.get('blocked_users', []))}\n"
+        + f"{to_title_small_caps('Broadcasts Sent')} : {BOT_DATA['metrics'].get('broadcasts_sent', 0)}\n"
+        + f"{to_title_small_caps('Reels Downloaded')} : {BOT_DATA['metrics'].get('reels_downloaded', 0)}\n"
+        + f"{to_title_small_caps('/Start Count')} : {BOT_DATA['metrics'].get('start_count', 0)}\n"
+        + f"{to_title_small_caps('Copyright Reports')} : {len(BOT_DATA['copyright_reports'])}\n\n"
+        + f"{to_title_small_caps('Uptime')} : {uptime}\n"
+        + f"{to_title_small_caps('Memory')} : {mem if mem is not None else 'N/A'} MB\n"
+        + f"{to_title_small_caps('Storage')} : {to_title_small_caps(backend)}"
     )
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup([back_row(), home_row()]))
 
@@ -5169,6 +6001,10 @@ async def _render_adm_notifications(update: Update, context: ContextTypes.DEFAUL
     new_groups_24h = sum(
         1 for g in BOT_DATA["groups"].values()
         if (dt := _parse(g.get("added_at"))) and dt >= day_ago
+    )
+    reel_activity_24h = sum(
+        1 for e in BOT_DATA.get("activity_log", [])
+        if (dt := _parse(e.get("time"))) and dt >= day_ago
     )
 
     # Tickets / support requests still waiting on a reply.
@@ -5210,6 +6046,7 @@ async def _render_adm_notifications(update: Update, context: ContextTypes.DEFAUL
     lines.append("📈 " + to_small_caps("last 24 hours"))
     lines.append(f"👤 " + to_small_caps("new users: ") + str(new_users_24h))
     lines.append(f"👨‍👩‍👧 " + to_small_caps("new groups: ") + str(new_groups_24h))
+    lines.append(f"🎬 " + to_small_caps("reel activity: ") + str(reel_activity_24h))
     lines.append("")
 
     if last_error:
@@ -5223,6 +6060,7 @@ async def _render_adm_notifications(update: Update, context: ContextTypes.DEFAUL
     lines.append("📊 " + to_small_caps("current totals"))
     lines.append(f"👥 " + to_small_caps("users: ") + str(len(BOT_DATA["users"])))
     lines.append(f"🚫 " + to_small_caps("blocked: ") + str(blocked_count))
+    lines.append(f"🎬 " + to_small_caps("reels delivered: ") + str(BOT_DATA["metrics"].get("reels_downloaded", 0)))
     lines.append(f"⏱ " + to_small_caps("uptime: ") + human_uptime())
 
     text = "\n".join(lines)
@@ -5848,7 +6686,7 @@ async def _render_adm_menu_ui(update: Update, context: ContextTypes.DEFAULT_TYPE
         name = MENU_DISPLAY_NAMES.get(mid, mid.replace("_", " ").title())
         return f"{name} ✅" if has_image else name
 
-    rows = []
+    rows = [[styled_button("🖼️ Set Welcome Image", callback_data="adm_menu_img:start")]]
     for i in range(0, len(menu_ids), 2):
         pair = menu_ids[i:i + 2]
         rows.append([styled_button(_label(mid), callback_data=f"adm_menu_edit:{mid}") for mid in pair])
@@ -5872,11 +6710,11 @@ def _build_menu_edit_screen(menu_id: str):
     when first opening it and when refreshing it in place after a save
     (e.g. right after an image upload), so the two never drift apart."""
     menu = BOT_DATA["menus"][menu_id]
-    parse_mode_label = menu.get("parse_mode") or "OFF (raw text)"
+    parse_mode_label = menu.get("parse_mode") or "OFF (Raw Text)"
     override = menu.get("auto_delete_seconds")
-    override_label = f"{override}s" if override is not None else "uses global"
+    override_label = f"{override}s" if override is not None else "Uses Global"
     has_image = bool(menu.get("image_file_id"))
-    image_status = "✅ Set" if has_image else "❌ Not set"
+    image_status = "✅ " + to_title_small_caps("Set") if has_image else "❌ " + to_title_small_caps("Not Set")
     image_btn_label = ("🖼️ Change Image" if has_image else "🖼️ Set Image")
 
     rows = [
@@ -6139,34 +6977,39 @@ async def _render_adm_settings(update: Update, context: ContextTypes.DEFAULT_TYP
     s = BOT_DATA["settings"]
     # v6 — same 2-per-row grid treatment as the top-level Admin Panel, so
     # deep submenus stay just as easy to scan and control.
-    kb = InlineKeyboardMarkup(
-        [
-            [styled_button("🖼 Set Welcome Image", callback_data="adm_menu_img:start"),
-             styled_button("🔒 Maintenance", callback_data="adm_maintenance")],
-            [styled_button(f"⏱ Global Auto-Delete: {s.get('global_auto_delete_seconds', 0)}s", callback_data="adm_set_autodelete"),
-             styled_button("💬 Auto-Replies", callback_data="adm_autoreply_list")],
-            [styled_button("👤 Manage Admins", callback_data="adm_manage_admins"),
-             styled_button("📥 Restore Backup", callback_data="adm_restore_info")],
-            [styled_button(
-                 toggle_label("🔐 Lock All Forwarding", s.get('lock_all_content')),
-                 callback_data="stgl:lock_all_content:adm_settings",
-             ),
-             styled_button("👑 Owner/Developer Contact", callback_data="adm_owner_contact")],
-            [styled_button("📋 Logger Channel", callback_data="adm_logger_channel"),
-             styled_button(f"📢 Force-Join: {s.get('force_join_channel') or 'OFF'}", callback_data="adm_force_join")],
-            [styled_button(
-                toggle_label("📄 Send As Document", s.get('send_as_document')),
-                callback_data="stgl:send_as_document:adm_settings",
-            )],
-            [styled_button(
-                 toggle_label("🌟 Premium Emoji Greeting", s.get('premium_emoji_enabled')),
-                 callback_data="stgl:premium_emoji_enabled:adm_settings",
-             ),
-             styled_button("✏️ Set Premium Emoji", callback_data="adm_set_premium_emoji")],
-            back_row(),
-            home_row(),
-        ]
-    )
+    rows = [
+        [styled_button("🔒 Maintenance", callback_data="adm_maintenance")],
+        [styled_button(f"⏱ Global Auto-Delete: {s.get('global_auto_delete_seconds', 0)}s", callback_data="adm_set_autodelete"),
+         styled_button("💬 Auto-Replies", callback_data="adm_autoreply_list")],
+    ]
+    # 👤 Manage Admins and 📥 Restore Backup can hand out or restore access
+    # to everything, so — like 📦 Update Backup / ☠️ Danger Zone — they stay
+    # owner-only even though "settings" itself is a grantable permission.
+    if is_owner(update.effective_user.id):
+        rows.append([styled_button("👤 Manage Admins", callback_data="adm_manage_admins"),
+                     styled_button("📥 Restore Backup", callback_data="adm_restore_info")])
+    rows += [
+        [styled_button(
+             toggle_label("🔐 Lock All Forwarding", s.get('lock_all_content')),
+             callback_data="stgl:lock_all_content:adm_settings",
+         ),
+         styled_button("👑 Owner/Developer Contact", callback_data="adm_owner_contact")],
+        [styled_button("📋 Logger Channel", callback_data="adm_logger_channel"),
+         styled_button("📣 Activity Channel", callback_data="adm_activity_channel")],
+        [styled_button(f"📢 Force-Join: {s.get('force_join_channel') or 'OFF'}", callback_data="adm_force_join")],
+        [styled_button(
+            toggle_label("📄 Send As Document", s.get('send_as_document')),
+            callback_data="stgl:send_as_document:adm_settings",
+        )],
+        [styled_button(
+             toggle_label("🌟 Premium Emoji Greeting", s.get('premium_emoji_enabled')),
+             callback_data="stgl:premium_emoji_enabled:adm_settings",
+         ),
+         styled_button("✏️ Set Premium Emoji", callback_data="adm_set_premium_emoji")],
+        back_row(),
+        home_row(),
+    ]
+    kb = InlineKeyboardMarkup(rows)
     await query.edit_message_text(
         "⚙️ " + to_small_caps("settings") + "\n"
         + to_small_caps("configure core bot behaviour below."),
@@ -6385,6 +7228,53 @@ async def cb_adm_logger_channel_set(update: Update, context: ContextTypes.DEFAUL
     )
 
 
+# ---- #18 — Activity Channel (dedicated home for the Reel Delivered card) ------
+
+def _build_adm_activity_channel_view():
+    s = BOT_DATA["settings"]
+    text = (
+        "📣 Activity Channel\n\n"
+        f"Channel ID: {s.get('activity_channel_id') or '(not set)'}\n"
+        f"Enabled: {'✅ ON' if s.get('activity_channel_enabled') else '❌ OFF'}\n\n"
+        "Every delivered reel posts a clean 'Reel Delivered' card here — "
+        "separate from the general Logger Channel, so this stays a pure "
+        "delivery feed with no error/debug noise mixed in."
+    )
+    kb = InlineKeyboardMarkup(
+        [
+            [styled_button("✏️ Set Channel", callback_data="adm_activity_channel_set")],
+            [styled_button(
+                toggle_label("🔀 Enabled", s.get('activity_channel_enabled')),
+                callback_data="stgl:activity_channel_enabled:adm_activity_channel",
+            )],
+            back_row(),
+        ]
+    )
+    return text, kb
+
+
+async def _render_adm_activity_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    text, kb = _build_adm_activity_channel_view()
+    await query.edit_message_text(text, reply_markup=kb)
+
+
+async def cb_adm_activity_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    await _render_adm_activity_channel(update, context)
+
+
+async def cb_adm_activity_channel_set(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    remember_panel_message(context, query, "activity_channel")
+    context.user_data["awaiting"] = "activity_channel_id"
+    await query.message.reply_text(
+        "Forward any message from the target channel here (bot must be an "
+        "admin there), or just type its numeric ID (looks like -100xxxxxxxxxx)."
+    )
+
+
 # ---- v3 §7 — Force-join channel ------------------------------------------------
 
 def _build_adm_force_join_view():
@@ -6393,11 +7283,15 @@ def _build_adm_force_join_view():
     for i, t in enumerate(targets, 1):
         lines.append(f"{i}. {t.get('chat_id') or '(link-only)'}\n   🔗 {t.get('link') or 'auto-resolve'}")
     text = (
-        "📢 Multiple Force-Join\n\n"
-        + ("\n\n".join(lines) if lines else "No channels set — force-join disabled.")
-        + "\n\nUsers must satisfy ALL listed channels. Public @usernames, numeric "
-          "channel IDs and t.me/invite links are supported. Join requests are also "
-          "accepted when Telegram delivers the request update to this bot."
+        "📢 " + to_title_small_caps("Multiple Force-Join") + "\n\n"
+        + ("\n\n".join(lines) if lines else to_small_caps("no channels set — force-join disabled."))
+        + "\n\n<blockquote>"
+        + to_title_small_caps(
+            "Users Must Satisfy All Listed Channels. Public @Usernames, Numeric "
+            "Channel IDs And t.me/Invite Links Are Supported. Join Requests Are Also "
+            "Accepted When Telegram Delivers The Request Update To This Bot."
+        )
+        + "</blockquote>"
     )
     kb_rows = [
         [styled_button("➕ Add Channel / Link", callback_data="adm_force_join_set")],
@@ -6412,7 +7306,7 @@ def _build_adm_force_join_view():
 async def _render_adm_force_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     text, kb = _build_adm_force_join_view()
-    await query.edit_message_text(text, reply_markup=kb)
+    await query.edit_message_text(text, reply_markup=kb, parse_mode="HTML")
 
 
 async def cb_adm_force_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -6425,11 +7319,18 @@ async def cb_adm_force_join_set(update: Update, context: ContextTypes.DEFAULT_TY
     await query.answer()
     remember_panel_message(context, query, "force_join")
     context.user_data["awaiting"] = "force_join_channel"
-    await query.message.reply_text(
-        "Send a public @channelusername, numeric channel ID (-100xxxxxxxxxx), "
-        "or a full https://t.me/... invite/join link. You can add multiple channels one by one. "
-        "For reliable membership checking, the bot should be an admin in each channel."
+    msg = await query.message.reply_text(
+        "<blockquote>"
+        + to_title_small_caps("Send A Public") + " @ChannelUsername, "
+        + to_title_small_caps("Numeric Channel") + " ID (-100xxxxxxxxxx), "
+        + to_title_small_caps("Or A Full") + " https://t.me/... "
+        + to_title_small_caps("Invite/Join Link. You Can Add Multiple Channels One By One. "
+                               "For Reliable Membership Checking, The Bot Should Be An Admin "
+                               "In Each Channel.")
+        + "</blockquote>",
+        parse_mode="HTML",
     )
+    _track_ephemeral(context, msg)
 
 
 async def cb_adm_force_join_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -6748,19 +7649,51 @@ async def cb_adm_autoreply_del(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.message.reply_text(to_small_caps("send the keyword you want to remove."))
 
 
+def _perm_summary_text(selected: set) -> str:
+    if not selected:
+        return to_small_caps("no sections selected — this admin won't see anything in the panel yet.")
+    lines = [f"• {ADMIN_PERMISSION_LABELS[k]}" for k in ADMIN_PERMISSION_KEYS if k in selected]
+    return to_small_caps("access granted") + ":\n" + "\n".join(lines)
+
+
+def _perm_picker_keyboard(selected: set, confirm_cb: str, cancel_cb: str, toggle_prefix: str) -> InlineKeyboardMarkup:
+    """Shared toggle-grid used both when adding a new admin and when
+    editing an existing one's access. ✅/⬜ next to each grantable section
+    (see ADMIN_PERMISSIONS) — 📦 Update Backup, ☠️ Danger Zone, and 👤
+    Manage Admins are deliberately absent: they're owner-only forever."""
+    rows, row = [], []
+    for key, label in ADMIN_PERMISSIONS:
+        mark = "✅" if key in selected else "⬜"
+        row.append(styled_button(f"{mark} {label}", callback_data=f"{toggle_prefix}:{key}"))
+        if len(row) == 2:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    rows.append([styled_button("✅ Select All", callback_data=f"{toggle_prefix}_all"),
+                 styled_button("⬜ Clear All", callback_data=f"{toggle_prefix}_none")])
+    rows.append([styled_button("💾 Save", callback_data=confirm_cb),
+                 styled_button("🚫 Cancel", callback_data=cancel_cb)])
+    return InlineKeyboardMarkup(rows)
+
+
 async def cb_adm_manage_admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    if not is_owner(update.effective_user.id):
+        await query.answer("🔒 " + to_small_caps("only the owner can access this."), show_alert=True)
+        return
     admins = BOT_DATA.get("admins", [])
-    text = "👤 Current Admins\n\n" + "\n".join(f"• {a}" for a in admins)
-    kb = InlineKeyboardMarkup(
-        [
-            [styled_button("➕ Add Admin", callback_data="adm_add_admin")],
-            [styled_button("➖ Remove Admin", callback_data="adm_remove_admin")],
-            [styled_button("🔙 Back", callback_data="adm_settings")],
-        ]
-    )
-    await query.edit_message_text(text, reply_markup=kb)
+    lines = ["👤 " + to_small_caps("current admins") + "\n"]
+    rows = []
+    for a in admins:
+        n_perms = len(get_admin_perms(a))
+        lines.append(f"• {a} — {n_perms}/{len(ADMIN_PERMISSION_KEYS)} " + to_small_caps("sections"))
+        rows.append([styled_button(f"✏️ {to_small_caps('edit access')} — {a}", callback_data=f"admperm_edit:{a}")])
+    rows.append([styled_button("➕ Add Admin", callback_data="adm_add_admin")])
+    rows.append([styled_button("➖ Remove Admin", callback_data="adm_remove_admin")])
+    rows.append([styled_button("🔙 Back", callback_data="adm_settings")])
+    await query.edit_message_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(rows))
 
 
 async def cb_adm_add_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -6783,9 +7716,187 @@ async def cb_adm_remove_admin(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.message.reply_text(to_small_caps("send the user id of the admin to remove."))
 
 
+# ---- New-admin access picker: shown right after /add_admin_id is entered ----
+
+async def _render_newadmin_picker(query, context):
+    draft = context.user_data.setdefault("newadmin_perms_draft", set())
+    new_id = context.user_data.get("newadmin_id_draft")
+    text = (
+        "➕ " + to_small_caps(f"choose access for admin {new_id}") + "\n\n"
+        + to_small_caps("tap a section to toggle it, then save. only what you tick here is what they'll be able to open.") + "\n\n"
+        + _perm_summary_text(draft)
+    )
+    await query.edit_message_text(text, reply_markup=_perm_picker_keyboard(draft, "newadmin_confirm", "newadmin_cancel", "newadmin_perm"))
+
+
+async def cb_newadmin_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if not is_owner(update.effective_user.id):
+        return
+    key = query.data.split(":", 1)[1]
+    draft = context.user_data.setdefault("newadmin_perms_draft", set())
+    draft.symmetric_difference_update({key})
+    await _render_newadmin_picker(query, context)
+
+
+async def cb_newadmin_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if not is_owner(update.effective_user.id):
+        return
+    context.user_data["newadmin_perms_draft"] = set(ADMIN_PERMISSION_KEYS)
+    await _render_newadmin_picker(query, context)
+
+
+async def cb_newadmin_none(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if not is_owner(update.effective_user.id):
+        return
+    context.user_data["newadmin_perms_draft"] = set()
+    await _render_newadmin_picker(query, context)
+
+
+async def cb_newadmin_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if not is_owner(update.effective_user.id):
+        return
+    new_id = context.user_data.pop("newadmin_id_draft", None)
+    draft = context.user_data.pop("newadmin_perms_draft", set())
+    if new_id is None:
+        await query.edit_message_text(to_small_caps("this expired — please try adding the admin again."))
+        return
+    if new_id not in BOT_DATA["admins"]:
+        BOT_DATA["admins"].append(new_id)
+    BOT_DATA.setdefault("admin_permissions", {})[str(new_id)] = sorted(draft)
+    save_data()
+    await query.edit_message_text("✅ " + to_small_caps(f"{new_id} is now an admin.") + "\n\n" + _perm_summary_text(draft))
+    await log_event(context, f"👤 Admin added: {new_id} — {len(draft)}/{len(ADMIN_PERMISSION_KEYS)} section(s) (by {update.effective_user.id})")
+
+
+async def cb_newadmin_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    context.user_data.pop("newadmin_id_draft", None)
+    context.user_data.pop("newadmin_perms_draft", None)
+    await query.edit_message_text(to_small_caps("cancelled — no admin was added."))
+
+
+# ---- Edit-existing-admin access picker (from Manage Admins ✏️) -------------
+
+async def _render_editperm_picker(query, context):
+    draft = context.user_data.setdefault("editperm_draft", set())
+    target_id = context.user_data.get("editperm_target_id")
+    text = (
+        "✏️ " + to_small_caps(f"editing access for admin {target_id}") + "\n\n"
+        + to_small_caps("tap a section to toggle it, then save.") + "\n\n"
+        + _perm_summary_text(draft)
+    )
+    await query.edit_message_text(text, reply_markup=_perm_picker_keyboard(draft, "editperm_confirm", "editperm_cancel", "editperm_perm"))
+
+
+async def cb_admperm_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if not is_owner(update.effective_user.id):
+        return
+    target_id = int(query.data.split(":", 1)[1])
+    context.user_data["editperm_target_id"] = target_id
+    context.user_data["editperm_draft"] = get_admin_perms(target_id)
+    await _render_editperm_picker(query, context)
+
+
+async def cb_editperm_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if not is_owner(update.effective_user.id):
+        return
+    key = query.data.split(":", 1)[1]
+    draft = context.user_data.setdefault("editperm_draft", set())
+    draft.symmetric_difference_update({key})
+    await _render_editperm_picker(query, context)
+
+
+async def cb_editperm_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if not is_owner(update.effective_user.id):
+        return
+    context.user_data["editperm_draft"] = set(ADMIN_PERMISSION_KEYS)
+    await _render_editperm_picker(query, context)
+
+
+async def cb_editperm_none(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if not is_owner(update.effective_user.id):
+        return
+    context.user_data["editperm_draft"] = set()
+    await _render_editperm_picker(query, context)
+
+
+async def cb_editperm_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if not is_owner(update.effective_user.id):
+        return
+    target_id = context.user_data.pop("editperm_target_id", None)
+    draft = context.user_data.pop("editperm_draft", set())
+    if target_id is None:
+        await query.edit_message_text(to_small_caps("this expired — please try again."))
+        return
+    BOT_DATA.setdefault("admin_permissions", {})[str(target_id)] = sorted(draft)
+    save_data()
+    await query.edit_message_text("✅ " + to_small_caps(f"access updated for {target_id}.") + "\n\n" + _perm_summary_text(draft))
+    await log_event(context, f"🔧 Admin access updated: {target_id} -> {len(draft)}/{len(ADMIN_PERMISSION_KEYS)} section(s) (by {update.effective_user.id})")
+
+
+async def cb_editperm_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    context.user_data.pop("editperm_target_id", None)
+    context.user_data.pop("editperm_draft", None)
+    await query.edit_message_text(to_small_caps("cancelled — no changes made."))
+
+
+async def cb_help_update_backup_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    is_own = is_owner(update.effective_user.id)
+    text = (
+        "<blockquote expandable>"
+        "<u>📦 " + to_small_caps("update backup — how it works") + "</u>\n\n"
+        + to_small_caps("normally, pushing a new bot.py to github wipes the live data — every setting, every menu edit, every saved user — because most free hosts start from a clean, empty disk on every deploy.") + "\n\n"
+        "<u>➤ " + to_small_caps("step 1 — export") + "</u>\n"
+        + to_small_caps("before you push a code update, run 📦 update backup from the admin panel (or /updatebackup). the bot sends you 2 files:") + "\n"
+        "  • <code>" + SEED_SETTINGS_FILE + "</code> — " + to_small_caps("every setting, menu, admin, group, ticket etc. (no users)") + "\n"
+        "  • <code>" + SEED_USERS_FILE + "</code> — " + to_small_caps("the full user list") + "\n\n"
+        "<u>➤ " + to_small_caps("step 2 — commit") + "</u>\n"
+        + to_small_caps("add both files into your github repo, in the same folder as bot.py, using those exact names, then push your updated code.") + "\n\n"
+        "<u>➤ " + to_small_caps("step 3 — auto-restore") + "</u>\n"
+        + to_small_caps("on the next startup, if the host has no existing data (fresh/wiped disk), the bot automatically reads both files and restores everything by itself — no restore command, no manual upload.") + "\n\n"
+        "<u>➤ " + to_small_caps("safety") + "</u>\n"
+        + to_small_caps("if the bot already has live data (a host with persistent storage), the seed files are ignored — your current live data is never overwritten automatically.")
+        + ("\n\n🔒 " + to_small_caps("only the owner can actually run the export (📦 update backup / /updatebackup) — this help screen is visible to every admin.") if not is_own else "")
+        + "</blockquote>"
+    )
+    kb = InlineKeyboardMarkup(
+        [[styled_button("🔙 Back", callback_data="nav:help_admin")]]
+        if not is_own else
+        [[styled_button("📦 Run Update Backup Now", callback_data="adm_update_backup")],
+         [styled_button("🔙 Back", callback_data="nav:help_admin")]]
+    )
+    await query.edit_message_text(text, parse_mode="HTML", reply_markup=kb)
+
+
 async def cb_adm_restore_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    if not is_owner(update.effective_user.id):
+        await query.answer("🔒 " + to_small_caps("only the owner can restore a backup."), show_alert=True)
+        return
     await query.message.reply_text(
         to_small_caps("📥 restore backup") + "\n\n"
         + to_small_caps("send me the .json or .json.enc backup file directly in this dm (the one exported via /database). ")
@@ -6823,12 +7934,13 @@ def _build_adm_premium_view():
         f"👥 Active premium users: {premium_count}",
         "",
     ]
+    # Main controls stay at the top; every ➕ Add action is grouped at the
+    # bottom so the management flow is cleaner on mobile.
     kb_rows = [
         [styled_button(toggle_label("🔀 Master Switch", s.get('premium_enabled')),
                         callback_data="stgl:premium_enabled:adm_premium")],
         [styled_button("✏️ Set Daily Limit", callback_data="adm_set_dailylimit")],
         [styled_button("👥 See Premium Users", callback_data="adm_premium_users")],
-        [styled_button("➕ Add Premium User (by ID)", callback_data="adm_premium_grant")],
         [styled_button("💳 UPI Settings", callback_data="adm_upi")],
     ]
     if not plans:
@@ -6849,6 +7961,8 @@ def _build_adm_premium_view():
                               callback_data=f"adm_plan_toggle:{p['id']}"),
                 styled_button("🗑", callback_data=f"adm_plan_del:{p['id']}"),
             ])
+    # Keep all Add actions together at the bottom.
+    kb_rows.append([styled_button("➕ Add Premium User (By ID)", callback_data="adm_premium_grant")])
     kb_rows.append([styled_button("➕ Add Plan", callback_data="adm_plan_add")])
     kb_rows.append(back_row())
     kb_rows.append(home_row())
@@ -7300,11 +8414,19 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
             await update.message.reply_text(to_small_caps("please send a valid numeric user id."))
             return
         new_id = int(text)
-        if new_id not in BOT_DATA["admins"]:
-            BOT_DATA["admins"].append(new_id)
-            save_data()
-        await update.message.reply_text(to_small_caps(f"✅ {new_id} is now an admin."))
-        await log_event(context, f"👤 Admin added: {new_id} (by {update.effective_user.id})")
+        if new_id in BOT_DATA["admins"]:
+            await update.message.reply_text(to_small_caps(f"{new_id} is already an admin — use ✏️ edit access instead."))
+            return
+        context.user_data["newadmin_id_draft"] = new_id
+        context.user_data["newadmin_perms_draft"] = set()
+        text_out = (
+            "➕ " + to_small_caps(f"choose access for admin {new_id}") + "\n\n"
+            + to_small_caps("tap a section to toggle it, then save. only what you tick here is what they'll be able to open.") + "\n\n"
+            + _perm_summary_text(set())
+        )
+        await update.message.reply_text(
+            text_out, reply_markup=_perm_picker_keyboard(set(), "newadmin_confirm", "newadmin_cancel", "newadmin_perm")
+        )
 
     elif awaiting == "remove_admin_id":
         context.user_data.pop("awaiting", None)
@@ -7314,6 +8436,7 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
         rem_id = int(text)
         if rem_id in BOT_DATA["admins"]:
             BOT_DATA["admins"].remove(rem_id)
+            BOT_DATA.get("admin_permissions", {}).pop(str(rem_id), None)
             save_data()
         await update.message.reply_text(f"✅ {rem_id} admin list se hata diya.")
         await log_event(context, f"👤 Admin removed: {rem_id} (by {update.effective_user.id})")
@@ -7349,7 +8472,7 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
             channel = raw
             if not channel.lstrip("-").isdigit() and not channel.startswith("@"):
                 channel = "@" + channel
-            target["chat_id"] = channel
+            target["chat_id"] = normalize_channel_id(channel)
         targets = _force_join_targets()
         key = str(target.get("chat_id") or target.get("link"))
         if any(str(x.get("chat_id") or x.get("link")) == key for x in targets):
@@ -7360,13 +8483,19 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
         BOT_DATA["settings"]["force_join_channel"] = targets[0].get("chat_id") if targets else None
         save_data()
         refreshed = await refresh_panel_after_save(context, "force_join", lambda: _build_adm_force_join_view())
-        await update.message.reply_text(
-            f"✅ Added force-join target: {raw}\n\n"
-            "Add another from the panel if needed. For private link-only channels, "
-            "membership can be confirmed through join-request updates; for normal "
-            "membership checks, configure the channel ID/@username and make the bot admin."
-            + ("" if refreshed else "\n(Reopen the panel to confirm.)")
+        confirm_msg = await update.message.reply_text(
+            "✅ " + to_title_small_caps(f"Added Force-Join Target: {raw}") + "\n\n"
+            + "<blockquote>"
+            + to_title_small_caps(
+                "Add Another From The Panel If Needed. For Private Link-Only Channels, "
+                "Membership Can Be Confirmed Through Join-Request Updates; For Normal "
+                "Membership Checks, Configure The Channel ID/@Username And Make The Bot Admin."
+            )
+            + "</blockquote>"
+            + ("" if refreshed else "\n" + to_small_caps("(reopen the panel to confirm.)")),
+            parse_mode="HTML",
         )
+        _track_ephemeral(context, confirm_msg)
 
     elif awaiting == "share_url":
         context.user_data.pop("awaiting", None)
@@ -7407,6 +8536,33 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
         save_data()
         refreshed = await refresh_panel_after_save(context, "logger_channel", _build_adm_logger_channel_view)
         await update.message.reply_text(f"✅ Logger channel set to {chat_id} and enabled." + ("" if refreshed else "\n(reopen the logger panel to confirm)"))
+
+    elif awaiting == "activity_channel_id":
+        context.user_data.pop("awaiting", None)
+        chat_id = None
+        forward_origin = getattr(update.message, "forward_origin", None)
+        if forward_origin is not None:
+            chat_obj = getattr(forward_origin, "chat", None)
+            if chat_obj is not None:
+                chat_id = chat_obj.id
+        if chat_id is None:
+            legacy_fwd = getattr(update.message, "forward_from_chat", None)
+            if legacy_fwd is not None:
+                chat_id = legacy_fwd.id
+        if chat_id is None and text.lstrip("-").isdigit():
+            chat_id = int(text)
+        if chat_id is None:
+            await update.message.reply_text(
+                to_small_caps("channel not detected. either forward a message from the channel, ")
+                + to_small_caps("or type the numeric id (-100...).")
+            )
+            context.user_data["awaiting"] = "activity_channel_id"
+            return
+        BOT_DATA["settings"]["activity_channel_id"] = chat_id
+        BOT_DATA["settings"]["activity_channel_enabled"] = True
+        save_data()
+        refreshed = await refresh_panel_after_save(context, "activity_channel", _build_adm_activity_channel_view)
+        await update.message.reply_text(f"✅ Activity channel set to {chat_id} and enabled." + ("" if refreshed else "\n(reopen the activity panel to confirm)"))
 
     elif awaiting == "daily_limit":
         context.user_data.pop("awaiting", None)
@@ -7516,7 +8672,7 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
             return
         context.user_data.setdefault("new_plan", {})["name"] = name
         context.user_data["awaiting"] = "plan_step_days"
-        await update.message.reply_text(to_small_caps("step 2/4 — plan kitne din chalega? (e.g. 30)"))
+        await update.message.reply_text("Step 2/4 — Plan kitne din chalega? (e.g. 30)")
 
     elif awaiting == "plan_step_days":
         if not text.strip().isdigit() or int(text.strip()) <= 0:
@@ -7575,12 +8731,11 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
             if plan["price_stars"]:
                 price_bits.append(f"{plan['price_stars']}⭐")
             refreshed = await refresh_panel_after_save(context, "premium", _build_adm_premium_view)
-            confirmation = "✅ " + to_small_caps(
-                f"plan added: {plan['name']} — {' / '.join(price_bits)} — {plan['days']}d — turned on."
-            ) + "\n" + to_small_caps("it's now visible to users in 📊 my usage (above the share button).")
-            if not refreshed:
-                confirmation += "\n" + to_small_caps("(reopen the premium panel to confirm)")
-            await update.message.reply_text(confirmation)
+            await update.message.reply_text(
+                f"✅ Plan added: {plan['name']} — {' / '.join(price_bits)} — {plan['days']}d — turned ON.\n"
+                "It's now visible to users in 📊 My Usage (above the Share button)."
+                + ("" if refreshed else "\n(reopen the premium panel to confirm)")
+            )
 
     elif awaiting == "reset_all_passcode":
         context.user_data.pop("awaiting", None)
@@ -7836,6 +8991,66 @@ async def cmd_database(update: Update, context: ContextTypes.DEFAULT_TYPE):
     os.remove(path)
 
 
+async def send_update_backup(bot, chat_id):
+    """The 📦 Update Backup system. Sends TWO plain (never encrypted) JSON
+    files, with fixed names so they can be committed straight into the
+    GitHub repo next to bot.py, unchanged:
+
+      • bot_settings_seed.json — everything EXCEPT users (menus, settings,
+        admins, groups, tickets, broadcast log, metrics, etc.)
+      • bot_users_seed.json    — just the full user list/info.
+
+    Workflow: before pushing a code update, run this (📦 Update Backup in
+    the admin panel, or /updatebackup) → download both files → add/commit
+    them into the repo with these exact names → push. On the next deploy,
+    if the host has no existing data (see _apply_seed_files_if_present in
+    load_data()), the bot auto-restores everything from these two files —
+    no manual DM-restore step needed."""
+    settings_data = {k: v for k, v in BOT_DATA.items() if k != "users"}
+    users_data = {"users": BOT_DATA.get("users", {})}
+
+    ts = int(time.time())
+    settings_path = os.path.join(tempfile.gettempdir(), f"update_backup_settings_{ts}.json")
+    users_path = os.path.join(tempfile.gettempdir(), f"update_backup_users_{ts}.json")
+    with open(settings_path, "w", encoding="utf-8") as f:
+        json.dump(settings_data, f, ensure_ascii=False, indent=2)
+    with open(users_path, "w", encoding="utf-8") as f:
+        json.dump(users_data, f, ensure_ascii=False, indent=2)
+
+    intro = to_small_caps(
+        "📦 update backup — 2 files, exact names required. put both next to "
+        "bot.py in your github repo and commit them BEFORE pushing a new "
+        f"version:\n\n• {SEED_SETTINGS_FILE}\n• {SEED_USERS_FILE}\n\n"
+        "on the next deploy, if the host has no existing data, the bot "
+        "auto-loads these back in on startup. no manual restore needed."
+    )
+    await bot.send_message(chat_id, intro)
+    with open(settings_path, "rb") as f:
+        await bot.send_document(chat_id, document=f, filename=SEED_SETTINGS_FILE)
+    with open(users_path, "rb") as f:
+        await bot.send_document(
+            chat_id, document=f, filename=SEED_USERS_FILE,
+            caption=f"👥 {to_small_caps('users in this file')}: {len(BOT_DATA.get('users', {}))}",
+        )
+    os.remove(settings_path)
+    os.remove(users_path)
+
+
+async def cmd_updatebackup(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_owner(update.effective_user.id):
+        return
+    await send_update_backup(context.bot, update.effective_chat.id)
+
+
+async def cb_adm_update_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not is_owner(update.effective_user.id):
+        await query.answer("🔒 " + to_small_caps("owner only."), show_alert=True)
+        return
+    await query.answer("✅ " + to_small_caps("building update backup..."))
+    await send_update_backup(context.bot, update.effective_chat.id)
+
+
 async def cmd_exportusers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """CSV export of users."""
     if not is_owner(update.effective_user.id):
@@ -7982,18 +9197,18 @@ async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ram = get_ram_percent()
         disk = get_disk_percent()
 
-        lines = [f"↬ ᴜᴩᴛɪᴍᴇ : {human_uptime_full()}"]
+        lines = [f"↬ {to_title_small_caps('Uptime')} : {human_uptime_full()}"]
         if ram is not None:
-            lines.append(f"↬ ʀᴀᴍ : {ram:.1f}%")
+            lines.append(f"↬ {to_title_small_caps('RAM')} : {ram:.1f}%")
         if cpu is not None:
-            lines.append(f"↬ ᴄᴩᴜ : {cpu:.1f}%")
+            lines.append(f"↬ {to_title_small_caps('CPU')} : {cpu:.1f}%")
         if disk is not None:
-            lines.append(f"↬ ᴅɪsᴋ : {disk:.1f}%")
-        lines.append(f"↬ sᴛᴏʀᴀɢᴇ : {backend}")
-        lines.append(f"↬ sᴇʀᴠᴇʀ ᴛɪᴍᴇ : {now_ist_str('%d %b %Y, %H:%M:%S')} IST")
+            lines.append(f"↬ {to_title_small_caps('Disk')} : {disk:.1f}%")
+        lines.append(f"↬ {to_title_small_caps('Storage')} : {to_title_small_caps(backend)}")
+        lines.append(f"↬ {to_title_small_caps('Server Time')} : {now_ist_str('%d %b %Y, %H:%M:%S')} IST")
 
         quote_body = html.escape("\n".join(lines))
-        text = f"🏓 <b>Pong!</b> {ms}ms\n\n<blockquote>{quote_body}</blockquote>"
+        text = f"🏓 <b>{to_title_small_caps('Pong!')}</b> {ms}ms\n\n<blockquote>{quote_body}</blockquote>"
         await msg.edit_text(text, parse_mode="HTML")
     else:
         await msg.edit_text(f"🏓 Pong! {ms}ms")
@@ -8228,6 +9443,17 @@ async def handle_restore_upload(update: Update, context: ContextTypes.DEFAULT_TY
         os.remove(raw_path)
         return
 
+    # 📦 Update Backup split files — sent one at a time, each merges into
+    # the CURRENT live data instead of replacing everything (unlike a full
+    # combined /database backup, which replaces it all).
+    if fname == SEED_SETTINGS_FILE:
+        incoming = dict(incoming)
+        incoming["users"] = BOT_DATA.get("users", {})
+    elif fname == SEED_USERS_FILE:
+        merged_incoming = json.loads(json.dumps(BOT_DATA))
+        merged_incoming["users"] = incoming.get("users", incoming)
+        incoming = merged_incoming
+
     if not set(DEFAULT_DATA.keys()).issubset(set(incoming.keys())):
         await update.message.reply_text(to_small_caps("❌ this doesn't look like a valid backup file. restore cancelled."))
         os.remove(raw_path)
@@ -8371,6 +9597,23 @@ async def global_error_handler(update: object, context: ContextTypes.DEFAULT_TYP
     except Exception:
         pass
 
+    # Urgent/critical errors go straight to every admin's DM, unconditionally
+    # — this does NOT check the Logger Channel toggle (log_event above does),
+    # so an admin who never bothered configuring a logger channel still finds
+    # out immediately when something actually breaks, instead of it only
+    # showing up next time they happen to open Activity Log.
+    if kind == "unhandled":
+        try:
+            await dm_all_admins(
+                context,
+                "🚨 " + to_title_small_caps("Urgent Alert") + "\n\n"
+                + f"{to_title_small_caps('Type')} : {html.escape(update_type)}\n"
+                + f"{to_title_small_caps('Error')} : {html.escape(err_text[:300])}",
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
+
 
 SCREEN_RENDERERS.update(
     {
@@ -8386,6 +9629,7 @@ SCREEN_RENDERERS.update(
         "adm_danger": _render_adm_danger,
         "adm_owner_contact": _render_adm_owner_contact,
         "adm_logger_channel": _render_adm_logger_channel,
+        "adm_activity_channel": _render_adm_activity_channel,
         "adm_force_join": _render_adm_force_join,
         "adm_premium": _render_adm_premium,
         "adm_upi": _render_adm_upi,
@@ -8398,6 +9642,7 @@ SCREEN_RENDERERS.update(
         "adm_activity": _render_adm_activity,
         "adm_selftest": _render_adm_selftest,
         "adm_notifications": _render_adm_notifications,
+        "ai_check": _render_ai_check,
     }
 )
 
@@ -8537,6 +9782,7 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("dbstatus", cmd_dbstatus))
     app.add_handler(CommandHandler("health", cmd_health))
     app.add_handler(CommandHandler("database", cmd_database))
+    app.add_handler(CommandHandler("updatebackup", cmd_updatebackup))
     app.add_handler(CommandHandler("export", cmd_export))
     app.add_handler(CommandHandler("exportusers", cmd_exportusers))
     app.add_handler(CommandHandler("exportpdf", cmd_exportpdf))
@@ -8554,6 +9800,7 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(cb_adm_owner_contact_set, pattern="^adm_owner_contact_set$"))
     app.add_handler(CallbackQueryHandler(cb_adm_owner_contact_clear, pattern="^adm_owner_contact_clear$"))
     app.add_handler(CallbackQueryHandler(cb_adm_logger_channel_set, pattern="^adm_logger_channel_set$"))
+    app.add_handler(CallbackQueryHandler(cb_adm_activity_channel_set, pattern="^adm_activity_channel_set$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_force_join")(cb_adm_force_join), pattern="^adm_force_join$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_leaderboard")(cb_adm_leaderboard), pattern="^adm_leaderboard$"))
     app.add_handler(CallbackQueryHandler(cb_adm_post_leaderboard, pattern="^adm_post_leaderboard$"))
@@ -8611,6 +9858,7 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(cb_adm_back, pattern="^adm_back$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_stats")(cb_adm_stats), pattern="^adm_stats$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_notifications")(cb_adm_notifications), pattern="^adm_notifications$"))
+    app.add_handler(CallbackQueryHandler(nav_tracked("ai_check")(cb_ai_check), pattern="^ai_check$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_users")(cb_adm_users), pattern="^adm_users$"))
     app.add_handler(CallbackQueryHandler(cb_adm_users_list, pattern="^adm_users_list$"))
     app.add_handler(CallbackQueryHandler(cb_adm_groups_list, pattern="^adm_groups_list$"))
@@ -8618,6 +9866,7 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(cb_adm_check_user, pattern="^adm_check_user$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_live")(cb_adm_live), pattern="^adm_live$"))
     app.add_handler(CallbackQueryHandler(cb_adm_quickban, pattern="^adm_quickban$"))
+    app.add_handler(CallbackQueryHandler(cb_adm_notify_route_cycle, pattern="^adm_notify_route_cycle$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_broadcast")(cb_adm_broadcast), pattern="^adm_broadcast$"))
     app.add_handler(CallbackQueryHandler(cb_adm_start_broadcast, pattern="^adm_start_broadcast$"))
     app.add_handler(CallbackQueryHandler(cb_adm_start_broadcast_confirm, pattern="^adm_start_broadcast_confirm$"))
@@ -8664,9 +9913,23 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(cb_adm_manage_admins, pattern="^adm_manage_admins$"))
     app.add_handler(CallbackQueryHandler(cb_adm_add_admin, pattern="^adm_add_admin$"))
     app.add_handler(CallbackQueryHandler(cb_adm_remove_admin, pattern="^adm_remove_admin$"))
+    app.add_handler(CallbackQueryHandler(cb_newadmin_toggle, pattern="^newadmin_perm:"))
+    app.add_handler(CallbackQueryHandler(cb_newadmin_all, pattern="^newadmin_perm_all$"))
+    app.add_handler(CallbackQueryHandler(cb_newadmin_none, pattern="^newadmin_perm_none$"))
+    app.add_handler(CallbackQueryHandler(cb_newadmin_confirm, pattern="^newadmin_confirm$"))
+    app.add_handler(CallbackQueryHandler(cb_newadmin_cancel, pattern="^newadmin_cancel$"))
+    app.add_handler(CallbackQueryHandler(cb_admperm_edit, pattern="^admperm_edit:"))
+    app.add_handler(CallbackQueryHandler(cb_editperm_toggle, pattern="^editperm_perm:"))
+    app.add_handler(CallbackQueryHandler(cb_editperm_all, pattern="^editperm_perm_all$"))
+    app.add_handler(CallbackQueryHandler(cb_editperm_none, pattern="^editperm_perm_none$"))
+    app.add_handler(CallbackQueryHandler(cb_editperm_confirm, pattern="^editperm_confirm$"))
+    app.add_handler(CallbackQueryHandler(cb_editperm_cancel, pattern="^editperm_cancel$"))
     app.add_handler(CallbackQueryHandler(cb_adm_restore_info, pattern="^adm_restore_info$"))
+    app.add_handler(CallbackQueryHandler(cb_help_update_backup_info, pattern="^help_update_backup_info$"))
+    app.add_handler(CallbackQueryHandler(cb_adm_update_backup, pattern="^adm_update_backup$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_owner_contact")(cb_adm_owner_contact), pattern="^adm_owner_contact$"))
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_logger_channel")(cb_adm_logger_channel), pattern="^adm_logger_channel$"))
+    app.add_handler(CallbackQueryHandler(nav_tracked("adm_activity_channel")(cb_adm_activity_channel), pattern="^adm_activity_channel$"))
 
     app.add_handler(CallbackQueryHandler(nav_tracked("adm_premium")(cb_adm_premium), pattern="^adm_premium$"))
     app.add_handler(CallbackQueryHandler(cb_adm_premium_users, pattern="^adm_premium_users$"))
