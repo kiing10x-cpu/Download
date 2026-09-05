@@ -2812,9 +2812,8 @@ async def cb_global_button_gate(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 LANG_NAMES = {
-    "en": "English", "es": "Español",
-    "fr": "Français", "ar": "العربية", "pt": "Português",
-    "id": "Indonesia", "bn": "বাংলা", "ur": "اردو", "ru": "Русский",
+    "en": "English",
+    "hi": "हिन्दी",
 }
 
 
@@ -2842,28 +2841,18 @@ async def _send_language_picker(context: ContextTypes.DEFAULT_TYPE, chat_id: int
 
 
 def build_language_keyboard() -> InlineKeyboardMarkup:
-    # Show every language configured by the bot, plus the built-in default.
-    # Keep the layout compact and consistent with the existing button styling.
-    configured = BOT_DATA["settings"].get("languages", [])
-    codes = []
-    for code in ("en", "es", "fr", "ar", "ru", "pt", "id", "bn", "ur"):
-        if code not in codes and (code in configured or code == "en"):
-            codes.append(code)
-    # If an admin has configured additional supported languages, include them.
-    for code in configured:
-        if code not in codes and code in LANG_NAMES:
-            codes.append(code)
-    # Build every button (languages + the trailing "Default" entry) as one
-    # flat list first, then pair them up two-per-row — this way "Default"
-    # fills in next to the last odd-one-out language instead of always
-    # getting its own lonely full-width row.
-    buttons = [
-        styled_button(to_small_caps(LANG_NAMES.get(c, c)), callback_data=f"setlang:{c}", style="primary")
-        for c in codes
-    ]
-    buttons.append(styled_button("✨ " + to_small_caps("Default"), callback_data="setlang:default", style="success"))
-    rows = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
-    return InlineKeyboardMarkup(rows)
+    """Show only हिन्दी and English side-by-side.
+
+    English is the bot's built-in/default language: selecting it stores
+    ``en`` explicitly so the existing English text and functionality are
+    used everywhere. There is intentionally no separate Default button.
+    """
+    return InlineKeyboardMarkup([
+        [
+            styled_button("हिन्दी", callback_data="setlang:hi", style="primary"),
+            styled_button("English", callback_data="setlang:en", style="success"),
+        ]
+    ])
 
 
 async def show_post_onboarding(context: ContextTypes.DEFAULT_TYPE, chat_id: int, uid: str):
@@ -3047,7 +3036,9 @@ async def cb_setlang(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     code = query.data.split(":", 1)[1]
     uid = str(update.effective_user.id)
-    lang_value = None if code == "default" else code
+    # English is the bot's actual default/base language, so keep it explicit
+    # instead of relying on a separate "Default" option.
+    lang_value = code if code in ("en", "hi") else "en"
     if uid in BOT_DATA["users"]:
         BOT_DATA["users"][uid]["lang"] = lang_value
         # Belt-and-suspenders: a selection from any source means the picker
