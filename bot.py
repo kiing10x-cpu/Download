@@ -2434,6 +2434,14 @@ async def render_menu(context: ContextTypes.DEFAULT_TYPE, chat_id: int, menu_id:
 
     buttons = (translation or {}).get("buttons") or menu.get("buttons", [])
     text = (translation or {}).get("text") or menu.get("text", "")
+    # FIX — Telegram rejects text messages with an empty body
+    # ("Text must be non-empty"). When a menu's text is blank and it has
+    # no image, that BadRequest used to abort the whole send/edit before
+    # the keyboard was ever attached — which is why the buttons appeared
+    # to be missing. Fall back to a placeholder so the message (and its
+    # buttons) always goes out.
+    if not (text and text.strip()) and not menu.get("image_file_id"):
+        text = to_small_caps(f"⚠️ menu '{menu_id}' has no text set.")
     kb = build_keyboard_from_buttons(buttons, menu_id)
     parse_mode = menu.get("parse_mode") or None
     image = menu.get("image_file_id")
