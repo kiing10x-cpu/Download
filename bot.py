@@ -3074,10 +3074,18 @@ async def show_post_onboarding(context: ContextTypes.DEFAULT_TYPE, chat_id: int,
     if not BOT_DATA["users"].get(uid, {}).get("reply_kb_sent"):
         try:
             await context.bot.send_message(chat_id, "⠀", reply_markup=main_reply_keyboard(is_admin(int(uid)), BOT_DATA["users"].get(uid, {}).get("lang")))
+            # FIX — flag used to be set to True even when the send above
+            # failed (it lived outside this try block), so a single
+            # transient failure (network blip, temporary block, etc.) on
+            # the very first /start meant that user's persistent bottom
+            # keyboard was marked "already sent" forever and never
+            # actually appeared again. Now the flag is only persisted on
+            # a confirmed successful send; a failure leaves it unset so
+            # the next /start retries sending the keyboard.
+            BOT_DATA["users"].setdefault(uid, {})["reply_kb_sent"] = True
+            save_data()
         except Exception:
             pass
-        BOT_DATA["users"].setdefault(uid, {})["reply_kb_sent"] = True
-        save_data()
     return sent
 
 
