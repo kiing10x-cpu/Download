@@ -1675,6 +1675,31 @@ def _apply_reply_kb_resend_migration():
     save_data()
 
 
+def _apply_reply_kb_resend_migration_v2():
+    """Second one-time resend pass, same idea as v1 above but under its own
+    flag ("reply_kb_resend_migration_v2_done").
+
+    v1 already fired once on an earlier deploy, so its own marker is
+    already stuck at True in the saved data/DB — meaning v1 now silently
+    no-ops on every startup, even though `reply_kb_sent` may have drifted
+    back to True-for-everyone again since then (e.g. it gets set True the
+    moment the keyboard send succeeds, and stays True across any later
+    code deploy, since deploying new code does not touch saved user data).
+    That's exactly why existing users stopped seeing the bottom keyboard
+    after this latest upgrade even though nothing about the keyboard
+    itself was removed. This repeats the same one-time reset under a new
+    flag so it actually runs again on this deploy specifically."""
+    settings = BOT_DATA.setdefault("settings", {})
+    if settings.get("reply_kb_resend_migration_v2_done"):
+        return
+    users = BOT_DATA.get("users", {})
+    for u in users.values():
+        if isinstance(u, dict) and u.get("reply_kb_sent"):
+            u["reply_kb_sent"] = False
+    settings["reply_kb_resend_migration_v2_done"] = True
+    save_data()
+
+
 def load_data():
     global BOT_DATA
     col = get_mongo_collection()
@@ -1698,6 +1723,7 @@ def load_data():
                 col.update_one({"_id": "bot_data"}, {"$set": BOT_DATA}, upsert=True)
         _apply_language_pack_migration()
         _apply_reply_kb_resend_migration()
+        _apply_reply_kb_resend_migration_v2()
         return
 
     if os.path.exists(DATA_FILE):
@@ -1710,6 +1736,7 @@ def load_data():
         save_data()
     _apply_language_pack_migration()
     _apply_reply_kb_resend_migration()
+    _apply_reply_kb_resend_migration_v2()
 
 
 def save_data():
