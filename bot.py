@@ -677,14 +677,14 @@ STR = {
 # with what the reply-keyboard button actually sends back — to_small_caps()
 # is idempotent (re-applying it to already-styled text is a safe no-op), so
 # this can't get out of sync with styled_kb_button()'s own wrapping below.
-RKB_DOWNLOAD = to_title_small_caps("Download Reel")
-RKB_USAGE = to_title_small_caps("My Usage")
-RKB_GIFT = to_title_small_caps("Send A Gift")
-RKB_LANGUAGE = to_title_small_caps("Language")
-RKB_DEVELOPER = to_title_small_caps("Developer")
-RKB_HOWTO = to_title_small_caps("How To Use")
-RKB_SUPPORT = to_title_small_caps("Support")
-RKB_ADMINPANEL = to_title_small_caps("Admin Panel")
+RKB_DOWNLOAD = "📥 " + to_title_small_caps("Download Reel")
+RKB_USAGE = "📊 " + to_title_small_caps("My Usage")
+RKB_GIFT = "🎁 " + to_title_small_caps("Send A Gift")
+RKB_LANGUAGE = "🌐 " + to_title_small_caps("Language")
+RKB_DEVELOPER = "👨‍💻 " + to_title_small_caps("Developer")
+RKB_HOWTO = "📖 " + to_title_small_caps("How To Use")
+RKB_SUPPORT = "🎧 " + to_title_small_caps("Support")
+RKB_ADMINPANEL = "⚙️ " + to_title_small_caps("Admin Panel")
 
 
 def main_reply_keyboard(is_admin_user: bool = False, lang: str = None) -> ReplyKeyboardMarkup:
@@ -702,7 +702,13 @@ def main_reply_keyboard(is_admin_user: bool = False, lang: str = None) -> ReplyK
     ]
     if is_admin_user:
         rows.append([styled_kb_button(labels["admin"], style="primary")])
-    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
+    return ReplyKeyboardMarkup(
+        rows,
+        resize_keyboard=True,
+        one_time_keyboard=False,
+        is_persistent=True,
+        input_field_placeholder="Choose an option from the menu below…",
+    )
 
 
 
@@ -1675,31 +1681,6 @@ def _apply_reply_kb_resend_migration():
     save_data()
 
 
-def _apply_reply_kb_resend_migration_v2():
-    """Second one-time resend pass, same idea as v1 above but under its own
-    flag ("reply_kb_resend_migration_v2_done").
-
-    v1 already fired once on an earlier deploy, so its own marker is
-    already stuck at True in the saved data/DB — meaning v1 now silently
-    no-ops on every startup, even though `reply_kb_sent` may have drifted
-    back to True-for-everyone again since then (e.g. it gets set True the
-    moment the keyboard send succeeds, and stays True across any later
-    code deploy, since deploying new code does not touch saved user data).
-    That's exactly why existing users stopped seeing the bottom keyboard
-    after this latest upgrade even though nothing about the keyboard
-    itself was removed. This repeats the same one-time reset under a new
-    flag so it actually runs again on this deploy specifically."""
-    settings = BOT_DATA.setdefault("settings", {})
-    if settings.get("reply_kb_resend_migration_v2_done"):
-        return
-    users = BOT_DATA.get("users", {})
-    for u in users.values():
-        if isinstance(u, dict) and u.get("reply_kb_sent"):
-            u["reply_kb_sent"] = False
-    settings["reply_kb_resend_migration_v2_done"] = True
-    save_data()
-
-
 def load_data():
     global BOT_DATA
     col = get_mongo_collection()
@@ -1723,7 +1704,6 @@ def load_data():
                 col.update_one({"_id": "bot_data"}, {"$set": BOT_DATA}, upsert=True)
         _apply_language_pack_migration()
         _apply_reply_kb_resend_migration()
-        _apply_reply_kb_resend_migration_v2()
         return
 
     if os.path.exists(DATA_FILE):
@@ -1736,7 +1716,6 @@ def load_data():
         save_data()
     _apply_language_pack_migration()
     _apply_reply_kb_resend_migration()
-    _apply_reply_kb_resend_migration_v2()
 
 
 def save_data():
@@ -3132,20 +3111,23 @@ async def show_post_onboarding(context: ContextTypes.DEFAULT_TYPE, chat_id: int,
         save_data()
         return await _send_language_picker(context, chat_id)
     sent = await render_menu(context, chat_id, "start")
-    if not BOT_DATA["users"].get(uid, {}).get("reply_kb_sent"):
-        try:
-            await context.bot.send_message(chat_id, "⠀", reply_markup=main_reply_keyboard(is_admin(int(uid)), BOT_DATA["users"].get(uid, {}).get("lang")))
-            # FIX — flag used to be set to True even when the send above
-            # failed (it lived outside this try block), so a single
-            # transient failure (network blip, temporary block, etc.) on
-            # the very first /start meant that user's persistent bottom
-            # keyboard was marked "already sent" forever and never
-            # actually appeared again. Now the flag is only persisted on
-            # a confirmed successful send; a failure leaves it unset so
-            # the next /start retries sending the keyboard.
-            BOT_DATA["users"].setdefault(uid, {})["reply_kb_sent"] = True
-            save_data()
-        except Exception as e:
+
+    # Always re-attach the reply keyboard when the user reaches /start.
+    # A saved `reply_kb_sent` flag can become stale after Telegram clients,
+    # language changes, bot updates, or a previously removed keyboard.
+    # Sending the markup again is cheap and guarantees the user sees it.
+    try:
+        await context.bot.send_message(
+            chat_id,
+            "👇 Choose an option from the menu below",
+            reply_markup=main_reply_keyboard(
+                is_admin(int(uid)),
+                BOT_DATA["users"].get(uid, {}).get("lang"),
+            ),
+        )
+        BOT_DATA["users"].setdefault(uid, {})["reply_kb_sent"] = True
+        save_data()
+    except Exception as e:
             # DEBUG — this used to be a bare "except: pass", so if this
             # send ever failed the keyboard would just silently never
             # appear with zero trace anywhere. Now logged both to the
