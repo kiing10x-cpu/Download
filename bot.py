@@ -1651,6 +1651,30 @@ def _apply_language_pack_migration():
         save_data()
 
 
+def _apply_reply_kb_resend_migration():
+    """One-time fix-up, runs once after BOT_DATA is loaded.
+
+    Older code could mark a user's `reply_kb_sent` flag as True even when
+    the persistent bottom keyboard actually failed to send (the flag was
+    set outside the try/except instead of only on success — see the fix
+    in show_post_onboarding). Any user who was affected has that flag
+    stuck at True in the saved data, so simply fixing the code going
+    forward does NOT help them — load_data() still finds reply_kb_sent
+    already True and skips resending. This clears the flag for every
+    user exactly once (guarded by a settings marker so it never re-runs
+    and never keeps re-sending the keyboard on every restart), so the
+    next /start each user sends resends the bottom keyboard for real."""
+    settings = BOT_DATA.setdefault("settings", {})
+    if settings.get("reply_kb_resend_migration_done"):
+        return
+    users = BOT_DATA.get("users", {})
+    for u in users.values():
+        if isinstance(u, dict) and u.get("reply_kb_sent"):
+            u["reply_kb_sent"] = False
+    settings["reply_kb_resend_migration_done"] = True
+    save_data()
+
+
 def load_data():
     global BOT_DATA
     col = get_mongo_collection()
@@ -1673,6 +1697,7 @@ def load_data():
                 _apply_seed_files_if_present()
                 col.update_one({"_id": "bot_data"}, {"$set": BOT_DATA}, upsert=True)
         _apply_language_pack_migration()
+        _apply_reply_kb_resend_migration()
         return
 
     if os.path.exists(DATA_FILE):
@@ -1684,6 +1709,7 @@ def load_data():
         _apply_seed_files_if_present()
         save_data()
     _apply_language_pack_migration()
+    _apply_reply_kb_resend_migration()
 
 
 def save_data():
