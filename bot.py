@@ -3110,8 +3110,20 @@ async def show_post_onboarding(context: ContextTypes.DEFAULT_TYPE, chat_id: int,
             # the next /start retries sending the keyboard.
             BOT_DATA["users"].setdefault(uid, {})["reply_kb_sent"] = True
             save_data()
-        except Exception:
-            pass
+        except Exception as e:
+            # DEBUG — this used to be a bare "except: pass", so if this
+            # send ever failed the keyboard would just silently never
+            # appear with zero trace anywhere. Now logged both to the
+            # console/log file AND to the bot's own Activity Log (via
+            # log_error, same mechanism used elsewhere in the file) so the
+            # actual reason (bad chat_id, malformed keyboard, Telegram
+            # rejecting the request, etc.) is visible instead of a mystery
+            # "buttons just don't show up".
+            log.exception("Persistent bottom keyboard send FAILED for uid=%s chat_id=%s", uid, chat_id)
+            try:
+                log_error("reply_keyboard_send", f"uid={uid} chat_id={chat_id}: {e}")
+            except Exception:
+                pass
     return sent
 
 
