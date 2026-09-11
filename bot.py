@@ -602,6 +602,25 @@ def _message_mentions_this_bot(update: Update, context: ContextTypes.DEFAULT_TYP
     return bool(username and f"@{username}" in text)
 
 
+def _has_audio_stream(path: str) -> bool:
+    """Ask ffmpeg directly whether a downloaded file actually contains an
+    audio stream — Instagram's own codec metadata (surfaced through
+    yt-dlp) isn't always accurate, so a format selector that looks like it
+    has audio can still land a video-only file. This is the ground-truth
+    check used to catch that before a silent reel gets sent to the user.
+    Without ffmpeg available we can't check, so assume it's fine rather
+    than blocking delivery."""
+    if not FFMPEG_PATH or not path or not os.path.exists(path):
+        return True
+    try:
+        result = subprocess.run(
+            [FFMPEG_PATH, "-i", path], capture_output=True, text=True, timeout=30
+        )
+        return bool(re.search(r"Stream #\d+:\d+.*Audio:", result.stderr))
+    except Exception:
+        return True
+
+
 def _safe_filename(value: str, fallback: str = "Instagram_Audio") -> str:
     value = re.sub(r'[\\/:*?"<>|]+', " ", str(value or ""))
     value = re.sub(r"\s+", " ", value).strip(" .")
@@ -653,8 +672,11 @@ def to_title_small_caps(text: str) -> str:
 # v2 build prompt — centralized small-caps strings (Section 10)
 # ----------------------------------------------------------------------------
 STR = {
-    "processing": to_small_caps("processing your reel...") + "\n📥 " + to_small_caps("fetching") + " • 🔄 "
-                  + to_small_caps("optimizing") + " • ✅ " + to_small_caps("almost done"),
+    # Per request: the "processing" message shown while a reel downloads is
+    # ONLY this single line — no fetching/optimizing/percentage text under
+    # it (see _animate_status() below, which now stays static instead of
+    # periodically rewriting this message).
+    "processing": to_small_caps("processing your reel..."),
     "done": "✅ " + to_small_caps("your reel is ready!") + "\n🎬 " + to_small_caps("saved and sent below"),
     "usage_title": to_small_caps("usage overview"),
     "how_to_use": (
@@ -677,14 +699,19 @@ STR = {
 # with what the reply-keyboard button actually sends back — to_small_caps()
 # is idempotent (re-applying it to already-styled text is a safe no-op), so
 # this can't get out of sync with styled_kb_button()'s own wrapping below.
-RKB_DOWNLOAD = "📥 " + to_title_small_caps("Download Reel")
-RKB_USAGE = "📊 " + to_title_small_caps("My Usage")
-RKB_GIFT = "🎁 " + to_title_small_caps("Send A Gift")
-RKB_LANGUAGE = "🌐 " + to_title_small_caps("Language")
-RKB_DEVELOPER = "👨‍💻 " + to_title_small_caps("Developer")
-RKB_HOWTO = "📖 " + to_title_small_caps("How To Use")
-RKB_SUPPORT = "🎧 " + to_title_small_caps("Support")
-RKB_ADMINPANEL = "⚙️ " + to_title_small_caps("Admin Panel")
+# Small-caps house style (matches the screenshot: normal capital first
+# letter, small caps for the rest) — kept, but with the leading emoji
+# removed per request. These stay in sync with styled_kb_button()'s own
+# premium_button_text() call below because to_title_small_caps() is
+# idempotent (re-styling an already-styled string is a safe no-op).
+RKB_DOWNLOAD = to_title_small_caps("Download Reel")
+RKB_USAGE = to_title_small_caps("My Usage")
+RKB_GIFT = to_title_small_caps("Send A Gift")
+RKB_LANGUAGE = to_title_small_caps("Language")
+RKB_DEVELOPER = to_title_small_caps("Developer")
+RKB_HOWTO = to_title_small_caps("How To Use")
+RKB_SUPPORT = to_title_small_caps("Support")
+RKB_ADMINPANEL = to_title_small_caps("Admin Panel")
 
 
 def main_reply_keyboard(is_admin_user: bool = False, lang: str = None) -> ReplyKeyboardMarkup:
@@ -958,9 +985,17 @@ def toggle_label(base: str, is_on: bool) -> str:
     return f"{base}: {'✅ ON' if is_on else '❌ OFF'}"
 
 
+_LEADING_EMOJI_RE = re.compile(
+    r"^(?:[\U0001F000-\U0001FFFF\u2190-\u21FF\u2300-\u27BF\u2B00-\u2BFF\uFE0F\u200D]\s*)+"
+)
+
+
 def styled_kb_button(text, style=None):
-    """Reply-keyboard button renderer with premium typography."""
-    text = premium_button_text(text)
+    """Reply-keyboard button renderer — small-caps house style (matches the
+    original look in the screenshot: normal capital first letter + small
+    caps for the rest), with any leading emoji stripped."""
+    clean = _LEADING_EMOJI_RE.sub("", str(text)).strip()
+    text = premium_button_text(clean or str(text))
     if style and SUPPORTS_KB_BUTTON_STYLE:
         return KeyboardButton(text, style=style)
     return KeyboardButton(text)
@@ -3672,19 +3707,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             _progress["stage"] = "optimizing"
 
     async def _animate_status():
+        # Per request: keep the status message static — just
+        # "Processing Your Reel..." — for the whole download instead of
+        # rewriting it every couple seconds with a stage/percentage bar.
+        # _progress is still fed by the yt-dlp progress hook above (kept in
+        # case it's needed again later) but is no longer rendered here.
         try:
-            while True:
-                await asyncio.sleep(2)
-                pct = _progress["pct"]
-                filled = pct // 10
-                bar = "▓" * filled + "░" * (10 - filled)
-                stage_label = to_small_caps(_progress["stage"])
-                try:
-                    await status_msg.edit_text(
-                        to_small_caps("⏳ processing your reel...") + f"\n📥 {stage_label}\n{bar} {pct}%"
-                    )
-                except Exception:
-                    pass
+            await asyncio.Event().wait()
         except asyncio.CancelledError:
             pass
 
@@ -3730,18 +3759,24 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 opts["ffmpeg_location"] = FFMPEG_PATH
         return opts
 
-    def run_download(use_merge: bool):
-        opts = build_ydl_opts(use_merge)
-        try:
-            info = _ytdlp_extract_with_retry(opts, url, download=True)
-        except Exception as first_error:
-            # Instagram occasionally exposes only one extractor-visible stream
-            # for a reel. Retry once with yt-dlp's broadest format selector
-            # instead of failing solely because our quality preference was too
-            # strict. The real exception still reaches logs if this also fails.
-            log.warning("Preferred Instagram format failed; retrying with plain best: %s", first_error)
+    def _resolve_downloaded_path(opts: dict, info: dict) -> str:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            fp = ydl.prepare_filename(info)
+        stem = fp.rsplit(".", 1)[0]
+        for candidate in (fp, stem + ".mp4", stem + ".webm", stem + ".mkv"):
+            if os.path.exists(candidate):
+                return candidate
+        return fp
+
+    def _try_one_format(fmt: str, need_merge: bool):
+        """Download a single format candidate and return (path, info), or
+        (None, None) if the attempt failed outright."""
+        if need_merge:
+            opts = build_ydl_opts(True)
+        else:
             opts = {
-                "format": "best/bestvideo+bestaudio",
+                "format": fmt,
+                "format_sort": ["res", "ext:mp4:m4a", "vcodec:h264", "acodec:aac"],
                 "outtmpl": out_template,
                 "quiet": True,
                 "no_warnings": True,
@@ -3749,17 +3784,65 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             }
             if FFMPEG_PATH:
                 opts["ffmpeg_location"] = FFMPEG_PATH
+        try:
             info = _ytdlp_extract_with_retry(opts, url, download=True)
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            fp = ydl.prepare_filename(info)
-        stem = fp.rsplit(".", 1)[0]
-        for candidate in (fp, stem + ".mp4", stem + ".webm", stem + ".mkv"):
-            if os.path.exists(candidate):
-                fp = candidate
-                break
-        ig_caption = (info.get("description") or "").strip()
-        uploader = (info.get("uploader") or info.get("uploader_id") or "").strip()
-        return fp, ig_caption, uploader
+        except Exception as e:
+            log.warning("Reel format %r failed: %s", fmt, e)
+            return None, None
+        fp = _resolve_downloaded_path(opts, info)
+        return (fp, info) if os.path.exists(fp) else (None, None)
+
+    def run_download(use_merge: bool):
+        # FIX — "bahut reel me audio nahi aata" (many reels arrive with no
+        # audio): a format selector that *looks* fine to yt-dlp can still
+        # land a video-only file in practice (Instagram's own codec
+        # metadata isn't always trustworthy). So instead of trusting the
+        # first successful download, every candidate is verified with
+        # ffmpeg itself (ground truth, same approach already used by the
+        # separate "Get Audio" button below) and — if it turns out silent —
+        # discarded in favor of the next candidate, instead of shipping a
+        # muted reel to the user.
+        candidates = []
+        if use_merge:
+            candidates.append(("bestvideo*+bestaudio/best", True))
+        candidates.append(("best[vcodec!=none][acodec!=none]/best", False))
+        candidates.append(("best/bestvideo+bestaudio", False))
+
+        fallback = None  # (fp, info) of the first successful download, kept
+        # around in case every candidate turns out silent (e.g. the post
+        # genuinely has no sound) — better to still send the video than to
+        # fail outright.
+        for fmt, need_merge in candidates:
+            fp, info = _try_one_format(fmt, need_merge)
+            if not fp:
+                continue
+            if _has_audio_stream(fp):
+                # Clean up the earlier silent fallback attempt, if any.
+                if fallback and fallback[0] != fp and os.path.exists(fallback[0]):
+                    try:
+                        os.remove(fallback[0])
+                    except OSError:
+                        pass
+                ig_caption = (info.get("description") or "").strip()
+                uploader = (info.get("uploader") or info.get("uploader_id") or "").strip()
+                return fp, ig_caption, uploader
+            # No audio detected on this candidate. Keep only the first such
+            # attempt as a fallback and discard any later duplicates so we
+            # don't litter the disk with unused files.
+            if fallback is None:
+                fallback = (fp, info)
+            else:
+                try:
+                    os.remove(fp)
+                except OSError:
+                    pass
+
+        if fallback:
+            fp, info = fallback
+            ig_caption = (info.get("description") or "").strip()
+            uploader = (info.get("uploader") or info.get("uploader_id") or "").strip()
+            return fp, ig_caption, uploader
+        raise RuntimeError("Could not download this reel in any available format.")
 
     file_path = None
     try:
