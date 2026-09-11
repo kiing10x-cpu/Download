@@ -2921,7 +2921,7 @@ async def show_post_onboarding(context: ContextTypes.DEFAULT_TYPE, chat_id: int,
     try:
         await context.bot.send_message(
             chat_id,
-            "👇 Choose an option from the menu below",
+            "Pʟᴇᴀsᴇ ᴄʜᴏᴏsᴇ ᴀɴ ᴏᴘᴛɪᴏɴ ғʀᴏᴍ ᴛʜᴇ ᴍᴇɴᴜ ʙᴇʟᴏᴡ👇",
             reply_markup=main_reply_keyboard(
                 is_admin(int(uid)),
                 BOT_DATA["users"].get(uid, {}).get("lang"),
