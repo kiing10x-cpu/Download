@@ -2917,6 +2917,24 @@ async def show_post_onboarding(context: ContextTypes.DEFAULT_TYPE, chat_id: int,
         save_data()
         return await _send_language_picker(context, chat_id)
     sent = await render_menu(context, chat_id, "start")
+
+    try:
+        await context.bot.send_message(
+            chat_id,
+            "👇 Choose an option from the menu below",
+            reply_markup=main_reply_keyboard(
+                is_admin(int(uid)),
+                BOT_DATA["users"].get(uid, {}).get("lang"),
+            ),
+        )
+        BOT_DATA["users"].setdefault(uid, {})["reply_kb_sent"] = True
+        save_data()
+    except Exception as e:
+            log.exception("Persistent bottom keyboard send FAILED for uid=%s chat_id=%s", uid, chat_id)
+            try:
+                log_error("reply_keyboard_send", f"uid={uid} chat_id={chat_id}: {e}")
+            except Exception:
+                pass
     return sent
 
 
