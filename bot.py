@@ -73,11 +73,6 @@ MONGO_URI = os.environ.get("MONGO_URI", "").strip()
 BACKUP_INTERVAL_HOURS = int(os.environ.get("BACKUP_INTERVAL_HOURS", "12"))
 
 DATA_FILE = "bot_data.json"
-# "Update Backup" seed files — see _apply_seed_files_if_present() and the
-# 📦 Update Backup admin-panel button. Drop both, with these EXACT names,
-# next to bot.py in the GitHub repo before pushing a code update. If the
-# host wipes local storage on deploy (no bot_data.json, empty MongoDB),
-# the bot auto-loads these back in on startup — no manual restore needed.
 SEED_SETTINGS_FILE = "bot_settings_seed.json"
 SEED_USERS_FILE = "bot_users_seed.json"
 BACKUP_DIR = "backups"
@@ -86,15 +81,6 @@ PLUGIN_DIR = "plugins"
 MAX_LOCAL_BACKUPS = 10
 BACKUP_KEY_FILE = "backup.key"  # local Fernet key — never put this in the repo/git
 
-# ----------------------------------------------------------------------------
-# 🗄 Mongo Plugin — lets the owner paste a MongoDB URI live from the Admin
-# Panel (🍭 Update Backup > 🗄 Mongo Plugin) instead of only via the
-# MONGO_URI env var. Precedence: MONGO_URI env var ALWAYS wins if set (it's
-# the infra-managed path) — the panel-set URI is only used when no env var
-# is present. Whatever is set via the panel is persisted to this small
-# local file (separate from bot_data.json) so it survives a restart even
-# before BOT_DATA itself has loaded — same pattern as BACKUP_KEY_FILE.
-# ----------------------------------------------------------------------------
 MONGO_CONFIG_FILE = "mongo_config.json"
 MONGO_URI_SOURCE = "env" if MONGO_URI else None   # "env" | "admin_panel" | None
 MONGO_CONNECTED_AT = None   # ISO timestamp of when this URI was first attached
@@ -114,12 +100,6 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 os.makedirs(PLUGIN_DIR, exist_ok=True)
 
 
-# ffmpeg is only needed when yt-dlp has to MERGE separate video+audio streams.
-# Most Instagram reels are already a single muxed file, so we don't strictly
-# need it — but when a merge is required and ffmpeg is missing, downloads
-# used to crash. We now auto-detect ffmpeg (system install, or the portable
-# binary from the `imageio-ffmpeg` package) and gracefully fall back to a
-# no-merge format if neither is available.
 FFMPEG_PATH = shutil.which("ffmpeg")
 FFPROBE_PATH = shutil.which("ffprobe")
 if not FFMPEG_PATH:
@@ -130,16 +110,6 @@ if not FFMPEG_PATH:
     except Exception:
         FFMPEG_PATH = None
 FFMPEG_AVAILABLE = bool(FFMPEG_PATH)
-# FIX — "audio extraction failed... unable to obtain file audio codec with
-# ffprobe": the imageio-ffmpeg package (our fallback when no system ffmpeg
-# is installed) ships ONLY an ffmpeg binary — no ffprobe. yt-dlp's
-# FFmpegExtractAudio postprocessor was pointed at that binary's folder via
-# ffmpeg_location and silently assumed ffprobe lived right next to it, so
-# every audio extraction on a server without a real system install failed
-# with exactly that ffprobe error. We now track ffprobe's availability
-# separately and do audio extraction ourselves via a direct ffmpeg call
-# (see cb_get_audio) instead of relying on yt-dlp's postprocessor, so a
-# missing ffprobe no longer breaks the Audio button.
 FFPROBE_AVAILABLE = bool(FFPROBE_PATH)
 
 
@@ -193,14 +163,6 @@ else:
         "`pip install imageio-ffmpeg` to always get the absolute best quality."
     )
 
-# ----------------------------------------------------------------------------
-# Local branded QR generation (replaces the old api.qrserver.com URL, which
-# gave a plain black-on-white square and depended on a third-party service
-# being reachable, separately from the bot itself). Same graceful-fallback
-# pattern as ffmpeg above: works best with `qrcode[pil]` installed, degrades
-# to a plain local QR if only `qrcode` is present, and falls all the way
-# back to the old remote-URL QR only if `qrcode` isn't installed at all.
-# ----------------------------------------------------------------------------
 QRCODE_AVAILABLE = False
 QRCODE_STYLED_AVAILABLE = False
 try:
@@ -238,11 +200,6 @@ else:
         "nicer, fully local QR codes that don't depend on a third party."
     )
 
-# ----------------------------------------------------------------------------
-# PDF report (charts) + encrypted backup — same graceful-fallback pattern as
-# qrcode/Pillow above. Neither is a hard requirement to run the bot; the
-# admin panel just tells you what to `pip install` if a feature is missing.
-# ----------------------------------------------------------------------------
 PDF_REPORT_AVAILABLE = False
 try:
     import matplotlib
@@ -276,20 +233,12 @@ except ImportError:
 
 UPI_QR_BRAND_COLOR = (0, 135, 90)  # UPI-style green (kept as a fallback tint)
 
-# Dark neon-card look (matches the requested reference design): near-black
-# card, purple -> cyan gradient border, white rounded panel holding the
-# actual black-on-white QR (max contrast = most reliably scannable), and a
-# circular center logo with a soft colored ring.
 QR_CARD_BG = (10, 10, 14)
 QR_GRADIENT_A = (147, 51, 234)   # purple
 QR_GRADIENT_B = (56, 189, 248)   # cyan
 QR_TEXT_LIGHT = (235, 235, 245)
 QR_TEXT_MUTED = (150, 150, 165)
 
-# Keep the logo comfortably inside the ~30% recovery budget of
-# ERROR_CORRECT_H so the code stays scannable even after we cover the
-# center with a photo. 20% of the QR's own width (not the outer card) is a
-# safe, well-tested ratio.
 QR_LOGO_RATIO = 0.20
 
 
@@ -366,8 +315,6 @@ def _paste_center_logo(qr_img: "Image.Image", logo_bytes: bytes = None):
     mask = Image.new("L", (logo_size, logo_size), 0)
     ImageDraw.Draw(mask).ellipse((0, 0, logo_size, logo_size), fill=255)
 
-    # white buffer ring so no QR module directly under the logo's edge is
-    # left half-covered/ambiguous to a scanner
     ring_size = int(logo_size * 1.22)
     ring_mask = Image.new("L", (ring_size, ring_size), 0)
     ImageDraw.Draw(ring_mask).ellipse((0, 0, ring_size, ring_size), fill=255)
@@ -412,9 +359,6 @@ def _find_unicode_font(bold: bool):
         os.path.expanduser(f"~/.fonts/{name}"),
         f"C:\\Windows\\Fonts\\{name}",
     ]
-    # matplotlib bundles DejaVu Sans and is present in a lot of environments
-    # even when the OS-level font packages aren't installed — cheap extra
-    # chance at a real unicode-capable font before giving up.
     try:
         import matplotlib
         candidates.insert(1, os.path.join(matplotlib.get_data_path(), "fonts", "ttf", name))
@@ -483,10 +427,6 @@ def generate_branded_qr(data: str, amount=None, caption: str = "Scan with any UP
     if not (QRCODE_AVAILABLE and PIL_AVAILABLE):
         return None
     try:
-        # ERROR_CORRECT_H = up to ~30% of the code can be damaged/covered
-        # and it still scans — required here since the center gets covered
-        # by the logo. Plain black-on-white modules (not colored/rounded)
-        # keep contrast at its safest maximum for real-world UPI scanners.
         qr = qrcode.QRCode(
             error_correction=qrcode.constants.ERROR_CORRECT_H,
             box_size=10,
@@ -496,9 +436,6 @@ def generate_branded_qr(data: str, amount=None, caption: str = "Scan with any UP
         qr.make(fit=True)
         qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
 
-        # Always paste a center logo — the real avatar when we have it,
-        # otherwise the vector fallback baked into _paste_center_logo, so
-        # the card never renders with a plain blank center.
         try:
             qr_img = _paste_center_logo(qr_img, logo_bytes)
         except Exception:
@@ -519,8 +456,6 @@ def generate_branded_qr(data: str, amount=None, caption: str = "Scan with any UP
         canvas = Image.new("RGB", (canvas_w, canvas_h), QR_CARD_BG)
         draw = ImageDraw.Draw(canvas)
 
-        # gradient border (purple -> cyan), drawn as a stroke via a mask so
-        # it only affects the outline, not the whole card
         border_mask = Image.new("L", (canvas_w, canvas_h), 0)
         ImageDraw.Draw(border_mask).rounded_rectangle(
             [0, 0, canvas_w - 1, canvas_h - 1], radius=radius, outline=255, width=border_w
@@ -538,8 +473,6 @@ def generate_branded_qr(data: str, amount=None, caption: str = "Scan with any UP
             draw.text(((canvas_w - w) / 2, y), amt_text, fill=QR_TEXT_LIGHT, font=font_big)
             y += header_h
 
-        # white rounded panel behind the QR — maximum contrast for scanning,
-        # matches the reference card's "white square in a dark frame" look
         panel_x, panel_y = pad, y
         draw.rounded_rectangle(
             [panel_x, panel_y, panel_x + panel_w - 1, panel_y + panel_h - 1],
@@ -657,8 +590,6 @@ def to_small_caps(text: str) -> str:
                 out.append(SMALL_CAPS_MAP.get(ch.lower(), ch))
         else:
             out.append(ch)
-            # Start a new styled word after whitespace/punctuation, but not
-            # after an already-styled Unicode small-cap glyph.
             word_start = not (ch.isalnum() or ch in "'’")
     return "".join(out)
 
@@ -672,10 +603,6 @@ def to_title_small_caps(text: str) -> str:
 # v2 build prompt — centralized small-caps strings (Section 10)
 # ----------------------------------------------------------------------------
 STR = {
-    # Per request: the "processing" message shown while a reel downloads is
-    # ONLY this single line — no fetching/optimizing/percentage text under
-    # it (see _animate_status() below, which now stays static instead of
-    # periodically rewriting this message).
     "processing": to_small_caps("processing your reel..."),
     "done": "✅ " + to_small_caps("your reel is ready!") + "\n🎬 " + to_small_caps("saved and sent below"),
     "usage_title": to_small_caps("usage overview"),
@@ -694,16 +621,6 @@ STR = {
     "ticket_closed": lambda tid: "🔒 " + to_small_caps(f"ticket #{tid} closed. need help again? tap") + " 🎧 " + to_small_caps("support"),
 }
 
-# Wrapped in to_small_caps() right here (not just at render time) so the
-# `if rkb_action == "download":` string-matching in handle_text() still lines up
-# with what the reply-keyboard button actually sends back — to_small_caps()
-# is idempotent (re-applying it to already-styled text is a safe no-op), so
-# this can't get out of sync with styled_kb_button()'s own wrapping below.
-# Small-caps house style (matches the screenshot: normal capital first
-# letter, small caps for the rest) — kept, but with the leading emoji
-# removed per request. These stay in sync with styled_kb_button()'s own
-# premium_button_text() call below because to_title_small_caps() is
-# idempotent (re-styling an already-styled string is a safe no-op).
 RKB_DOWNLOAD = to_title_small_caps("Download Reel")
 RKB_USAGE = to_title_small_caps("My Usage")
 RKB_GIFT = to_title_small_caps("Send A Gift")
@@ -733,20 +650,8 @@ def main_reply_keyboard(is_admin_user: bool = False, lang: str = None) -> ReplyK
         rows,
         resize_keyboard=True,
         one_time_keyboard=False,
-        # FIX — "phone ka back button click karne par buttons hat nahi
-        # rahe": is_persistent=True forces Telegram to keep pinning this
-        # keyboard open and pop it back up even after the user dismisses
-        # it, which is why the phone's back button looked like it wasn't
-        # doing anything (unlike a normal bot's keyboard, which closes and
-        # stays closed). Turning persistence off restores the standard
-        # behavior — tapping the phone back button (or the keyboard toggle
-        # icon) closes this keyboard like any other bot's, and the user
-        # can bring it back anytime via the keyboard icon next to the
-        # message box.
         is_persistent=False,
-        input_field_placeholder="Choose an option from the menu below…",
     )
-
 
 
 def _map_alpha_digit(text: str, upper_base: int, lower_base: int, digit_base=None) -> str:
@@ -771,12 +676,6 @@ def to_bold_italic_sans(text: str) -> str:
     return _map_alpha_digit(text, 0x1D63C, 0x1D656, 0x1D7EC)
 
 
-# -----------------------------------------------------------------------------
-# User-facing error messages
-# -----------------------------------------------------------------------------
-# Keep technical exceptions (yt-dlp / ffmpeg / Telegram / network details)
-# in the server/admin logs only. Users should always receive short, clean
-# messages in the same typography as the rest of the bot UI.
 USER_ERR_WRONG_FORMAT = (
     "❌ I" + to_small_caps("nvalid ") + "L" + to_small_caps("ink") + "\n\n"
     + "T" + to_small_caps("he link you sent is not a valid ")
@@ -867,13 +766,6 @@ def premium_button_text(text: str) -> str:
     return to_title_small_caps(str(text))
 
 
-# House style (requested): every inline button shows its emoji/icon at the
-# END of the label instead of at the front — "Support Settings 🛠" instead
-# of "🛠 Support Settings". Rather than hand-editing every one of the
-# hundreds of styled_button(...) call sites across the file, this is done
-# once, centrally, inside styled_button() itself, so it automatically
-# applies to every button everywhere (top-level Admin Panel, every
-# submenu, every confirm/cancel row, etc.) with zero risk of missing one.
 _EMOJI_CHAR_RE = re.compile(
     "[\U0001F000-\U0001FFFF\u2190-\u21FF\u2300-\u27BF\u2B00-\u2BFF\uFE0F\u200D]"
 )
@@ -912,11 +804,6 @@ def styled_button(text, callback_data=None, url=None, style=None):
     return InlineKeyboardButton(premium_button_text(_move_emoji_to_end(text)), **kwargs)
 
 
-# ---- Activity Log: categorization + plain-English fix hints -----------------
-# Every entry logged to BOT_DATA["error_log"] carries a "kind" so the panel
-# can show *what* went wrong, *why* it likely happened, and *how* to fix it —
-# instead of a raw, undated exception string nobody but a developer could
-# read.
 ERROR_KIND_INFO = {
     "force_join": (
         "🔒 Force-Join Check",
@@ -1209,14 +1096,6 @@ DEFAULT_MENUS = {
         "updated_at": None,
         "translations": {},
     },
-    # v10 — these 5 are new: the intro banner (and optional image) for each
-    # of Send A Gift / Language / Developer / Support / Admin Panel is now
-    # admin-editable from Menu & UI too, same as every other menu. Only the
-    # BANNER text/image is stored here — the live functional buttons on
-    # each screen (Stars/UPI, the language list, the developer contact
-    # link, the actual open-a-ticket flow, the admin dashboard's own
-    # buttons) stay code-driven and are appended after this banner, since
-    # those carry real logic that can't be hand-typed as plain buttons.
     "gift": {
         "text": (
             "<blockquote>"
@@ -1289,17 +1168,6 @@ DEFAULT_MENUS = {
     },
 }
 
-# ----------------------------------------------------------------------------
-# language_pack.json — ships next to bot.py with ready-made translations
-# (10 languages) for the language picker plus real per-menu text for start,
-# language, and (a shorter) disclaimer, howto, gift, support, developer,
-# download. Loaded once at import time and merged into DEFAULT_MENUS so
-# fresh installs have working translations out of the box — and again at
-# runtime in load_data() so already-deployed bots pick it up too, without
-# ever overwriting a translation an admin has since customized by hand.
-# Missing/corrupt file is never fatal — the bot just falls back to the
-# untranslated (English) text, same as before this file existed.
-# ----------------------------------------------------------------------------
 _LANGUAGE_PACK_CACHE = None
 
 
@@ -1369,29 +1237,18 @@ def _apply_language_pack_to_menus(menus: dict) -> None:
             continue
         translations = menu.setdefault("translations", {})
         for lang, content in per_lang.items():
-            # "en" is deliberately never stored as a translation — English
-            # always falls through to the base text written in bot.py
-            # (see DEFAULT_MENUS), even if language_pack.json ships an
-            # "en" entry of its own.
             if lang == "en":
                 continue
             if lang not in translations and isinstance(content, dict) and content.get("text"):
                 translations[lang] = {"text": content["text"]}
 
 
-# Populate DEFAULT_MENUS itself at import time, so brand-new installs (no
-# saved bot_data.json / Mongo doc yet) start with working translations.
 _apply_language_pack_to_menus(DEFAULT_MENUS)
 
 DEFAULT_DATA = {
     "users": {},
     "groups": {},
     "admins": [OWNER_ID] if OWNER_ID else [],
-    # Granular admin access — str(admin_id) -> [permission_key, ...]. An
-    # admin with NO entry here (i.e. added before this feature existed) is
-    # treated as full-access, so nobody already trusted silently loses
-    # access. Only admins added from now on get an explicit, owner-chosen
-    # list. See ADMIN_PERMISSIONS / get_admin_perms() / has_admin_perm().
     "admin_permissions": {},
     "blocked": [],
     "menus": json.loads(json.dumps(DEFAULT_MENUS)),
@@ -1404,10 +1261,6 @@ DEFAULT_DATA = {
         "rate_limit_max": 20,
         "rate_limit_window_seconds": 60,
         "inactive_reengage_days": 0,
-        # Pre-populated from language_pack.json (minus "en", which is
-        # always shown anyway) so the language picker has real options out
-        # of the box. Admin can still add/remove languages in Settings >
-        # Languages as before — this is just the starting default.
         "languages": [c for c in _load_language_pack().get("languages", {}) if c != "en"],
         "lock_all_content": False,  # #4 — master forwarding/sharing lock
         "logger_channel_id": None,  # #14 — dedicated logger channel
@@ -1479,9 +1332,6 @@ DEFAULT_DATA = {
     "maintenance_notified": [],   # chat_id(int) list — everyone shown the maintenance notice,
                                    # so we know exactly who to ping with BOT_LIVE_TEXT on toggle-off
     "maintenance_notice_msg": {},  # chat_id(str) -> message_id(int) of that chat's LATEST maintenance
-                                    # notice — lets us delete the old one before sending a new one
-                                    # (no more duplicate notices piling up), and delete it automatically
-                                    # the moment maintenance is switched off.
 }
 
 # ----------------------------------------------------------------------------
@@ -1505,8 +1355,6 @@ def _deep_merge_defaults(data: dict) -> dict:
             merged[k].update(v)
         else:
             merged[k] = v
-    # ensure any newly-added default menus (and newly-added fields on
-    # existing menus, e.g. "translations") exist even in old data files
     for menu_id, menu in DEFAULT_MENUS.items():
         if menu_id not in merged["menus"]:
             merged["menus"][menu_id] = json.loads(json.dumps(menu))
@@ -1843,14 +1691,6 @@ def is_admin(user_id: int) -> bool:
     return is_owner(user_id) or user_id in BOT_DATA.get("admins", [])
 
 
-# ----------------------------------------------------------------------------
-# Granular admin permissions — every grantable Admin Panel section. Keys
-# match the panel's callback_data with the "adm_" prefix stripped (see
-# _perm_key_for_screen). 📦 Update Backup, ☠️ Danger Zone, and 👤 Manage
-# Admins are intentionally NOT in this list — they stay owner-only no
-# matter what, since they can export all data, do irreversible damage, or
-# hand out access, respectively.
-# ----------------------------------------------------------------------------
 ADMIN_PERMISSIONS = [
     ("stats", "📊 Statistics"),
     ("users", "👥 Users & Groups"),
@@ -2038,8 +1878,6 @@ async def is_force_join_ok(context: ContextTypes.DEFAULT_TYPE, user_id: int) -> 
         if key in verified:
             continue
         if not chat_id:
-            # Link-only targets cannot be queried by getChatMember. They can
-            # still be verified through a join-request update.
             return False
         try:
             member = await context.bot.get_chat_member(chat_id=chat_id, user_id=user_id)
@@ -2067,12 +1905,6 @@ async def resolve_force_join_link(context: ContextTypes.DEFAULT_TYPE, channel) -
                 return chat.invite_link
             return await context.bot.export_chat_invite_link(int(ch))
         except Exception as e:
-            # This is the #1 real cause of "no usable join link found" on the
-            # user-facing prompt: either the ID is still wrong (not a real
-            # channel the bot can see), or the bot IS in the channel but
-            # isn't an admin there (export_chat_invite_link needs admin
-            # rights). Logged so it shows up in Activity Log instead of
-            # silently failing with zero diagnosis.
             log.warning("Force-join: could not resolve invite link for %s: %s", ch, e)
             log_error("force_join", f"could not resolve a join link for channel {ch}: {e}")
             return None
@@ -2268,16 +2100,6 @@ async def log_user_activity(context: ContextTypes.DEFAULT_TYPE, update: Update, 
         del buf[: len(buf) - 300]
     save_data()
 
-    # NOTE: this used to also DM admins a plain-text "Live Activity" ping
-    # right here, at request time. That has been superseded by the richer
-    # Reel Delivered-style card (see build_reel_delivered_card /
-    # send_reel_delivered_card) which now goes to admin DM once the reel is
-    # actually delivered — same "📡 Feed To Admin DM" toggle, one consistent
-    # format instead of two different-looking messages for the same event.
-    # The activity_log entry above (used by the Live User Feed / quick-ban
-    # screen) is still recorded immediately, so nothing about the
-    # anti-misuse monitoring itself is lost.
-
 
 def track_sent_message(chat_id: int, message_id: int):
     """#5 — small per-chat ring buffer so 'Delete All Bot Messages' has something to work with."""
@@ -2418,11 +2240,6 @@ async def schedule_delete(context, chat_id, message_id, seconds):
         )
 
 
-# ----------------------------------------------------------------------------
-# Dynamic menu engine — render_menu is the ONE function every command/callback
-# uses to show a menu (#1, #2, #3). Same-message edit-in-place navigation.
-# ----------------------------------------------------------------------------
-
 def build_keyboard_from_buttons(buttons, menu_id):
     if not buttons:
         return None
@@ -2485,20 +2302,12 @@ async def render_menu(context: ContextTypes.DEFAULT_TYPE, chat_id: int, menu_id:
 
     buttons = (translation or {}).get("buttons") or menu.get("buttons", [])
     text = (translation or {}).get("text") or menu.get("text", "")
-    # FIX — Telegram rejects text messages with an empty body
-    # ("Text must be non-empty"). When a menu's text is blank and it has
-    # no image, that BadRequest used to abort the whole send/edit before
-    # the keyboard was ever attached — which is why the buttons appeared
-    # to be missing. Fall back to a placeholder so the message (and its
-    # buttons) always goes out.
     if not (text and text.strip()) and not menu.get("image_file_id"):
         text = to_small_caps(f"⚠️ menu '{menu_id}' has no text set.")
     kb = build_keyboard_from_buttons(buttons, menu_id)
     parse_mode = menu.get("parse_mode") or None
     image = menu.get("image_file_id")
 
-    # Welcome-screen personalization — supports {username}/{bot_name} and
-    # legacy {first_name}/{bot_link} placeholders for the start menu.
     if menu_id == "start":
         if "{username}" in text or "{first_name}" in text:
             stored_name = BOT_DATA["users"].get(str(chat_id), {}).get("name") or ""
@@ -2515,27 +2324,18 @@ async def render_menu(context: ContextTypes.DEFAULT_TYPE, chat_id: int, menu_id:
                 me = await _cached_get_me(context)
                 display_name = html.escape(me.first_name or "our bot")
                 bot_name = display_name
-                # tg://user?id=<id> (not an https://t.me/<username> link) —
-                # same trick already used above for {username}. A t.me/
-                # link jumps straight into the chat; this ID-based deep
-                # link opens the bot's profile card first instead.
                 bot_link = f'<a href="tg://user?id={me.id}">{display_name}</a>'
             except Exception as e:
                 log_error("bot_link_resolve", f"render_menu couldn't resolve bot name/link: {e}")
             text = text.replace("{bot_name}", bot_name)
             text = text.replace("{bot_link}", bot_link)
 
-    # #10 — owner/developer credit button, injected at render time (not part
-    # of the admin-editable button list) so it can't be accidentally deleted
-    # by editing menu buttons.
     if menu_id in ("start", "help_user"):
         owner_id = BOT_DATA["settings"].get("owner_display_user_id")
         if owner_id:
             label = BOT_DATA["settings"].get("owner_display_label") or "👑 Developer"
             owner_id_str = str(owner_id)
             if owner_id_str.isdigit():
-                # Same tg://user?id= reliability issue as the developer
-                # button — resolve the real @username via getChat when we can.
                 url = f"tg://user?id={owner_id_str}"
                 try:
                     chat = await context.bot.get_chat(int(owner_id_str))
@@ -2686,17 +2486,6 @@ async def cb_toggle_menu_button(update: Update, context: ContextTypes.DEFAULT_TY
 # Style Text picker (#1) — reusable for menu body text AND button labels
 # ----------------------------------------------------------------------------
 
-# The welcome screen's live placeholders — {first_name} and {bot_link} (the
-# bot's own clickable name/username in the welcome text). BUG FIX: every
-# STYLE_OPTIONS function remaps plain a-z/A-Z letters (small caps, bold,
-# fullwidth, ...), so styling text that contains these tokens used to
-# mangle the literal word "bot_link" inside the braces into unicode
-# look-alike letters. render_menu()'s exact `text.replace("{bot_link}", ...)`
-# could then never find the token again, so the bot's name/link in the
-# welcome message silently stopped being clickable the moment an admin
-# styled the welcome text even once. Fixed by shielding these tokens with
-# private-use sentinel characters (untouched by every style function) before
-# styling, then restoring the real placeholder text afterwards.
 _WELCOME_PLACEHOLDERS = ["{first_name}", "{bot_link}", "{username}", "{bot_name}"]
 
 
@@ -2733,12 +2522,8 @@ async def _replace_rkb_screen(context: ContextTypes.DEFAULT_TYPE, chat_id: int, 
     persisted panel_msg store as /start and /admin, so it survives a bot
     restart, not just context.user_data."""
     msg = await context.bot.send_message(chat_id, text, reply_markup=reply_markup, parse_mode=parse_mode)
-    # All persistent reply-keyboard actions share one panel slot. This means
-    # the user's own button message remains in chat, while only the latest
-    # bot-side screen is replaced on every button tap.
     await track_and_refresh_panel(context, chat_id, "rkb_latest", msg)
     return msg
-
 
 
 async def cb_styleset(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2780,15 +2565,6 @@ async def delete_incoming(update: Update):
     except Exception:
         pass
 
-
-# ----------------------------------------------------------------------------
-# FIX — "chat ekdum clear rakhna hai": the Send-Gift/Stars support flow (pick
-# amount -> pay) used to leave a trail of "choose an amount" / invoice
-# messages sitting in the chat forever. These are now tracked per-user and
-# swept away the moment the person opens any other menu (Start, My Usage,
-# Gift menu, Admin Panel) — same "disappears on next menu" behaviour asked
-# for, without needing a bot restart or persistent duplicate messages.
-# ----------------------------------------------------------------------------
 
 def _track_ephemeral(context: ContextTypes.DEFAULT_TYPE, message) -> None:
     if message is None:
@@ -2856,11 +2632,6 @@ async def show_force_join_prompt(update: Update, context: ContextTypes.DEFAULT_T
     await context.bot.send_message(chat_id, text, reply_markup=InlineKeyboardMarkup(kb_rows))
 
 
-# NOTE: the maintenance notice and the "bot is live again" message are both
-# fully admin-customisable — edit them anytime via 🎨 Menu & UI → maintenance
-# / bot_live, or directly from Settings → 🔒 Maintenance → ✏️ Set New Message.
-# The constant below only exists as a last-resort fallback if the "bot_live"
-# menu entry is ever missing from storage.
 _BOT_LIVE_FALLBACK = (
     "✅ 𝐁𝐎𝐓 𝐈𝐒 𝐋𝐈𝐕𝐄\n\n"
     "ᴍᴀɪɴᴛᴇɴᴀɴᴄᴇ ɪꜱ ᴄᴏᴍᴘʟᴇᴛᴇ — ᴛʜᴇ ʙᴏᴛ ɪꜱ ʙᴀᴄᴋ ᴜᴘ ᴀɴᴅ ʀᴜɴɴɪɴɢ ɴᴏʀᴍᴀʟʟʏ."
@@ -2956,8 +2727,6 @@ async def send_maintenance_notice(context: ContextTypes.DEFAULT_TYPE, chat_id: i
     try:
         menu = BOT_DATA["menus"].get("maintenance", {})
         if menu.get("image_file_id"):
-            # admin has attached an image via the generic Menu & UI editor —
-            # animation doesn't apply there, send normally.
             first = await render_menu(context, chat_id, "maintenance")
         else:
             text = menu.get("text") or to_small_caps("maintenance is currently active.")
@@ -2965,11 +2734,6 @@ async def send_maintenance_notice(context: ContextTypes.DEFAULT_TYPE, chat_id: i
             kb = build_keyboard_from_buttons(buttons, "maintenance") if buttons else None
             first = await _send_typewriter(context, chat_id, text, reply_markup=kb)
 
-        # Remember every chat_id shown the notice, so that when maintenance
-        # is switched off we know exactly who to notify (instead of nobody
-        # finding out except by tapping something again) — and remember
-        # THIS message's id specifically, so it can be auto-deleted the
-        # moment maintenance goes off, or replaced next time this fires.
         notified = BOT_DATA.setdefault("maintenance_notified", [])
         if chat_id not in notified:
             notified.append(chat_id)
@@ -3048,9 +2812,6 @@ async def cb_global_button_gate(update: Update, context: ContextTypes.DEFAULT_TY
         return
     data = query.data or ""
     if data in ("maint_notify_me", "maint_notify_me_done"):
-        # This IS the maintenance screen's own button — it must always work
-        # while maintenance is on, or tapping it would just re-trigger the
-        # maintenance notice instead of confirming the opt-in.
         return
     if BOT_DATA["settings"].get("maintenance") and not is_admin(update.effective_user.id):
         await send_maintenance_notice(context, update.effective_chat.id)
@@ -3157,10 +2918,6 @@ async def show_post_onboarding(context: ContextTypes.DEFAULT_TYPE, chat_id: int,
         return await _send_language_picker(context, chat_id)
     sent = await render_menu(context, chat_id, "start")
 
-    # Always re-attach the reply keyboard when the user reaches /start.
-    # A saved `reply_kb_sent` flag can become stale after Telegram clients,
-    # language changes, bot updates, or a previously removed keyboard.
-    # Sending the markup again is cheap and guarantees the user sees it.
     try:
         await context.bot.send_message(
             chat_id,
@@ -3173,14 +2930,6 @@ async def show_post_onboarding(context: ContextTypes.DEFAULT_TYPE, chat_id: int,
         BOT_DATA["users"].setdefault(uid, {})["reply_kb_sent"] = True
         save_data()
     except Exception as e:
-            # DEBUG — this used to be a bare "except: pass", so if this
-            # send ever failed the keyboard would just silently never
-            # appear with zero trace anywhere. Now logged both to the
-            # console/log file AND to the bot's own Activity Log (via
-            # log_error, same mechanism used elsewhere in the file) so the
-            # actual reason (bad chat_id, malformed keyboard, Telegram
-            # rejecting the request, etc.) is visible instead of a mystery
-            # "buttons just don't show up".
             log.exception("Persistent bottom keyboard send FAILED for uid=%s chat_id=%s", uid, chat_id)
             try:
                 log_error("reply_keyboard_send", f"uid={uid} chat_id={chat_id}: {e}")
@@ -3195,9 +2944,6 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return  # silently ignored, per spec
     is_new = touch_user(update)
 
-    # Group-specific /start: don't show the private onboarding/gate flow in
-    # a group. Show a clean card with the group name as a link and who
-    # started the bot, matching the bot's house typography.
     if not _is_private_chat(update):
         chat = update.effective_chat
         title = html.escape(chat.title or "This Group")
@@ -3223,15 +2969,6 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await delete_incoming(update)
         return
 
-    # FIX — this notification used to fire only AFTER the rate-limit /
-    # maintenance / disclaimer+force-join gate checks below all passed. Any
-    # one of those returning early (extremely common: force-join is the
-    # normal setup) meant the "New User Started Bot" detail card never went
-    # out. And because touch_user() already saved the user on this very
-    # first call, is_new would be False on every later /start from that
-    # same person — so admins could end up NEVER being notified about a
-    # new user at all. Fire it here, right where is_new is known, before
-    # anything else has a chance to return early.
     await notify_admins_new_start(context, update, is_new)
     if not check_rate_limit(user_obj.id):
         await update.message.reply_text("⏳ " + to_small_caps("slow down, too many requests too fast."))
@@ -3279,9 +3016,6 @@ async def cb_maint_notify_me(update: Update, context: ContextTypes.DEFAULT_TYPE)
         confirmed_kb = InlineKeyboardMarkup(
             [[styled_button("✅ " + to_small_caps("you'll be notified"), callback_data="maint_notify_me_done", style="primary")]]
         )
-        # Beyond the popup alert (which disappears in a couple seconds),
-        # leave a permanent line inside the message itself so the
-        # confirmation stays visible in the chat, not just flashed once.
         confirm_line = "\n\n🔔 " + to_small_caps("notification set — we'll message you the moment the bot is back online.")
         base_text = query.message.caption if query.message.photo else query.message.text
         base_text = base_text or ""
@@ -3331,10 +3065,6 @@ async def cmd_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = BOT_DATA["users"].get(str(user_obj.id), {}).get("lang")
     translation = menu.get("translations", {}).get(lang) if (lang and lang != "en") else None  # "en" is the bot.py default, never a translation override
     banner = (translation or {}).get("text") or menu.get("text") or DEFAULT_MENUS["language"]["text"]
-    # build_language_keyboard() always includes at least English + Default
-    # (Hinglish), whether or not the owner has added any extra languages in
-    # Settings > Languages — so the picker should always be shown, never
-    # blocked behind an "extra languages" check.
     await _replace_rkb_screen(
         context, update.effective_chat.id, "language",
         banner, reply_markup=build_language_keyboard(lang or "en"), parse_mode=menu.get("parse_mode"),
@@ -3346,30 +3076,16 @@ async def cb_setlang(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     code = query.data.split(":", 1)[1]
     uid = str(update.effective_user.id)
-    # BUGFIX: this used to be hardcoded to `code in ("en", "hi")`, so
-    # picking any enabled language OTHER than Hindi (e.g. es, fr, ar, bn —
-    # anything added via Settings > Languages) silently fell back to
-    # English every time, even though the button and translation existed.
-    # Now any language the admin has actually enabled is accepted.
     enabled_langs = set(BOT_DATA.get("settings", {}).get("languages", []) or [])
     lang_value = code if (code == "en" or code in enabled_langs) else "en"
     if uid in BOT_DATA["users"]:
         BOT_DATA["users"][uid]["lang"] = lang_value
-        # Belt-and-suspenders: a selection from any source means the picker
-        # has now been shown/handled for this user.
         BOT_DATA["users"][uid]["lang_prompted"] = True
         save_data()
-    # Onboarding order: language is picked BEFORE the disclaimer. So if this
-    # user hasn't agreed to the terms yet, the next screen is the disclaimer
-    # — now shown in whichever language they just picked — not the start
-    # menu. Returning users who change their language later (already past
-    # the disclaimer) still land straight on start, same as before.
     if not BOT_DATA["users"].get(uid, {}).get("accepted_terms"):
         await render_menu(context, query.message.chat_id, "disclaimer", existing_message=query.message, lang=lang_value)
         return
     await render_menu(context, query.message.chat_id, "start", existing_message=query.message)
-    # Refresh the persistent keyboard too, so a returning user who changes
-    # language immediately sees the new labels instead of the old language.
     try:
         await context.bot.send_message(
             query.message.chat_id,
@@ -3395,10 +3111,6 @@ async def cb_agree_terms(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.delete()
     except Exception:
         pass
-    # Disclaimer accepted — now check the OTHER half of the gate before
-    # letting the user any further in. If a force-join channel is set, they
-    # see the join prompt right here instead of skipping straight to the
-    # start menu.
     if not await is_force_join_ok(context, update.effective_user.id):
         await show_force_join_prompt(update, context)
         return
@@ -3485,34 +3197,19 @@ async def send_reel_delivered_card(context, user_name: str, user_id, reel_number
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # BUGFIX — root cause of the recurring "'NoneType' object has no
-    # attribute 'reply_to_message'" crash in the Activity Log: this handler
-    # is filter-matched against update.effective_message, which is also
-    # populated for edited messages / channel posts — but update.message
-    # itself is None for those. Every line below reads update.message
-    # directly, so without this guard any edited message crashed here.
     if update.message is None:
         return
     user_obj = update.effective_user
     if is_blocked(user_obj.id) and not is_admin(user_obj.id):
         return  # silently ignored, per spec
 
-    # Maintenance is a hard global lock for non-admins: no reply-keyboard
-    # action, support flow, reel parsing, auto-reply or media flow can run.
     if BOT_DATA["settings"].get("maintenance") and not is_admin(user_obj.id):
         await send_maintenance_notice(context, update.effective_chat.id)
         return
 
-    # v2 §6 — an admin replying (in the admin group / their DM) to a forwarded
-    # ticket message routes straight back to that user, bypassing everything else.
     if update.message.reply_to_message and is_admin(user_obj.id):
         support_uid = BOT_DATA.get("support_msg_map", {}).get(str(update.message.reply_to_message.message_id))
         if support_uid:
-            # v10 — two fixes requested: (1) the admin gets a clear
-            # delivered/failed confirmation instead of silence, and (2) the
-            # user's copy of the reply is prefixed with a quote of their own
-            # original problem, so it's obvious which issue the reply is
-            # about instead of a bare message showing up out of context.
             reply_rid = BOT_DATA.get("support_admin_msg_map", {}).get(
                 str(update.message.reply_to_message.message_id)
             )
@@ -3548,8 +3245,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = user_obj.id
     uid = str(user_id)
 
-    # v2 §6 — while a user has an open ticket, every message they send auto-
-    # forwards into it (no command/button needed).
     open_tid = BOT_DATA["users"].get(uid, {}).get("open_ticket_id")
     if open_tid and str(open_tid) in BOT_DATA["tickets"] and BOT_DATA["tickets"][str(open_tid)]["status"] == "open":
         await forward_to_ticket(update, context, open_tid)
@@ -3557,57 +3252,22 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = update.message.text or ""
 
-    # Group safety: never answer normal group conversation. The bot only
-    # reacts to an actual Instagram URL (with or without @BotUsername).
-    # Private chats retain the normal helpful invalid-link feedback.
     if not _is_private_chat(update) and text:
         if not INSTAGRAM_URL_RE.search(text):
             return
 
-    # BUGFIX #2 (part 2) — non-text media that isn't part of an active ticket
-    # or awaited-input flow has nothing to do here; don't fall through to the
-    # "not a valid reel link" text reply for a bare photo/video.
     if not text and not context.user_data.get("awaiting"):
         return
 
-    # Gate check comes before EVERY reply-keyboard/button dispatch below —
-    # this used to sit much further down (after the awaiting-input checks),
-    # which meant a user who hadn't agreed to the disclaimer yet (or hadn't
-    # joined the force-join channel) could still tap "📊 My Usage", "🎁 Send
-    # a Gift", etc. and have them actually work. Nothing past this point
-    # should run until require_gate() clears.
     if not await require_gate(update, context):
         return
 
-    # v2 §1 — persistent reply-keyboard routing. Every branch here deletes
-    # the user's own tapped-button message (it was piling up in the chat
-    # right alongside the bot's replies) and routes its reply through the
-    # same replace-in-place screen, so repeat taps on ANY of these buttons
-    # — not just My Usage — leave only the most recent copy behind.
-    # RKB_ADMINPANEL is excluded here — cmd_admin() replies to this exact
-    # message first (reply_text) and only then deletes it itself, so
-    # deleting it up-front would break that reply-to reference.
     user_lang = BOT_DATA["users"].get(uid, {}).get("lang")
     rkb_action = _rkb_action_for_text(text, user_lang)
     if rkb_action in {"download", "usage", "gift", "language", "developer", "howto", "support"}:
-        # This was previously missing — the comment above described this
-        # behaviour but no code actually deleted the tapped message, so old
-        # button-tap messages from the user kept piling up in the chat.
         await delete_incoming(update)
-        # BUGFIX — tapping any bottom-keyboard button must cancel whatever
-        # text-collection state was pending (e.g. Support's "awaiting":
-        # "support_message"). Without this, closing Support and tapping a
-        # different button (How To Use, My Usage, ...) left "awaiting"
-        # stuck at "support_message", so the NEXT plain text the user typed
-        # — completely unrelated to Support — silently got sent to Support
-        # instead of being treated normally. Branches below that need their
-        # own awaiting state (Support) set it again right after this, so
-        # this is always safe.
         context.user_data.pop("awaiting", None)
     if text == RKB_DOWNLOAD:
-        # Now a fully admin-editable menu (text/image/buttons) via
-        # Menu & UI → "download", instead of a hardcoded string — same
-        # single-slot panel behavior as every other reply-keyboard screen.
         sent = await render_menu(context, update.effective_chat.id, "download")
         await track_and_refresh_panel(context, update.effective_chat.id, "rkb_latest", sent)
         return
@@ -3624,8 +3284,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_developer_button(update, context)
         return
     if rkb_action == "howto":
-        # Same treatment as Download Reel above — admin-editable via
-        # Menu & UI → "howto".
         sent = await render_menu(context, update.effective_chat.id, "howto")
         await track_and_refresh_panel(context, update.effective_chat.id, "rkb_latest", sent)
         return
@@ -3642,9 +3300,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_premium_emoji_capture(update, context)
         return
 
-    # PDF #3 / #11 — user-facing text-collection flows (copyright report,
-    # support message) run regardless of admin status, before the
-    # admin-only dispatcher below.
     if awaiting in (
         "support_message", "copyright_report_link", "copyright_report_details",
         "ticket_new", "gift_stars_custom_amount", "gift_upi_amount",
@@ -3671,8 +3326,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if not match:
-        # Never spam groups for ordinary conversation. Auto-replies and the
-        # invalid-link message are intentionally private-chat only.
         if not _is_private_chat(update):
             return
         low = text.lower()
@@ -3685,14 +3338,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Maintenance is already enforced at the top of handle_text().
 
-    # (disclaimer + force-join already verified by require_gate() above —
-    # no need to re-check either one here)
 
     url = match.group(1)
 
-    # Anti-misuse monitoring: every reel link a user pastes is logged and,
-    # by default, forwarded live to admin DMs (+ logger group) with a
-    # one-tap ban button — this is a check-only feed, no automatic action.
     if not is_admin(user_id):
         await log_user_activity(context, update, url)
 
@@ -3702,8 +3350,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     status_msg = await update.message.reply_text(STR["processing"])
 
-    # v3 §8 — real download progress (fed by yt-dlp's progress_hooks from the
-    # worker thread) instead of just a canned 3-stage loop.
     _progress = {"pct": 0, "stage": "fetching"}
 
     def _progress_hook(d):
@@ -3717,11 +3363,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             _progress["stage"] = "optimizing"
 
     async def _animate_status():
-        # Per request: keep the status message static — just
-        # "Processing Your Reel..." — for the whole download instead of
-        # rewriting it every couple seconds with a stage/percentage bar.
-        # _progress is still fed by the yt-dlp progress hook above (kept in
-        # case it's needed again later) but is no longer rendered here.
         try:
             await asyncio.Event().wait()
         except asyncio.CancelledError:
@@ -3736,18 +3377,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     out_template = os.path.join(DOWNLOAD_DIR, f"%(id)s_{int(time.time())}.%(ext)s")
 
     def build_ydl_opts(use_merge: bool) -> dict:
-        # FIX — "video+audio hamesha clear download ho": the old format string
-        # ("bestvideo+bestaudio/best") had no format_sort, so yt-dlp could
-        # pick mismatched/lower-quality video+audio pairs, or a codec combo
-        # that plays back muted/glitchy on some devices. Now:
-        #  1. The no-merge path explicitly requires a format that already
-        #     has BOTH video and audio, so it can never silently pick a
-        #     video-only stream and ship a muted reel.
-        #  2. format_sort prefers resolution first, then mp4/h264/aac — the
-        #     combo every Telegram client can always play cleanly.
-        #  3. Audio is re-encoded to AAC on merge (video is left untouched
-        #     via -c:v copy) so a rare opus/vorbis track from IG can't end
-        #     up silent or unplayable inside Telegram's in-app player.
         opts = {
             "format": (
                 "bestvideo*+bestaudio/best"
@@ -3803,15 +3432,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return (fp, info) if os.path.exists(fp) else (None, None)
 
     def run_download(use_merge: bool):
-        # FIX — "bahut reel me audio nahi aata" (many reels arrive with no
-        # audio): a format selector that *looks* fine to yt-dlp can still
-        # land a video-only file in practice (Instagram's own codec
-        # metadata isn't always trustworthy). So instead of trusting the
-        # first successful download, every candidate is verified with
-        # ffmpeg itself (ground truth, same approach already used by the
-        # separate "Get Audio" button below) and — if it turns out silent —
-        # discarded in favor of the next candidate, instead of shipping a
-        # muted reel to the user.
         candidates = []
         if use_merge:
             candidates.append(("bestvideo*+bestaudio/best", True))
@@ -3819,9 +3439,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         candidates.append(("best/bestvideo+bestaudio", False))
 
         fallback = None  # (fp, info) of the first successful download, kept
-        # around in case every candidate turns out silent (e.g. the post
-        # genuinely has no sound) — better to still send the video than to
-        # fail outright.
         for fmt, need_merge in candidates:
             fp, info = _try_one_format(fmt, need_merge)
             if not fp:
@@ -3836,9 +3453,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ig_caption = (info.get("description") or "").strip()
                 uploader = (info.get("uploader") or info.get("uploader_id") or "").strip()
                 return fp, ig_caption, uploader
-            # No audio detected on this candidate. Keep only the first such
-            # attempt as a fallback and discard any later duplicates so we
-            # don't litter the disk with unused files.
             if fallback is None:
                 fallback = (fp, info)
             else:
@@ -3857,23 +3471,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file_path = None
     try:
         try:
-            # BUGFIX #4 — run_download() is a blocking (sync) yt-dlp call; it
-            # was being awaited directly, which froze the whole bot's event
-            # loop (all users) during every single download. Runs in a
-            # thread now so the loop — and the animation above — keep going.
             file_path, ig_caption, ig_uploader = await asyncio.to_thread(run_download, FFMPEG_AVAILABLE)
         except Exception as e:
-            # Self-heal: if a merge was attempted and ffmpeg turned out to be
-            # the problem, retry once with a no-merge (progressive) format.
             if "ffmpeg" in str(e).lower():
                 log.warning("Merge failed (ffmpeg issue), retrying with progressive format.")
                 file_path, ig_caption, ig_uploader = await asyncio.to_thread(run_download, False)
             else:
                 raise
 
-        # BUGFIX #5 — Telegram bots can't upload files over 50MB; previously
-        # a big reel would silently hang/fail with a raw exception. Check
-        # size upfront and give a clear message instead of attempting upload.
         MAX_UPLOAD_BYTES = 50 * 1024 * 1024
         file_size = os.path.getsize(file_path) if file_path and os.path.exists(file_path) else 0
         if file_size > MAX_UPLOAD_BYTES:
@@ -3891,19 +3496,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         menu = BOT_DATA["menus"]["reel_result"]
         translation = menu.get("translations", {}).get(lang) if (lang and lang != "en") else None  # "en" is the bot.py default, never a translation override
         base_caption = (translation or {}).get("text") or menu.get("text", "")
-        # The delivered reel gets a purpose-built action row.  The old
-        # Caption callback is intentionally removed: short captions use
-        # Telegram's native CopyTextButton, while long captions fall back
-        # to a callback that sends the complete caption for normal copy.
         parse_mode = menu.get("parse_mode") or None
         kb = None
 
         # v2 §9 — native Telegram blockquote with extra reel info, HTML only.
         if parse_mode == "HTML":
             import html as _html
-            # Keep the caption visibly quoted under the reel.  Telegram's
-            # native copy button can copy up to 256 characters; longer
-            # captions get a callback fallback below so nothing is lost.
             preview = ig_caption[:700] + ("…" if len(ig_caption) > 700 else "")
             bq = (
                 "<blockquote expandable>"
@@ -3914,10 +3512,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             result_caption = base_caption
 
-        # Compact reel controls: Caption + Audio stay together on the first
-        # row, while the full-width Remove Buttons control sits underneath.
-        # Labels use the bot's small-caps font so the controls match the rest
-        # of the user-facing UI.
         if ig_caption:
             if len(ig_caption) <= 256:
                 try:
@@ -3953,12 +3547,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         anim_task.cancel()
         protect = bool(BOT_DATA["settings"].get("lock_all_content", False))
-        # v3 §8 — send as document when admin forces it, or file is close to
-        # the 50MB cap (documents preserve quality better near the limit).
         threshold = BOT_DATA["settings"].get("document_mode_threshold_mb", 45) * 1024 * 1024
         as_document = BOT_DATA["settings"].get("send_as_document", False) or file_size > threshold
-        # Tell the user the reel is ready immediately before delivering the
-        # actual media. Keep this as a separate, clean message.
         try:
             await status_msg.edit_text(to_small_caps("Your reel is ready"))
         except Exception:
@@ -3974,19 +3564,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     video=vid, caption=result_caption, parse_mode=parse_mode, reply_markup=kb, protect_content=protect
                 )
 
-        # The original Instagram link is only needed during processing. Once
-        # the reel has been delivered successfully, remove that incoming link
-        # from the user's chat, matching the chat-cleanup behavior used by
-        # the admin input flows.
         await delete_incoming(update)
 
-        # Cache the real Instagram caption + source URL so the Copy Caption
-        # fallback, Audio button, and Remove button under THIS specific video
-        # can use them, keyed
-        # to this exact message. The video file itself is deleted right
-        # after sending (see finally: below), so Audio re-downloads
-        # audio-only from the cached URL rather than needing the video kept
-        # around on disk.
         _caption_cache[(sent.chat_id, sent.message_id)] = {
             "caption": ig_caption,
             "url": url,
@@ -4023,8 +3602,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:  # noqa: BLE001
         anim_task.cancel()
         log.exception("Download failed")
-        # Technical details stay in logs/admin activity only. Never expose
-        # yt-dlp/Instagram/ffmpeg exceptions to the end user.
         if "no video formats found" in str(e).lower():
             log_error("ytdlp_no_formats", f"url={url} err={e} — yt-dlp may need updating (pip install -U yt-dlp)")
         log_error("download", f"url={url} err={e}")
@@ -4091,8 +3668,6 @@ async def cb_remove_reel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = (query.message.chat_id, query.message.message_id)
     _caption_cache.pop(key, None)
 
-    # The media message must remain untouched. Telegram lets us edit the
-    # caption/reply markup of the delivered media message independently.
     try:
         await query.message.edit_caption(caption=None, reply_markup=None)
         return
@@ -4131,26 +3706,6 @@ async def cb_get_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     status_msg = await query.message.reply_text("🎵 " + to_small_caps("extracting audio..."))
 
-    # FIX — "ffmpeg audio extraction failed ... Output file does not
-    # contain any stream": the old selector "best[vcodec!=none][acodec!=
-    # none]/best" falls back to plain "best" whenever Instagram serves this
-    # post as separate video/audio DASH tracks instead of one muxed file.
-    # "best" alone then happily grabs the highest-resolution VIDEO-ONLY
-    # track (exactly the 1440x2560 vp09 stream seen in the error) — which
-    # has no audio at all, so ffmpeg's "-vn" strip has nothing left to
-    # write out. Since this button only ever needs the audio, ask yt-dlp
-    # for an audio-only format first; only fall back toward muxed/video
-    # formats if a post genuinely has no separate audio track.
-    # FIX v2 — the acodec-metadata check added after the last fix was
-    # itself wrong: Instagram's yt-dlp extractor frequently reports
-    # acodec == "none" on formats that DO contain audio (it can't always
-    # read real codec info from Instagram's API), so trusting that field
-    # produced false "no audio track" errors on posts that were fine.
-    # Metadata here just isn't trustworthy either way — so instead of
-    # guessing from it, we download a candidate format and ask ffmpeg
-    # itself (ground truth, no ffprobe needed) whether the actual file has
-    # an audio stream. If not, we try the next candidate format instead of
-    # giving up on the first guess.
     def probe_has_audio(path: str) -> bool:
         try:
             result = subprocess.run(
@@ -4179,11 +3734,6 @@ async def cb_get_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return fp if os.path.exists(fp) else None
 
     def run_source_download():
-        # Try, in order: a dedicated audio-only stream; the best muxed
-        # (video+audio) stream; then whatever "best" resolves to as a last
-        # resort. Each candidate is verified against the real file, not
-        # metadata, before we commit to it — failed candidates are cleaned
-        # up immediately so we don't leave stray video-only files behind.
         candidates = ["bestaudio", "best[acodec!=none][vcodec!=none]", "best"]
         tried_paths = []
         for fmt in candidates:
@@ -4230,8 +3780,6 @@ async def cb_get_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     audio_path = None
     try:
         if not FFMPEG_AVAILABLE:
-            # Audio extraction (muxing out just the audio track) genuinely
-            # needs ffmpeg, unlike plain video download — no safe fallback.
             await status_msg.edit_text(
                 "❌ " + to_small_caps("audio extraction needs ffmpeg, which isn't available on this server.")
             )
@@ -4245,8 +3793,6 @@ async def cb_get_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await status_msg.edit_text(USER_ERR_AUDIO_NOT_AVAILABLE, parse_mode="HTML")
             return
         protect = bool(BOT_DATA["settings"].get("lock_all_content", False))
-        # Give Telegram a clean, human-readable filename/title instead of the
-        # temporary yt-dlp filename full of ids and timestamps.
         audio_title = _safe_filename((entry or {}).get("uploader") or (entry or {}).get("title") or "Instagram Audio")
         filename = _safe_filename((entry or {}).get("title") or audio_title) + ".mp3"
         with open(audio_path, "rb") as aud:
@@ -4261,8 +3807,6 @@ async def cb_get_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         save_data()
         await status_msg.delete()
     except Exception as e:
-        # Full technical error is useful for debugging, but must never be
-        # shown to users. Keep it in the server/admin log only.
         log.exception("Audio extraction failed for %s", url)
         log_error("audio", f"url={url} err={e}")
         try:
@@ -4290,11 +3834,6 @@ async def cb_check_force_join(update: Update, context: ContextTypes.DEFAULT_TYPE
             await query.message.delete()
         except Exception:
             pass
-        # Both gates are clear now — land the user in the start menu (this
-        # covers the onboarding path; if they were already past onboarding
-        # and just got re-blocked later, show_post_onboarding is a no-op
-        # past the language-picker/reply-keyboard first-run bits and just
-        # re-renders start, which is fine here).
         uid = str(update.effective_user.id)
         await show_post_onboarding(context, query.message.chat_id, uid)
     else:
@@ -4569,8 +4108,6 @@ async def _render_ai_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if st.get("last_recovery_at"):
         lines.append(row("🟢", "Last Recovery", html.escape(str(st.get("last_recovery_at")))))
 
-    # Keep the entire dashboard inside the same native Telegram quote/card,
-    # matching the bot's existing premium message convention.
     text = "<blockquote>" + "\n".join(lines) + "</blockquote>"
     kb = InlineKeyboardMarkup([
         [styled_button("🔄 " + to_small_caps("Refresh"), callback_data="ai_check")],
@@ -4829,8 +4366,6 @@ async def cb_support_resolve(update: Update, context: ContextTypes.DEFAULT_TYPE)
             parse_mode="HTML",
         )
     except Exception:
-        # Message may have been deleted by the user / too old to edit —
-        # fall back to a fresh "resolved" message in the same style.
         try:
             msg = await context.bot.send_message(
                 chat_id=req["confirm_chat_id"], text=_build_support_user_confirmation(rid), parse_mode="HTML"
@@ -4937,10 +4472,6 @@ async def resolve_developer_url(context: ContextTypes.DEFAULT_TYPE) -> str | Non
     dev_id = BOT_DATA["settings"].get("developer_id")
     if not dev_id:
         return None
-    # tg://user?id=... only opens if the tapping user's Telegram client already
-    # has that account cached (shared group, contact, etc.) — it silently does
-    # nothing otherwise, which is the "click nahi khulta" bug. Resolving the
-    # real @username via getChat and linking to t.me/username always works.
     try:
         chat = await context.bot.get_chat(dev_id)
         if chat.username:
@@ -4985,13 +4516,6 @@ async def show_gift_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if BOT_DATA["settings"].get("upi_id"):
         kb_rows.append([styled_button("💳 Support Via UPI", callback_data="gift_upi", style="primary")])
 
-    # v10 — banner text now comes from BOT_DATA["menus"]["gift"] so the
-    # admin can edit it from Menu & UI like any other menu, instead of it
-    # being hardcoded here. The Stars/UPI buttons above stay code-driven
-    # since they carry real payment logic.
-    # v11 — also respects the user's saved language (same lookup
-    # render_menu() uses), so Send A Gift shows the translated text
-    # instead of always falling back to the base/English copy.
     menu = BOT_DATA["menus"].get("gift", {})
     lang = BOT_DATA["users"].get(str(update.effective_chat.id), {}).get("lang")
     translation = menu.get("translations", {}).get(lang) if (lang and lang != "en") else None  # "en" is the bot.py default, never a translation override
@@ -5023,8 +4547,6 @@ async def cb_view_leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def cb_gift_stars(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    # FIX — amounts changed from 10/50/100 to 50/100/500 per request; the
-    # "Another amount" / "Dismiss" row below is left exactly as it was.
     kb = InlineKeyboardMarkup([
         [
             styled_button("⭐ 50", callback_data="gift_stars_amt:50", style="success"),
@@ -5172,9 +4694,6 @@ async def cb_gift_stars_amount(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     await query.answer()
     amount = int(query.data.split(":", 1)[1])
-    # FIX — "chat ekdum clear rakhna hai": this invoice is part of the
-    # optional support/tip flow (no plan attached), so it's tracked and
-    # gets swept away automatically the moment another menu is opened.
     msg = await send_stars_invoice(context, query.message.chat_id, amount)
     _track_ephemeral(context, msg)
 
@@ -5186,8 +4705,6 @@ async def cmd_precheckout(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_successful_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sp = update.message.successful_payment
     uid = str(update.effective_user.id)
-    # v4 — a star payment for a specific admin-defined plan grants THAT plan's
-    # day count; a generic/free-amount star gift keeps the old flat setting.
     plan_id = None
     parts = (sp.invoice_payload or "").split(":")
     if len(parts) >= 5 and parts[4]:
@@ -5204,12 +4721,6 @@ async def cmd_successful_payment(update: Update, context: ContextTypes.DEFAULT_T
         )
         log_line = f"⭐ Plan purchased — {sp.total_amount} stars from {update.effective_user.id} ({plan['name']}), premium granted"
     else:
-        # FIX — a voluntary support gift (no plan attached) must NOT auto-
-        # grant Premium; that made zero sense to a user paying ₹1/1 star as
-        # a tip and getting "premium added for 30 days" back. It's now a
-        # pure thank-you, nothing unlocked.
-        # FIX — leaderboard must ONLY count real 🎁 Send Gift donations, not
-        # subscription/plan purchases, so record_donation() moved here.
         record_donation(uid, update.effective_user.full_name, sp.total_amount, "stars")
         text = (
             "🎉 " + to_small_caps("thank you so much for the support!") + "\n\n"
@@ -5219,12 +4730,6 @@ async def cmd_successful_payment(update: Update, context: ContextTypes.DEFAULT_T
         log_line = f"⭐ Gift received — {sp.total_amount} stars from {update.effective_user.id}"
     await update.message.reply_text(text)
     await log_event(context, log_line)
-    # FIX — "stars bhejega to kaise pata chalega": Stars payments settle
-    # instantly through Telegram's own payment system (no manual admin
-    # verification possible or needed), but the admin still had zero way to
-    # know it happened unless a logger channel was configured. Every star
-    # payment now also DMs every admin directly, guaranteed, regardless of
-    # logger-channel setup.
     await dm_all_admins(context, "💰 " + log_line)
 
 
@@ -5250,11 +4755,6 @@ async def start_upi_order(update: Update, context: ContextTypes.DEFAULT_TYPE, am
     BOT_DATA["gift_orders"][oid] = order
     save_data()
     upi_uri = f"upi://pay?pa={upi_id}&am={amount}&cu=INR&tn=Gift%20Order%20{oid}"
-    # BUGFIX/UPGRADE — was a plain black-square QR from a third-party URL
-    # (api.qrserver.com). Now generated locally: dark gradient-bordered
-    # card, fixed amount + caption baked in, and the paying user's own
-    # Telegram profile photo as the center logo. Falls back to the old
-    # remote URL automatically if qrcode/Pillow aren't installed.
     avatar_bytes = await fetch_user_avatar_bytes(context, update.effective_user.id)
     qr_photo = generate_branded_qr(
         upi_uri, amount=amount, caption=to_small_caps("scan with any upi app"),
@@ -5286,9 +4786,6 @@ async def upi_countdown_job(context: ContextTypes.DEFAULT_TYPE):
     if remaining <= 0:
         order["status"] = "expired"
         save_data()
-        # Auto-delete the QR photo from the chat on expiry (10 min), rather
-        # than leaving a dead/expired QR sitting there. A small follow-up
-        # notice replaces it so the user still has a way to retry.
         deleted = False
         try:
             await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
@@ -5336,9 +4833,6 @@ async def cb_gift_upi_paid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     order["status"] = "claimed_pending_verify"
     save_data()
     plan = find_premium_plan(order.get("plan_id")) if order.get("plan_id") else None
-    # FIX — "jab i've paid click kare tab QR expire ho jaye": the QR photo
-    # message is now deleted immediately on tap instead of sitting there
-    # indefinitely with a "marked as paid" note stacked below it.
     try:
         await query.message.delete()
     except Exception:
@@ -5354,9 +4848,6 @@ async def cb_gift_upi_paid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(chat_id=query.message.chat_id, text=user_text)
     targets = BOT_DATA.get("admins", [])
     kind = f"Plan purchase ({plan['name']})" if plan else "Support gift"
-    # FIX — admin gets a real decision, not just a one-way "confirm":
-    # Approve/Decline for a plan purchase (unlocks or refuses the plan),
-    # Received/Not Received for a free-amount gift (records or ignores it).
     approve_label = "✅ Approve Payment" if plan else "✅ Received"
     decline_label = "❌ Decline Payment" if plan else "❌ Not Received"
     admin_kb = InlineKeyboardMarkup([[
@@ -5402,12 +4893,6 @@ async def cb_gift_upi_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE
         log_line = f"💳 UPI order #{oid} approved by admin {update.effective_user.id} ({plan['name']}), premium granted"
         admin_ack = f"✅ Order #{oid} approved, plan unlocked for the user."
     else:
-        # FIX — a free-amount gift/support payment does NOT unlock any
-        # premium plan on its own; "Received" just confirms the money
-        # arrived and says thanks. If the admin wants to reward it, that's
-        # a separate, explicit action (e.g. gifting a plan manually).
-        # FIX — leaderboard must ONLY count real 🎁 Send Gift donations, not
-        # subscription/plan purchases, so record_donation() moved here.
         record_donation(uid, donor_name, order["amount"], "inr")
         user_text = (
             "🎉 " + to_small_caps("thank you so much for the support!") + "\n\n"
@@ -5489,16 +4974,8 @@ async def handle_user_awaiting_input(update: Update, context: ContextTypes.DEFAU
     user_obj = update.effective_user
 
     if awaiting == "support_message":
-        # NOTE — pop "awaiting" first thing, unconditionally, so a support
-        # request can never accidentally re-trigger on a later message even
-        # if something below raises.
         context.user_data.pop("awaiting", None)
 
-        # The "please type your message below" prompt is only ever needed
-        # up until this exact moment — the user just submitted it. Delete
-        # it now so the chat doesn't keep showing a now-stale instruction
-        # sitting above the confirmation. It's the same "rkb_latest" panel
-        # message _replace_rkb_screen tracked when the prompt was shown.
         _prompt_key = f"rkb_latest:{update.effective_chat.id}"
         _prompt_msg_id = BOT_DATA.get("panel_msg", {}).pop(_prompt_key, None)
         if _prompt_msg_id:
@@ -5537,9 +5014,6 @@ async def handle_user_awaiting_input(update: Update, context: ContextTypes.DEFAU
                 sent = await context.bot.send_message(
                     chat_id=target, text=card_text, parse_mode="HTML", reply_markup=card_kb
                 )
-                # Replying to this message still routes an admin's reply
-                # straight to the user (unchanged), AND it's linked back to
-                # this request for the live-status "Mark Resolved" button.
                 BOT_DATA.setdefault("support_msg_map", {})[str(sent.message_id)] = str(user_obj.id)
                 BOT_DATA.setdefault("support_admin_msg_map", {})[str(sent.message_id)] = rid
                 req["admin_message_ids"].append(sent.message_id)
@@ -5548,10 +5022,6 @@ async def handle_user_awaiting_input(update: Update, context: ContextTypes.DEFAU
         save_data()
         await log_event(context, f"🆘 Support request #{rid} from {user_obj.id}")
 
-        # v11 — typing animation removed here per request (it was showing
-        # raw <blockquote> markup mid-reveal on some clients since
-        # intermediate frames are sent unparsed by design). Confirmation
-        # now sends instantly, fully HTML-parsed, no animation.
         confirm_msg = await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text=_build_support_user_confirmation(rid),
@@ -5687,11 +5157,6 @@ async def cb_adm_block_domain(update: Update, context: ContextTypes.DEFAULT_TYPE
     await log_event(context, f"🚫 Admin blocked domain: {domain}")
 
 
-# ----------------------------------------------------------------------------
-# Admin panel — top level (#9 categorized, functional dispatcher — not a
-# content menu, since these are actions, not editable copy)
-# ----------------------------------------------------------------------------
-
 def get_admin_panel_title() -> str:
     """v10 — sourced from BOT_DATA['menus']['admin'] so the admin can edit
     this banner from Menu & UI too, falling back to the original default."""
@@ -5797,10 +5262,6 @@ async def _render_adm_activity(update: Update, context: ContextTypes.DEFAULT_TYP
     if not entries:
         body = "✅ " + to_small_caps("activity log") + "\n\n" + to_small_caps("all clear — nothing to report.")
     else:
-        # Group consecutive display by kind so repeats of the same issue
-        # (e.g. force-join misconfigured) don't push everything else off
-        # screen, and each entry explains what happened, why, and how to
-        # fix it — not just a raw exception string.
         blocks = []
         fix_rows = []
         for n, e in enumerate(entries, 1):
@@ -5945,13 +5406,6 @@ async def cb_adm_selftest(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _render_adm_selftest(update, context)
 
 
-# ---- 🧪 Test Commands — run/check every bot command straight from the panel --
-# One small screen, one button per command the bot supports. Tapping a
-# button runs that command's real, safe logic and drops the actual result
-# right into this chat — no need to leave the admin panel or type anything
-# to verify a command still works. Commands that need an argument (like
-# /block <id>) show their usage instead of guessing one; owner-only
-# commands only actually run for the owner.
 COMMAND_TEST_LIST = [
     ("start", "🚀 /start"),
     ("help", "❓ /help"),
@@ -6011,9 +5465,6 @@ async def cb_run_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = query.data.split(":", 1)[1]
     chat_id = update.effective_chat.id
 
-    # Auto-clean the Test Commands screen: delete whatever result the last
-    # tap here left behind before running a new one, so repeatedly tapping
-    # through commands doesn't fill the chat with old test output.
     for old_mid in context.user_data.get("last_test_msg_ids", []):
         try:
             await context.bot.delete_message(chat_id, old_mid)
@@ -6270,11 +5721,6 @@ async def cb_adm_quickban(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-# ---- #3 — generic back-stack navigation --------------------------------------
-# Screens registered here can be reached via the stack-aware "adm_back"
-# button regardless of how deep the user has drilled in. Leaf actions (add /
-# remove / toggle / confirm) intentionally aren't part of this table — they
-# fall back to a hardcoded parent, same as before.
 SCREEN_RENDERERS = {}  # populated just above build_app, once every screen fn exists
 
 
@@ -6310,9 +5756,6 @@ def nav_tracked(screen_key):
 async def cb_adm_back(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    # Sweep away any leftover "send a value..." prompt / "✅ saved" confirmation
-    # messages from whatever setup flow the admin is leaving — those should
-    # not keep sitting in the chat once the admin navigates away.
     await _clear_ephemeral(context, update.effective_chat.id)
     context.user_data.pop("awaiting", None)
     stack = context.user_data.setdefault("adm_nav_stack", ["adm_home"])
@@ -6353,11 +5796,6 @@ async def cb_adm_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     await _render_adm_stats(update, context)
 
-
-# ---- 🔔 Notification Center ---------------------------------------------------
-# A single live "what's going on" dashboard so the admin doesn't have to open
-# Tickets, Activity Log, Users & Groups, and Settings separately just to see
-# whether anything needs attention right now.
 
 async def _render_adm_notifications(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -6403,8 +5841,6 @@ async def _render_adm_notifications(update: Update, context: ContextTypes.DEFAUL
 
     lines = ["🔔 " + to_title_small_caps("Notification Center"), ""]
 
-    # Needs-attention section first, so the admin sees anything urgent
-    # without scrolling.
     alerts = []
     if maintenance_on:
         alerts.append("🔒 " + to_small_caps("maintenance mode is currently ON — users can't use the bot."))
@@ -6534,10 +5970,6 @@ async def build_user_details_card(context: ContextTypes.DEFAULT_TYPE, target_id:
     uid = str(target_id)
     u = BOT_DATA["users"].get(uid, {})
 
-    # Prefer a live getChat so name/username/premium reflect the user's
-    # CURRENT profile, not whatever was cached at their last /start. Falls
-    # back to stored data if the chat can't be fetched (user blocked the
-    # bot, invalid id, never started it, etc.).
     chat_obj = None
     try:
         chat_obj = await context.bot.get_chat(target_id)
@@ -6605,23 +6037,6 @@ async def build_user_details_card(context: ContextTypes.DEFAULT_TYPE, target_id:
     return "<blockquote>" + "\n".join(lines) + "</blockquote>"
 
 
-# ---- Broadcast (reliable delivery, admin copy, /broadcast command, and month-wise delete) ----
-#
-# What changed and why:
-#  1. do_broadcast() used to fire every send back-to-back with zero pacing.
-#     Telegram enforces a hard ~30 messages/second global rate limit; blast
-#     past it and the API replies with 429 "Too Many Requests" (RetryAfter),
-#     which the old code caught with a bare `except Exception` and simply
-#     logged as a permanent failure. That's the "bar bar failed ho jata hai"
-#     — most of those "failures" were really just flood-control hits that a
-#     short pause and one retry would have delivered fine. Fixed by pacing
-#     every send and giving a RetryAfter exactly one honoured retry.
-#  2. Failures are now categorized (blocked the bot, invalid/deleted chat,
-#     rate-limited-then-recovered, other) instead of one flat "failed"
-#     number, so the admin can actually see *why* delivery didn't land.
-#  3. Every successfully delivered message ID is now recorded per user
-#     against the broadcast, so a broadcast can be pulled back out of every
-#     recipient's chat later (see Delete Broadcast below).
 BROADCAST_SEND_DELAY = 0.05  # ~20 msg/sec — safely under Telegram's cap
 
 
@@ -6681,8 +6096,6 @@ async def cb_adm_start_broadcast_confirm(update: Update, context: ContextTypes.D
 
     for uid in targets:
         try:
-            # Render the exact same start destination/menu users get from /start,
-            # without pretending Telegram received a command from the bot.
             await context.bot.send_message(chat_id=int(uid), text="/start")
             sent += 1
         except RetryAfter as e:
@@ -6775,8 +6188,6 @@ async def cb_adm_bc_log(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def do_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
-    # #4 — the master "lock everything" switch ORs together with the
-    # broadcast-specific forward-lock toggle.
     s = BOT_DATA["settings"]
     protect = s.get("protect_broadcasts", True) or s.get("lock_all_content", False)
     broadcast_id = BOT_DATA.get("broadcast_next_id", 1)
@@ -6794,8 +6205,6 @@ async def do_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     recovered = 0        # succeeded only after a flood-control retry
 
     user_ids = list(BOT_DATA["users"].keys())
-    # The sending admin also receives a copy, so the broadcast is visible in
-    # the admin chat exactly like it is for users.
     admin_uid = str(update.effective_user.id)
     if admin_uid not in user_ids:
         user_ids.append(admin_uid)
@@ -6807,9 +6216,6 @@ async def do_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 protect_content=protect,
             )
         except RetryAfter as e:
-            # Flood control — Telegram itself tells us exactly how long to
-            # wait. Honour it once, then retry this one user before giving
-            # up, instead of silently counting a recoverable hit as failed.
             await asyncio.sleep(e.retry_after + 0.5)
             try:
                 copied = await context.bot.copy_message(
@@ -6821,13 +6227,9 @@ async def do_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 other_failed += 1
                 copied = None
         except Forbidden:
-            # User blocked the bot, deleted their account, or kicked it
-            # from a group — permanent, not worth retrying.
             blocked += 1
             copied = None
         except BadRequest:
-            # Chat not found / user never actually opened a DM with the
-            # bot — also permanent.
             invalid_chat += 1
             copied = None
         except TelegramError:
@@ -6839,12 +6241,6 @@ async def do_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if copied:
             track_sent_message(int(uid), copied.message_id)
-            # BUGFIX — broadcasts must NEVER auto-delete. They used to be
-            # swept up by the same global_auto_delete_seconds timer used for
-            # ordinary bot replies, so an admin announcement could vanish
-            # from a user's chat on its own a few minutes after being sent.
-            # A broadcast is only ever removed by an explicit admin action
-            # (🗑 Delete Broadcast), never by a timer.
             delivered_ids[uid] = copied.message_id
             sent += 1
 
@@ -6881,9 +6277,6 @@ async def do_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     report = _broadcast_report_text(entry)
     try:
         await status_msg.edit_text(report)
-        # Remember where this report lives so cb_bc_start_now can keep it
-        # live-updated as users tap 🚀 Start Bot, instead of the numbers
-        # only ever being a one-time snapshot.
         entry["report_chat_id"] = status_msg.chat_id
         entry["report_message_id"] = status_msg.message_id
     except Exception:
@@ -7027,9 +6420,6 @@ async def cb_adm_bc_deldo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ---- Menu & UI (#1, #2, #4, #7 controls) -------------------------------------
 
 MENU_DISPLAY_NAMES = {
-    # v10 — short labels requested for the Menu & UI list, so a button
-    # name never gets cut off / hard to read on a phone screen. Anything
-    # not in this map falls back to its raw id (title-cased) below.
     "start": "Start",
     "disclaimer": "Disclaimer",
     "download": "Downld",
@@ -7049,13 +6439,6 @@ MENU_DISPLAY_NAMES = {
 
 async def _render_adm_menu_ui(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    # v6 — 2-per-row grid for the menu list too, so it stays compact even
-    # as more menus get added.
-    # v10 — one badge, not two: a single ✅ appears on a menu's button only
-    # when it already has an image set; nothing is added when it doesn't
-    # (previously showed a 🖼️ frame emoji AND a ✅/❌ on every button).
-    # Labels now use the short MENU_DISPLAY_NAMES above instead of the raw
-    # menu id, so nothing overflows on a phone screen.
     menu_ids = list(BOT_DATA["menus"])
 
     def _label(mid):
@@ -7113,11 +6496,6 @@ def _build_menu_edit_screen(menu_id: str):
     ])
     rows.append([styled_button("🔙 Back", callback_data="adm_menu_ui")])
 
-    # v10 — the header now names the menu with its short display name (not
-    # a generic "Editing Menu" title with the id buried below), and a
-    # quoted preview of the CURRENT text is shown right under the status
-    # lines — so it's confirmed at a glance which menu this is and what's
-    # already set for it, without needing to tap "Edit Text" first.
     display_name = MENU_DISPLAY_NAMES.get(menu_id, menu_id.replace("_", " ").title())
     current_text = menu.get("text") or ""
     preview = html.escape(re.sub(r"<[^>]+>", "", current_text)).strip()
@@ -7209,9 +6587,6 @@ async def cb_adm_menu_img(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     menu_id = query.data.split(":", 1)[1]
     context.user_data["awaiting"] = f"menu_image:{menu_id}"
-    # Remember this exact "editing menu" screen so that once the photo is
-    # received, we can flip its 🖼️ status straight to ✅ Set in place,
-    # instead of leaving the admin to guess whether it actually saved.
     remember_panel_message(context, query, f"menu_edit:{menu_id}")
     await query.message.reply_text(to_small_caps("send a photo (image only, not a video)."))
 
@@ -7352,19 +6727,11 @@ async def cb_btn_type_pick(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def _render_adm_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     s = BOT_DATA["settings"]
-    # v6 — same 2-per-row grid treatment as the top-level Admin Panel, so
-    # deep submenus stay just as easy to scan and control.
     rows = [
         [styled_button("🔒 Maintenance", callback_data="adm_maintenance")],
         [styled_button(f"⏱ Global Auto-Delete: {s.get('global_auto_delete_seconds', 0)}s", callback_data="adm_set_autodelete"),
          styled_button("💬 Auto-Replies", callback_data="adm_autoreply_list")],
     ]
-    # 👤 Manage Admins can hand out access to everything, so — like the
-    # whole 🍭 Update Backup section / ☠️ Danger Zone — it stays owner-only
-    # even though "settings" itself is a grantable permission.
-    # NOTE: 📥 Restore Backup used to live here — it now lives on the
-    # consolidated 🍭 Update Backup screen along with every other
-    # backup/database-related action (Mongo Plugin, full DB export, etc.).
     if is_owner(update.effective_user.id):
         rows.append([styled_button("👤 Manage Admins", callback_data="adm_manage_admins")])
     rows += [
@@ -7772,9 +7139,6 @@ async def cb_adm_force_join_test(update: Update, context: ContextTypes.DEFAULT_T
 
 
 def _build_adm_leaderboard_view():
-    # FIX — split out of the old combined "Leaderboard & Sharing" screen;
-    # this screen is now Leaderboard-only. Share settings moved to their
-    # own "📤 Share Settings" section (see _build_adm_share_view below).
     s = BOT_DATA["settings"]
     lb_on = s.get("leaderboard_enabled", False)
     donor_count = len([d for d in BOT_DATA.get("donations", {}).values() if d.get("score", 0) > 0])
@@ -7840,8 +7204,6 @@ async def cb_adm_post_leaderboard(update: Update, context: ContextTypes.DEFAULT_
 
 
 def _build_adm_share_view():
-    # FIX — split out of the old combined "Leaderboard & Sharing" screen;
-    # this is now its own standalone "📤 Share Settings" section.
     s = BOT_DATA["settings"]
     share_on = s.get("share_enabled", True)
     share_url = s.get("share_url") or to_small_caps("(default — bot's own link)")
@@ -7911,15 +7273,10 @@ async def cb_settings_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE)
     save_data()
 
     if key == "maintenance":
-        # Single combined screen now (status + toggle + set-message all in
-        # one place) — toggling just re-renders that same screen instead of
-        # showing a separate bulky "MAINTENANCE ON" / "BOT IS LIVE" card.
         if BOT_DATA["settings"]["maintenance"]:
             await query.answer("🔒 " + to_small_caps("maintenance enabled."), show_alert=False)
         else:
             await query.answer("🟢 " + to_small_caps("bot is live again."), show_alert=False)
-            # Tell every user who actually hit the maintenance wall — not
-            # just the admin looking at this panel — that the bot is back.
             await broadcast_bot_live(context)
         await _render_adm_maintenance(update, context)
         return
@@ -8004,8 +7361,6 @@ async def cb_adm_autoreply_list(update: Update, context: ContextTypes.DEFAULT_TY
     query = update.callback_query
     await query.answer()
     replies = BOT_DATA["settings"].get("auto_replies", {})
-    # BUGFIX — `A + B or C` always evaluated truthy (header alone is
-    # non-empty), so the "no auto-replies" fallback text never showed.
     lines = ["💬 Auto-Replies\n"] + (
         [f"• `{k}` → {v[:30]}" for k, v in replies.items()] or [to_small_caps("no auto-reply has been set.")]
     )
@@ -8318,8 +7673,6 @@ def _build_adm_premium_view():
         f"👥 Active premium users: {premium_count}",
         "",
     ]
-    # Main controls stay at the top; every ➕ Add action is grouped at the
-    # bottom so the management flow is cleaner on mobile.
     kb_rows = [
         [styled_button(toggle_label("🔀 Master Switch", s.get('premium_enabled')),
                         callback_data="stgl:premium_enabled:adm_premium")],
@@ -8694,11 +8047,6 @@ async def _do_reset_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE, awaiting: str):
     text = (update.message.text or "").strip()
-    # FIX — "jo admin ne bheja usko chat se delete kar de, bas panel section
-    # pe wo add ho jaye": every admin config-input message (plan steps, URLs,
-    # IDs, menu text, etc.) is now auto-deleted right after being read, same
-    # cleanup pattern /start and /admin already use — only the confirmation /
-    # refreshed panel view stays in chat, not the raw text the admin typed.
     await delete_incoming(update)
 
     if awaiting == "maintenance_set_msg":
@@ -8708,9 +8056,6 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
         menu["updated_by"] = update.effective_user.id
         menu["updated_at"] = datetime.utcnow().isoformat()
         save_data()
-        # Confirmation + the combined status/toggle screen right below it,
-        # so the admin can flip maintenance on/off immediately without
-        # hunting for a separate button.
         is_on = bool(BOT_DATA["settings"].get("maintenance"))
         await update.message.reply_text(
             "✅ " + to_small_caps("maintenance message updated.") + "\n\n"
@@ -8986,9 +8331,6 @@ async def handle_admin_text_input(update: Update, context: ContextTypes.DEFAULT_
     elif awaiting == "developer_id":
         context.user_data.pop("awaiting", None)
         raw = text.strip()
-        # Accept either a numeric user id OR an @username in the same
-        # prompt, instead of forcing the admin into a separate "link
-        # override" flow just to use a username.
         if raw.lstrip("@").isdigit() and not raw.startswith("@"):
             BOT_DATA["settings"]["developer_id"] = int(raw)
             BOT_DATA["settings"]["developer_link"] = None
@@ -9277,8 +8619,6 @@ async def handle_admin_media(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user_id = update.effective_user.id
     if not awaiting or not is_admin(user_id):
         return
-    # Same chat-cleanup as handle_admin_text_input — the admin's uploaded
-    # photo/video used to set a menu image is deleted right after being read.
     await delete_incoming(update)
 
     if awaiting.startswith("menu_image:") and update.message.photo:
@@ -9793,8 +9133,6 @@ async def cmd_export(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
         if update.effective_chat.id != update.effective_user.id:
             await update.message.reply_text("✅ " + to_small_caps("sent to your dm."))
-        # Follow-up: last-updated timestamp + light code details, sent as a
-        # separate message right under the exported file.
         try:
             stats = _scan_export_code_stats(src_dir)
             details_text = (
@@ -9924,9 +9262,6 @@ async def handle_restore_upload(update: Update, context: ContextTypes.DEFAULT_TY
         os.remove(raw_path)
         return
 
-    # 📦 Update Backup split files — sent one at a time, each merges into
-    # the CURRENT live data instead of replacing everything (unlike a full
-    # combined /database backup, which replaces it all).
     if fname == SEED_SETTINGS_FILE:
         incoming = dict(incoming)
         incoming["users"] = BOT_DATA.get("users", {})
@@ -10042,9 +9377,6 @@ async def cmd_unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     kb = InlineKeyboardMarkup([[styled_button("🚀 /start", callback_data="go_start")]])
     sent = await update.message.reply_text(text, parse_mode="HTML", reply_markup=kb)
-    # Self-cleaning: this is just noise once the user has moved on, so it
-    # always disappears shortly after — independent of the global
-    # auto-delete setting (which may be 0 / off for real menu content).
     await schedule_delete(context, sent.chat_id, sent.message_id, 15)
 
 
@@ -10097,9 +9429,6 @@ async def global_error_handler(update: object, context: ContextTypes.DEFAULT_TYP
     log.exception("Unhandled error", exc_info=context.error)
     update_type = type(update).__name__ if update else "unknown"
     err_text = str(context.error)
-    # A duplicate-instance getUpdates conflict is common and has a very
-    # different (and non-code) fix from a generic bug, so it gets its own
-    # Activity Log category instead of being lumped under "unhandled".
     kind = "conflict" if "Conflict" in err_text and "getUpdates" in err_text else "unhandled"
     log_error(kind, f"[{update_type}] {err_text}")
     save_data()
@@ -10108,11 +9437,6 @@ async def global_error_handler(update: object, context: ContextTypes.DEFAULT_TYP
     except Exception:
         pass
 
-    # Urgent/critical errors go straight to every admin's DM, unconditionally
-    # — this does NOT check the Logger Channel toggle (log_event above does),
-    # so an admin who never bothered configuring a logger channel still finds
-    # out immediately when something actually breaks, instead of it only
-    # showing up next time they happen to open Activity Log.
     if kind == "unhandled":
         try:
             await dm_all_admins(
@@ -10157,40 +9481,6 @@ SCREEN_RENDERERS.update(
     }
 )
 
-
-# ----------------------------------------------------------------------------
-# 🧩 Feature Plugins — drop a .py file into plugins/ and its features load
-# straight into the bot, without editing bot.py at all.
-#
-# HOW TO WRITE A PLUGIN (share this with whoever is building the feature):
-#   1. Create a new file, e.g. plugins/my_feature.py
-#   2. It must define one function: `def register(app):`
-#   3. Inside register(), add handlers exactly like in bot.py, e.g.:
-#
-#        from __main__ import (
-#            styled_button, is_premium_active, is_admin, to_small_caps,
-#            require_premium, BOT_DATA, log_error,
-#        )
-#        from telegram.ext import CommandHandler
-#
-#        async def my_cool_feature(update, context):
-#            await update.message.reply_text("Hello from a plugin!")
-#
-#        def register(app):
-#            app.add_handler(CommandHandler("mycommand", my_cool_feature))
-#
-#   4. To make a feature Premium-only, wrap the handler with the
-#      require_premium() decorator (see below) — it automatically blocks
-#      non-premium users and shows them the upgrade menu, same as every
-#      built-in premium feature.
-#   5. Save the file into the bot's plugins/ folder and RESTART the bot —
-#      plugin files are only scanned once, at startup, so a running bot
-#      won't pick up a newly uploaded file until it's restarted.
-#
-# A broken plugin (syntax error, missing register(), exception while
-# loading) is skipped and logged to the Activity Log — it can never crash
-# the rest of the bot or stop other plugins from loading.
-# ----------------------------------------------------------------------------
 
 def require_premium(handler):
     """Decorator for plugin (or future core) handlers that should only run
@@ -10272,18 +9562,8 @@ async def cb_adm_plugins(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _render_adm_plugins(update, context)
 
 
-# BUGFIX — this must be registered here, AFTER _render_adm_plugins is
-# defined, not inside the big SCREEN_RENDERERS.update({...}) block far
-# above (which runs at module import time, before this function existed
-# yet) — that ordering caused a hard NameError crash on every startup.
 SCREEN_RENDERERS["adm_plugins"] = _render_adm_plugins
 
-
-# ----------------------------------------------------------------------------
-# 🗄 Mongo Plugin — live MongoDB connect/disconnect from the Admin Panel,
-# no env var or restart required. See set_mongo_uri()/disconnect_mongo()/
-# get_mongo_status() near the top of the file for the actual logic.
-# ----------------------------------------------------------------------------
 
 def _format_mongo_status_text(explain: bool = True) -> str:
     st = get_mongo_status()
@@ -10410,14 +9690,9 @@ SCREEN_RENDERERS["adm_mongo_plugin"] = _render_adm_mongo_plugin
 SCREEN_RENDERERS["adm_update_backup"] = _render_adm_update_backup
 
 
-
-
 def build_app() -> Application:
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # Group -1 runs BEFORE every handler added below (group 0, the default).
-    # This is the actual enforcement point for "no button works until
-    # agree + join" — see cb_global_button_gate's docstring.
     app.add_handler(CallbackQueryHandler(cb_global_button_gate), group=-1)
 
     app.add_handler(CallbackQueryHandler(cb_go_start, pattern="^go_start$"))
@@ -10615,9 +9890,6 @@ def build_app() -> Application:
 
     app.add_handler(MessageHandler(filters.Document.ALL & filters.ChatType.PRIVATE, handle_restore_upload))
     app.add_handler(MessageHandler((filters.PHOTO | filters.VIDEO) & filters.ChatType.PRIVATE, handle_admin_media))
-    # BUGFIX #2 — was filters.TEXT only, so photo/video messages (ticket
-    # replies from users, or admins replying with media) never reached
-    # handle_text and therefore never got forwarded into the ticket thread.
     app.add_handler(
         MessageHandler(
             (filters.TEXT | filters.PHOTO | filters.VIDEO | filters.Document.ALL
@@ -10637,9 +9909,6 @@ def build_app() -> Application:
             )
         app.job_queue.run_repeating(inactive_reengage_job, interval=timedelta(hours=24), first=timedelta(hours=24))
 
-    # Load any drop-in feature files from plugins/ LAST, so a plugin can
-    # never conflict with or shadow a built-in command/callback pattern
-    # registered above.
     load_plugins(app)
 
     return app
@@ -10659,100 +9928,3 @@ def main():
 if __name__ == "__main__":
     main()
 
-# ------------------------------------------------------------------------
-# Scope notes (what's implemented vs intentionally skipped):
-#
-# Implemented: dynamic menu engine + render_menu (#1,3), per-menu image
-# with caption-length validation (#2), style/small-caps text helper (#1),
-# custom per-menu buttons: menu/url/callback/toggle types (#4), colorful
-# buttons with library-version fallback (#5), separate user/admin help
-# (#6), global + per-menu auto-delete (#7), forward-lock toggle (#8),
-# categorized admin panel incl. new Menu & UI category (#9), storage layer
-# unchanged (#10), health dashboard (#11, simplified — no per-API-provider
-# stats since the bot only calls Telegram + yt-dlp, no third-party APIs to
-# track), CSV user export + full JSON database export (#12), recurring
-# backup + restore-by-upload with confirm screen (#13), typing indicator +
-# keyword auto-reply + rate limiting + inactive re-engagement (#15).
-#
-# Skipped for scope (say the word and I'll add any of these next):
-# - Menu version history (#14) — undo/rollback per-menu edits. Encrypted
-#   backups + multi-language menus (rest of #14) are now done, see below.
-# ------------------------------------------------------------------------
-#
-# ------------------------------------------------------------------------
-# Follow-up pass — the 4 previously-skipped items, completed:
-#
-# 1. 📊 PDF Report — new /exportpdf command + a "📊 /exportpdf" button in
-#    🧪 Test Commands. Builds two matplotlib charts (14-day new-user
-#    growth from real per-user `joined` timestamps, and a lifetime-metrics
-#    bar chart) and lays them out in a reportlab PDF with a summary table.
-#    Degrades to a clear "install matplotlib+reportlab" message if those
-#    packages aren't present — never crashes the bot.
-# 2. ✏️ Button edit-in-place — every custom menu button in Admin Panel >
-#    Menu & UI > (menu) > Buttons now has an ✏️ next to it. Editing reuses
-#    the same label → type → value → row flow as Add Button, except each
-#    step accepts "-" to keep that field exactly as it was, so a single
-#    typo no longer means delete + re-add.
-# 3. 🔒 Encrypted backups — /database, the admin-panel backup button, and
-#    the scheduled backup job all now encrypt with a local Fernet key
-#    (auto-generated once as `backup.key`, never written into the /export
-#    source zip). Restore accepts both plain .json and .json.enc, and
-#    gives a specific error if the key doesn't match or `cryptography`
-#    isn't installed — never a silent failure.
-# 4. 🌟 Premium custom emoji — Settings > "✏️ Set Premium Emoji" lets the
-#    owner send one message containing a real Telegram Premium custom
-#    emoji; the bot reads its `custom_emoji_id` off the message entities
-#    and stores it. Turning on "🌟 Premium Emoji Greeting" sends that
-#    emoji + a small-caps welcome line right before every /start menu.
-#    Kept as its own entities-based message (no HTML) so it can never
-#    collide with the HTML parse_mode used elsewhere. Non-Premium viewers
-#    automatically see the fallback glyph captured from the same message —
-#    that substitution is Telegram's own client behaviour, not this bot's.
-#
-# Multi-language menus were intentionally left alone this pass — already
-# maintained separately outside this file, per instruction.
-# ------------------------------------------------------------------------
-#
-# ------------------------------------------------------------------------
-# Code review pass — fixes applied:
-#
-# 1. Admin Panel "Premium ON/OFF" button did nothing visible — the generic
-#    toggle handler only knew how to refresh 3 hardcoded screens and
-#    "adm_premium" wasn't one of them. Toggle now looks up ANY registered
-#    screen, so this and every future toggle button actually re-renders.
-# 2. Force-join was silently non-functional in common setups:
-#      - ANY error checking membership (bad channel format, bot not admin
-#        there, etc.) was swallowed with zero logging, so it looked
-#        "configured" while never blocking a single user. Now logged to
-#        Activity Log so it's actually diagnosable.
-#      - Bare usernames typed without "@" are now auto-normalized on save.
-#      - Setting the channel now immediately verifies the bot can see it
-#        and is an admin there, warning the admin right away if not.
-#      - The "📢 Join Channel" button used to build a dead
-#        https://t.me/-100xxxxxxxxxx link for numeric channel IDs (the
-#        suggested format for private channels) — now resolves a real,
-#        clickable invite link via the Bot API.
-# 3. Payment QR codes were a plain black-and-white square from a
-#    third-party URL (api.qrserver.com). Now generated locally: rounded
-#    modules, on-brand color, amount + "scan with any UPI app" caption
-#    baked into the card. Falls back to the old remote URL automatically
-#    if `qrcode`/Pillow aren't installed — see setup notes at the top.
-# 4. Admin Panel buttons are now colorless/neutral by design (colors were
-#    intentionally removed from every admin screen per request).
-# 5. Every button in the bot — admin panel and user-facing — is now
-#    small-caps by default, enforced centrally in styled_button() /
-#    styled_kb_button() so it can't drift out of sync screen-by-screen.
-# 6. Auto-Replies list: an operator-precedence bug (`list_a + list_b or
-#    fallback`) meant the "no auto-replies yet" message could never
-#    actually display, since the concatenated list was always truthy.
-# 7. A download-failure message interpolated the raw exception text into
-#    an HTML-parsed message unescaped; any "<", ">", or "&" in a yt-dlp
-#    error (common in URLs) broke Telegram's parser and could leave the
-#    user staring at a frozen "processing..." message. Now escaped, with
-#    a plain-text fallback if the edit still somehow fails.
-# 8. /export now sends a follow-up message right after the zip: when the
-#    code was last modified (latest .py file mtime, not the zip's own
-#    build time) plus a light summary — file count, total lines, function
-#    count, export size. Purely informational; wrapped so a failure here
-#    can never break the actual export.
-# ------------------------------------------------------------------------
