@@ -733,7 +733,17 @@ def main_reply_keyboard(is_admin_user: bool = False, lang: str = None) -> ReplyK
         rows,
         resize_keyboard=True,
         one_time_keyboard=False,
-        is_persistent=True,
+        # FIX — "phone ka back button click karne par buttons hat nahi
+        # rahe": is_persistent=True forces Telegram to keep pinning this
+        # keyboard open and pop it back up even after the user dismisses
+        # it, which is why the phone's back button looked like it wasn't
+        # doing anything (unlike a normal bot's keyboard, which closes and
+        # stays closed). Turning persistence off restores the standard
+        # behavior — tapping the phone back button (or the keyboard toggle
+        # icon) closes this keyboard like any other bot's, and the user
+        # can bring it back anytime via the keyboard icon next to the
+        # message box.
+        is_persistent=False,
         input_field_placeholder="Choose an option from the menu below…",
     )
 
